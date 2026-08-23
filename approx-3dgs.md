@@ -23,7 +23,7 @@ Thus, $\int _z^{z_f}dz'  f(z'))$ is a monotonically increasing function where $\
 
 Thus, we can get an accurate approximation of $T(z)$ by approximating as a sum of sigmoids on within $z \in [z_i,z_f]$ 
 
-## Approximating Transmittance as Sum of Gaussians
+## Approximating Transmittance as Sum of Gaussian CDFs
 
 Let $f(z)=\sum_i^N w_i \phi_i(z)$. That is, the input attenuation coefficient corresponds to a weighted sum of $N$ gaussians.
 
@@ -145,9 +145,9 @@ where:
 
 - $A=\exp(-\sum_{i=0}^N w_i \Phi_i(z_f)))$
 - $B_i= (e^{w_i}-1) \prod_{j=0}^{i-1} e^{w_j}$
-- $h_i(z)=\frac{z-\mu_i-w_i\sigma_i^2}{\sigma_i}$
+- $h_i(z)=\frac{z-\mu_i-\frac{\sigma}{A}(-\sqrt{2\pi} + \sqrt{2\pi+2A^2})}{\frac{\sigma |e^A-1| \exp(-A\Phi(\frac{\mu}{\sigma}))}{A  \phi(\frac{\mu}{\sigma}) \sqrt{2\pi}}}$
 
-## Calculating Radiance Transfer
+## Calculating Radiative Transfer
 
 Now, we can return to our original expression:
 
@@ -155,16 +155,24 @@ $\int_{z_i}^{z_f} dz\ g(z)\exp(- \int _z^{z_f}dz'  f(z'))$
 
 $\approx \int_{z_i}^{z_f} dz\ g(z) *A (1+ \sum_i B_i\Phi(h_i(z))$
 
-$= A(1+ \sum_i B_i\int_{z_i}^{z_f} dz\ g(z)\ \Phi(h_i(z))$
+$= A(\int_{z_i}^{z_f} dz\ g(z))+ A\sum_i B_i\int_{z_i}^{z_f} dz\ g(z)\ \Phi(h_i(z)$
 
 Assuming our emission function is also a sum of weighted gaussians: $g(z)= \sum_j c_j\phi(\frac{z-\mu_j}{\sigma_j})$
 
-$= A(1+ \sum_i B_i\int_{z_i}^{z_f} dz\  \sum_j c_j\phi(\frac{z-\mu_j}{\sigma_j})\ \Phi(h_i(z))$
+$= A(\int_{z_i}^{z_f} dz\ \sum_j c_j\phi(\frac{z-\mu_j}{\sigma_j}))+ A\sum_i B_i\int_{z_i}^{z_f} dz\  \sum_j c_j\phi(\frac{z-\mu_j}{\sigma_j})\ \Phi(h_i(z)$
 
-$= A(1+ \sum_i \sum_j B_i c_j\int_{z_i}^{z_f} dz\  \phi(\frac{z-\mu_j}{\sigma_j})\ \Phi(h_i(z))$
+$= A(\sum_j  c_j\int_{z_i}^{z_f} dz\ \phi(\frac{z-\mu_j}{\sigma_j}))+ A\sum_i \sum_j B_i c_j\int_{z_i}^{z_f} dz\  \phi(\frac{z-\mu_j}{\sigma_j})\ \Phi(h_i(z)$
 
 <aside>
 💡
+
+$\sum_j  c_j\int_{z_i}^{z_f} dz\ \phi(\frac{z-\mu_j}{\sigma_j})$
+
+$=\sum_j  \sigma_j \int_{\frac{z_i-\mu_j}{\sigma_j}}^{\frac{z_f-\mu_j}{\sigma_j}} du\ \phi(u)$
+
+$=\sum_j  \sigma_j | \Phi(u) |_{\frac{z_i-\mu_j}{\sigma_j}}^{\frac{z_f-\mu_j}{\sigma_j}}$ 
+
+$=\sum_j  \sigma_j (\Phi(\frac{z_f-\mu_j}{\sigma_j}) - \Phi(\frac{z_0-\mu_j}{\sigma_j}))$
 
 $\int_{z_i}^{z_f} dz\  \phi(\frac{z-\mu_j}{\sigma_j})\ \Phi(\frac{z-\mu_i}{\sigma_i})$
 
@@ -178,9 +186,9 @@ $= \sigma_j[ \Phi_2(\frac{\mu_j-\mu_i}{\sqrt{\sigma_i^2 + \sigma_j^2}},\frac{z_f
 
 </aside>
 
-$= A(1+ \sum_i \sum_j B_i c_j \sigma_j[ \Phi_2(\frac{\mu_j-\mu_i}{\sqrt{\sigma_i^2 + \sigma_j^2}},\frac{z_f-\mu_j}{\sigma_j};\rho=-\frac{\sigma_j}{\sqrt{\sigma_i^2 + \sigma_j^2}})
+$= A \sum_j (  \sigma_j (\Phi(\frac{z_f-\mu_j}{\sigma_j}) - \Phi(\frac{z_0-\mu_j}{\sigma_j})) +  \sum_i B_i c_j \sigma_j[ \Phi_2(\frac{\mu_j-\mu_i}{\sqrt{\sigma_i^2 + \sigma_j^2}},\frac{z_f-\mu_j}{\sigma_j};\rho=-\frac{\sigma_j}{\sqrt{\sigma_i^2 + \sigma_j^2}})
 
--  \Phi_2(\frac{\mu_j-\mu_i}{\sqrt{\sigma_i^2 + \sigma_j^2}},\frac{z_i-\mu_j}{\sigma_j};\rho=-\frac{\sigma_j}{\sqrt{\sigma_i^2 + \sigma_j^2}})]$
+-  \Phi_2(\frac{\mu_j-\mu_i}{\sqrt{\sigma_i^2 + \sigma_j^2}},\frac{z_i-\mu_j}{\sigma_j};\rho=-\frac{\sigma_j}{\sqrt{\sigma_i^2 + \sigma_j^2}})])$
 
 ---
 
