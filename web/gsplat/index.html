@@ -75,29 +75,64 @@
           <select id="blendMode">
             <option value="alpha" selected>Alpha (classic 3DGS)</option>
             <option value="approx">Approx transmittance (Appendix A)</option>
+            <option value="probe">Probe: window + −log + α-T</option>
+            <option value="probeBeer">Probe: hard-cap window + Beer T (no Φ)</option>
+            <option value="probeLog">Probe: α loop + dead −log</option>
+            <option value="probeWin">Probe: window, no −log + α-T</option>
           </select>
         </label>
+        <p class="hint" style="margin-top: -0.4rem">
+          Probes isolate cost: <code>probeBeer</code> = same hard-capped window as
+          approx but Beer T (no Appendix-A) — splits window tax vs Φ tax;
+          <code>probeLog</code> = only −log; <code>probeWin</code> = window without −log;
+          <code>probe</code> = uncapped window + −log + α-T.
+        </p>
 
         <label id="maxInteractRow">
           Max Φ-interact
-          <input id="maxInteract" type="range" min="0" max="64" step="1" value="0" />
-          <span id="maxInteractVal">off</span>
+          <input id="maxInteract" type="range" min="0" max="64" step="1" value="4" />
+          <span id="maxInteractVal">4</span>
         </label>
         <p class="hint" style="margin-top: -0.4rem">
-          Approx only: cap overlapping fronts in Appendix-A (nearest kept; rest Beer).
-          0 = unlimited.
+          Approx / window probes: Appendix-A on a hard-capped window of ≤N
+          overlapping fronts (oldest overflow → Beer). 0 = unlimited.
+        </p>
+
+        <label id="kSigmaRow">
+          Overlap k (σ)
+          <input id="kSigma" type="range" min="0.5" max="6" step="0.1" value="2.5" />
+          <span id="kSigmaVal">2.5</span>
+        </label>
+        <p class="hint" style="margin-top: -0.4rem">
+          Keep fronts in the Φ window while
+          <code>|Δμ| ≤ k (σᵢ+σⱼ)</code>; else evict → Beer. Larger k = bigger
+          windows (smoother, slower).
         </p>
 
         <label id="cdfModeRow">
           Φ CDF
           <select id="cdfMode">
-            <option value="logistic" selected>Logistic (fast)</option>
+            <option value="lut" selected>Φ LUT (fast)</option>
+            <option value="logistic">Logistic</option>
             <option value="as">Abramowitz–Stegun</option>
           </select>
         </label>
 
+        <label id="logModeRow">
+          Optical −log(1−α)
+          <select id="logMode">
+            <option value="lut" selected>LUT −log(1−e^{−x})</option>
+            <option value="fast">Fast piecewise</option>
+            <option value="exact">Exact (exp+log)</option>
+          </select>
+        </label>
+        <p class="hint" style="margin-top: -0.4rem">
+          LUT: f(x)=−log(1−e^{−x}), x=½r²+(−ln o); −ln o precomputed per splat.
+          Fast: analytic piecewise. Exact: gauss exp + Math.log.
+        </p>
+
         <button id="bench" type="button" class="secondary">Bench ε sweep</button>
-        <button id="profile" type="button" class="secondary">Profile alpha vs approx</button>
+        <button id="profile" type="button" class="secondary">Profile ablations</button>
 
         <pre id="stats">Loading scene…</pre>
         <pre id="benchOut"></pre>
