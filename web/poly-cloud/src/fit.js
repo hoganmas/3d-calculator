@@ -1,306 +1,80 @@
-/** Expression parse + 3D Chebyshev fit → world monomials. */
+/** Density expression (MathLive/LaTeX via Compute Engine) + 3D Chebyshev fit → world monomials. */
 
+import { compile } from "@cortex-js/compute-engine";
 import { MAX_DEG } from "./clipGrid.js";
 
-const FN = new Set(["sin", "cos", "tan", "exp", "log", "ln", "sqrt", "abs", "max", "min", "hypot"]);
-
+/** Preset densities as LaTeX (shown in the MathLive field). */
 export const PRESETS = {
   blob: {
     label: "Gaussian blob",
-    expr: "exp(-(x^2+y^2+z^2))",
+    latex: String.raw`\exp(-(x^{2}+y^{2}+z^{2}))`,
     deg: 4,
     scale: 2.5,
     half: 2,
   },
   soft: {
     label: "Soft ellipsoid",
-    expr: "exp(-(x^2+0.5*y^2+2*z^2))",
+    latex: String.raw`\exp(-(x^{2}+0.5y^{2}+2z^{2}))`,
     deg: 4,
     scale: 3,
     half: 2,
   },
   two: {
     label: "Two blobs",
-    expr: "exp(-4*((x-0.7)^2+y^2+z^2))+exp(-4*((x+0.7)^2+y^2+z^2))",
+    latex: String.raw`\exp(-4((x-0.7)^{2}+y^{2}+z^{2}))+\exp(-4((x+0.7)^{2}+y^{2}+z^{2}))`,
     deg: 5,
     scale: 2.2,
     half: 2,
   },
   shell: {
     label: "Spherical shell",
-    expr: "exp(-12*(sqrt(x^2+y^2+z^2)-0.9)^2)",
+    latex: String.raw`\exp(-12(\sqrt{x^{2}+y^{2}+z^{2}}-0.9)^{2})`,
     deg: 5,
     scale: 3,
     half: 1.8,
   },
   ridge: {
     label: "Vertical ridge",
-    expr: "exp(-10*x^2)*exp(-0.4*(y^2+z^2))",
+    latex: String.raw`\exp(-10x^{2})\exp(-0.4(y^{2}+z^{2}))`,
     deg: 4,
     scale: 4,
     half: 2,
   },
 };
 
-function normalizeLatex(s) {
-  let x = s.trim();
-  x = x.replace(/^\$+|\$+$/g, "");
-  x = x.replace(/\\\[|\\\]/g, "");
-  x = x.replace(/\\\(|\\\)/g, "");
-  x = x.replace(/\\left|\\right/g, "");
-  x = x.replace(/\\,/g, "");
-  x = x.replace(/\\ |~/g, "");
-  x = x.replace(/\\times|\\cdot|\\ast|·|×/g, "*");
-  x = x.replace(/\^{([^{}]+)}/g, "^$1");
-  x = x.replace(/\^\{([^{}]+)\}/g, "^$1");
-  for (let k = 0; k < 8; k++) {
-    const next = x.replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, "(($1)/($2))");
-    if (next === x) break;
-    x = next;
-  }
-  const map = [
-    [/\\sin/g, "sin"],
-    [/\\cos/g, "cos"],
-    [/\\tan/g, "tan"],
-    [/\\exp/g, "exp"],
-    [/\\log/g, "log"],
-    [/\\ln/g, "ln"],
-    [/\\sqrt/g, "sqrt"],
-    [/\\abs/g, "abs"],
-    [/\\max/g, "max"],
-    [/\\min/g, "min"],
-    [/\\pi/g, "pi"],
-  ];
-  for (const [re, rep] of map) x = x.replace(re, rep);
-  x = x.replace(/π/g, "pi");
-  x = x.replace(/\\([a-zA-Z]+)/g, "$1");
-  x = x.replace(/\\/g, "");
-  x = x.replace(/\s+/g, "");
-  return x;
-}
-
-function insertImplicitMult(s) {
-  let x = s;
-  x = x.replace(/(\d)([a-zA-Z(])/g, "$1*$2");
-  x = x.replace(/(\))(\()/g, "$1*$2");
-  x = x.replace(/(\))([a-zA-Z0-9])/g, "$1*$2");
-  x = x.replace(/([a-zA-Z0-9_]+)\(/g, (m, id) => (FN.has(id) ? m : `${id}*(`));
-  return x;
-}
-
-function tokenize(src) {
-  const tokens = [];
-  let i = 0;
-  while (i < src.length) {
-    const ch = src[i];
-    if (/[0-9.]/.test(ch)) {
-      const start = i++;
-      while (i < src.length && /[0-9.eE]/.test(src[i])) i++;
-      if (src[i] === "e" || src[i] === "E") {
-        i++;
-        if (src[i] === "+" || src[i] === "-") i++;
-        while (i < src.length && /[0-9]/.test(src[i])) i++;
-      }
-      tokens.push({ kind: "num", text: src.slice(start, i) });
-      continue;
-    }
-    if (/[a-zA-Z_]/.test(ch)) {
-      const start = i++;
-      while (i < src.length && /[a-zA-Z0-9_]/.test(src[i])) i++;
-      tokens.push({ kind: "ident", text: src.slice(start, i) });
-      continue;
-    }
-    if ("+-*/^".includes(ch)) {
-      tokens.push({ kind: "op", text: ch });
-      i++;
-      continue;
-    }
-    if (ch === "(") {
-      tokens.push({ kind: "lp", text: ch });
-      i++;
-      continue;
-    }
-    if (ch === ")") {
-      tokens.push({ kind: "rp", text: ch });
-      i++;
-      continue;
-    }
-    if (ch === ",") {
-      tokens.push({ kind: "comma", text: ch });
-      i++;
-      continue;
-    }
-    throw new Error(`Unexpected “${ch}”`);
-  }
-  tokens.push({ kind: "eof", text: "" });
-  return tokens;
-}
-
-class Parser {
-  constructor(toks) {
-    this.toks = toks;
-    this.i = 0;
-  }
-  peek() {
-    return this.toks[this.i];
-  }
-  eat(kind) {
-    const t = this.peek();
-    if (kind && t.kind !== kind) throw new Error(`Expected ${kind}, got “${t.text}”`);
-    this.i++;
-    return t;
-  }
-  parse() {
-    const e = this.expr();
-    if (this.peek().kind !== "eof") throw new Error(`Unexpected “${this.peek().text}”`);
-    return e;
-  }
-  expr() {
-    let left = this.term();
-    while (this.peek().kind === "op" && (this.peek().text === "+" || this.peek().text === "-")) {
-      const op = this.eat("op").text;
-      left = { kind: "bin", op, left, right: this.term() };
-    }
-    return left;
-  }
-  term() {
-    let left = this.power();
-    while (this.peek().kind === "op" && (this.peek().text === "*" || this.peek().text === "/")) {
-      const op = this.eat("op").text;
-      left = { kind: "bin", op, left, right: this.power() };
-    }
-    return left;
-  }
-  power() {
-    let left = this.unary();
-    if (this.peek().kind === "op" && this.peek().text === "^") {
-      this.eat("op");
-      left = { kind: "bin", op: "^", left, right: this.power() };
-    }
-    return left;
-  }
-  unary() {
-    if (this.peek().kind === "op" && this.peek().text === "-") {
-      this.eat("op");
-      return { kind: "unary", op: "-", arg: this.unary() };
-    }
-    if (this.peek().kind === "op" && this.peek().text === "+") {
-      this.eat("op");
-      return this.unary();
-    }
-    return this.primary();
-  }
-  primary() {
-    const t = this.peek();
-    if (t.kind === "num") {
-      this.eat("num");
-      return { kind: "num", v: Number(t.text) };
-    }
-    if (t.kind === "ident") {
-      const name = this.eat("ident").text;
-      if (this.peek().kind === "lp") {
-        if (!FN.has(name)) throw new Error(`Unknown function “${name}”`);
-        this.eat("lp");
-        const args = [];
-        if (this.peek().kind !== "rp") {
-          args.push(this.expr());
-          while (this.peek().kind === "comma") {
-            this.eat("comma");
-            args.push(this.expr());
-          }
-        }
-        this.eat("rp");
-        return { kind: "call", fn: name, args };
-      }
-      return { kind: "ident", name };
-    }
-    if (t.kind === "lp") {
-      this.eat("lp");
-      const e = this.expr();
-      this.eat("rp");
-      return e;
-    }
-    throw new Error(`Unexpected “${t.text}”`);
-  }
-}
-
-function realPow(a, b) {
-  if (Number.isInteger(b)) {
-    const n = b | 0;
-    if (n === 0) return 1;
-    let r = 1;
-    const base = n > 0 ? a : 1 / a;
-    const k = Math.abs(n);
-    for (let i = 0; i < k; i++) r *= base;
-    return r;
-  }
-  if (a < 0) return NaN;
-  return Math.pow(a, b);
-}
-
-function evalAst(ast, ctx) {
-  switch (ast.kind) {
-    case "num":
-      return ast.v;
-    case "ident": {
-      const n = ast.name.toLowerCase();
-      if (n === "x") return ctx.x;
-      if (n === "y") return ctx.y;
-      if (n === "z") return ctx.z;
-      if (n === "r") return Math.hypot(ctx.x, ctx.y, ctx.z);
-      if (n === "pi") return Math.PI;
-      if (n === "e") return Math.E;
-      throw new Error(`Unknown identifier “${ast.name}”`);
-    }
-    case "unary":
-      return -evalAst(ast.arg, ctx);
-    case "bin": {
-      const a = evalAst(ast.left, ctx);
-      const b = evalAst(ast.right, ctx);
-      if (ast.op === "+") return a + b;
-      if (ast.op === "-") return a - b;
-      if (ast.op === "*") return a * b;
-      if (ast.op === "/") return a / b;
-      return realPow(a, b);
-    }
-    case "call": {
-      const args = ast.args.map((a) => evalAst(a, ctx));
-      switch (ast.fn) {
-        case "sin":
-          return Math.sin(args[0]);
-        case "cos":
-          return Math.cos(args[0]);
-        case "tan":
-          return Math.tan(args[0]);
-        case "exp":
-          return Math.exp(Math.max(-80, Math.min(80, args[0])));
-        case "log":
-        case "ln":
-          return Math.log(args[0]);
-        case "sqrt":
-          return Math.sqrt(Math.max(0, args[0]));
-        case "abs":
-          return Math.abs(args[0]);
-        case "max":
-          return Math.max(...args);
-        case "min":
-          return Math.min(...args);
-        case "hypot":
-          return Math.hypot(...args);
-        default:
-          throw new Error(ast.fn);
-      }
-    }
-    default:
-      throw new Error("bad ast");
-  }
-}
-
+/**
+ * Compile a density expression to f(x,y,z) → number.
+ * Accepts LaTeX (preferred) or ASCII Math–ish strings Compute Engine can parse.
+ */
 export function compileExpr(raw) {
-  const norm = insertImplicitMult(normalizeLatex(raw));
-  if (!norm) throw new Error("Empty expression");
-  const ast = new Parser(tokenize(norm)).parse();
-  return (x, y, z) => evalAst(ast, { x, y, z });
+  const src = String(raw ?? "").trim();
+  if (!src) throw new Error("Empty expression");
+
+  const result = compile(src);
+  if (!result?.success || typeof result.run !== "function") {
+    const why = result?.unsupported?.length
+      ? `unsupported: ${result.unsupported.join(", ")}`
+      : "could not compile";
+    throw new Error(`Expression ${why}`);
+  }
+
+  const { run, freeSymbols = [] } = result;
+  for (const s of freeSymbols) {
+    const id = String(s);
+    if (id !== "x" && id !== "y" && id !== "z") {
+      throw new Error(`Unknown symbol “${id}” (use x, y, z)`);
+    }
+  }
+
+  return (x, y, z) => {
+    const v = run({ x, y, z });
+    if (typeof v === "number") return v;
+    if (v && typeof v.valueOf === "function") {
+      const n = Number(v.valueOf());
+      return n;
+    }
+    return Number(v);
+  };
 }
 
 function chebT(k, u) {
@@ -359,7 +133,6 @@ function chebToMonomial3D(chebCoeffs, deg, half) {
             if (Tj[b] === 0) continue;
             for (let d = 0; d < Tk.length; d++) {
               if (Tk[d] === 0) continue;
-              // T_i(x/h) contrib Ti[a]*(x/h)^a
               const scale = c * Ti[a] * Tj[b] * Tk[d] * invH ** (a + b + d);
               mono[a + b * n + d * n * n] += scale;
             }

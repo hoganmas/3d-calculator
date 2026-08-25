@@ -65,6 +65,7 @@
       input,
       select,
       textarea,
+      math-field,
       button {
         font: inherit;
         font-size: 13px;
@@ -81,6 +82,23 @@
         resize: vertical;
         font-family: "IBM Plex Mono", ui-monospace, monospace;
         font-size: 12px;
+      }
+      math-field {
+        display: block;
+        width: 100%;
+        min-height: 64px;
+        font-size: 18px;
+        --contains-highlight-background-color: #243044;
+      }
+      math-field:focus-within {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 1px rgba(110, 168, 254, 0.35);
+      }
+      math-field.invalid {
+        border-color: #e35d6a;
+        box-shadow: 0 0 0 1px rgba(227, 93, 106, 0.35);
+        background: #1a1214;
       }
       button {
         cursor: pointer;
@@ -198,11 +216,6 @@
         font-size: 12px;
         min-height: 1.2em;
       }
-      #expr.invalid {
-        border-color: #e35d6a;
-        box-shadow: 0 0 0 1px rgba(227, 93, 106, 0.35);
-        background: #1a1214;
-      }
       @media (max-width: 800px) {
         #app {
           grid-template-columns: 1fr;
@@ -232,7 +245,12 @@
 
         <label>
           f(x,y,z) density
-          <textarea id="expr" spellcheck="false"></textarea>
+          <math-field
+            id="expr"
+            math-virtual-keyboard-policy="sandboxed"
+            smart-fence
+            smart-superscript
+          ></math-field>
         </label>
 
         <div class="row3">

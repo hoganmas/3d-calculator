@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import "mathlive";
+import "mathlive/static.css";
 import { compileExpr, fitChebyshev3D, PRESETS } from "./fit.js";
 import { volumeVertex, volumeFragment } from "./shaders.js";
 import { clipGridVertex, clipGridFragment } from "./clipShaders.js";
@@ -48,10 +50,25 @@ for (const [key, p] of Object.entries(PRESETS)) {
   els.preset.appendChild(opt);
 }
 
+function getExprLatex() {
+  const mf = els.expr;
+  if (!mf) return "";
+  if (typeof mf.getValue === "function") return String(mf.getValue("latex") || "").trim();
+  return String(mf.value || "").trim();
+}
+
+function setExprLatex(latex) {
+  const mf = els.expr;
+  if (!mf) return;
+  const v = latex ?? "";
+  if (typeof mf.setValue === "function") mf.setValue(v, { silenceNotifications: true });
+  else mf.value = v;
+}
+
 function applyPreset(key) {
   const p = PRESETS[key] ?? PRESETS.blob;
   els.preset.value = key;
-  els.expr.value = p.expr;
+  setExprLatex(p.latex);
   els.deg.value = String(p.deg);
   els.scale.value = String(p.scale);
   els.half.value = String(p.half);
@@ -278,27 +295,43 @@ worldGrid.renderOrder = -1;
 scene.add(worldGrid);
 
 function makeAxisLabel(text, color, position) {
-  const size = 64;
+  // High-res canvas so sprites stay sharp under orbit / retina.
+  const css = 128;
+  const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+  const size = Math.round(css * dpr);
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
   ctx.clearRect(0, 0, size, size);
-  ctx.font = "600 42px 'IBM Plex Sans', system-ui, sans-serif";
+  ctx.scale(dpr, dpr);
+  ctx.font = "600 72px 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
+  // Soft stroke reduces shimmer / jagged edges when minified by the GPU.
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "rgba(8,10,14,0.55)";
+  ctx.strokeText(text, css / 2, css / 2 + 1);
   ctx.fillStyle = color;
-  ctx.fillText(text, size / 2, size / 2 + 2);
+  ctx.fillText(text, css / 2, css / 2 + 1);
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  tex.generateMipmaps = true;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
   const mat = new THREE.SpriteMaterial({
     map: tex,
     transparent: true,
     depthTest: true,
     depthWrite: false,
+    sizeAttenuation: true,
   });
   const spr = new THREE.Sprite(mat);
-  spr.scale.set(0.35, 0.35, 0.35);
+  spr.scale.set(0.42, 0.42, 0.42);
   spr.position.copy(position);
   return spr;
 }
@@ -409,13 +442,13 @@ function setExprCompileOk(ok) {
 
 function syncExprCompileState() {
   try {
-    compileExpr(els.expr.value);
+    compileExpr(getExprLatex());
     setExprCompileOk(true);
     setErr("");
     return true;
   } catch (e) {
     setExprCompileOk(false);
-    const raw = (els.expr.value || "").trim();
+    const raw = getExprLatex();
     if (raw) setErr(e instanceof Error ? e.message : String(e));
     else setErr("");
     return false;
@@ -773,7 +806,7 @@ function uploadFit() {
     if (!(half > 0)) throw new Error("half-size must be > 0");
     if (deg < 1 || deg > MAX_DEG) throw new Error(`poly deg must be 1…${MAX_DEG}`);
 
-    const fn = compileExpr(els.expr.value);
+    const fn = compileExpr(getExprLatex());
     setExprCompileOk(true);
     const fit = fitChebyshev3D(fn, half, deg);
 
@@ -811,7 +844,7 @@ function uploadFit() {
     });
   } catch (e) {
     try {
-      compileExpr(els.expr.value);
+      compileExpr(getExprLatex());
       setExprCompileOk(true);
     } catch {
       setExprCompileOk(false);

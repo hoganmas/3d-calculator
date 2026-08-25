@@ -4,7 +4,7 @@
 
 Details: [`research/poly/notes/clip-space-babbage.md`](../../research/poly/notes/clip-space-babbage.md).
 
-1. Fit `f(x,y,z)` with a 3D Chebyshev polynomial → **world monomial tensor** \(c_{ijk}\).
+1. Fit `f(x,y,z)` (MathLive LaTeX → Compute Engine) with a 3D Chebyshev polynomial → **world monomial tensor** \(c_{ijk}\).
 2. **clip-grid (preferred):** bake dens at Chebyshev-root \(t_j\) (view-fixed window); fill screen \(x\) with Chebyshev nodes + Clenshaw (WebGPU f32). March with Beer F2B. CPU f64 Babbage + WebGL atlas if no WebGPU.
 3. **LOS raymarch (optional):** per-pixel nested Horner → \(\gamma(u)\) → Beer march (reference / debug).
 
