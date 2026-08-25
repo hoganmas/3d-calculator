@@ -177,8 +177,8 @@
       <aside id="panel">
         <h1>Polynomial density cloud</h1>
         <p>
-          Fit → world monomials → camera-centered ray poly α(t). Compare stepped raymarch vs Path C
-          (Chebyshev fit of T=exp(−τ), then ∫ σ T).
+          Fit → world monomials (once). Per ray: 3N+1 nested samples → Chebyshev
+          density on the segment. Raymarch vs Path C (Chebyshev τ̂, T=exp(−τ̂)).
         </p>
 
         <label>
@@ -194,7 +194,7 @@
         <div class="row3">
           <label>poly deg<input id="deg" type="number" min="2" max="6" step="1" /></label>
           <label>scale<input id="scale" type="number" min="0.1" max="20" step="0.1" /></label>
-          <label>steps<input id="steps" type="number" min="8" max="96" step="4" /></label>
+          <label>steps<input id="steps" type="number" min="8" max="96" step="4" value="32" /></label>
         </div>
 
         <div class="row">
@@ -203,10 +203,26 @@
         </div>
 
         <label>
+          resolve %
+          <input id="resolve" type="range" min="40" max="100" step="5" value="85" />
+        </label>
+
+        <label>
           mode
           <select id="mode">
             <option value="raymarch">raymarch (baseline)</option>
             <option value="pathc">Path C (Cheb. T=exp(-τ))</option>
+          </select>
+        </label>
+
+        <label>
+          profile stage
+          <select id="profileStage">
+            <option value="0">0 · full render</option>
+            <option value="1">1 · after ray→γ(u)</option>
+            <option value="2">2 · + τ nodes → T</option>
+            <option value="3">3 · + Cheb τ̂ at exit</option>
+            <option value="4">4 · + dense F2B (full Path C)</option>
           </select>
         </label>
 
@@ -227,8 +243,16 @@
             <div class="v" id="nCoeff">—</div>
           </div>
           <div class="stat">
-            <div class="k">f min / max</div>
-            <div class="v" id="fRange">—</div>
+            <div class="k">CPU frame</div>
+            <div class="v" id="cpuMs">—</div>
+          </div>
+          <div class="stat">
+            <div class="k">GPU frame</div>
+            <div class="v" id="gpuMs">—</div>
+          </div>
+          <div class="stat">
+            <div class="k">coeffs src</div>
+            <div class="v" id="basisMs">—</div>
           </div>
           <div class="stat">
             <div class="k">shader</div>
@@ -236,7 +260,10 @@
           </div>
         </div>
 
-        <p>Drag to orbit · scroll to zoom · right-drag to pan.</p>
+        <p id="profileHint" style="font-size: 11px; color: var(--muted)">
+          LOS build: nested Horner composition → γ(u) (exact, corner-stable).
+          March is O(steps·deg). Dense 3D deg-N is Ω(N³)/ray — not O(N); see profile stage 1 vs full.
+        </p>
       </aside>
       <main id="viewport">
         <div id="hud">three.js · custom volume shader</div>

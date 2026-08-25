@@ -2,8 +2,10 @@ import { loadSceneFromFile, sceneBounds, parseSceneJson } from "./loaders.js";
 
 const canvas = document.getElementById("view");
 const ctx = canvas.getContext("2d", { alpha: false });
+const viewportEl = document.getElementById("viewport");
 const statsEl = document.getElementById("stats");
 const benchOut = document.getElementById("benchOut");
+const hudEl = document.getElementById("hud");
 const epsInput = document.getElementById("eps");
 const epsVal = document.getElementById("epsVal");
 const epsPreset = document.getElementById("epsPreset");
@@ -12,6 +14,50 @@ const liveToggle = document.getElementById("live");
 const fileInput = document.getElementById("file");
 const maxGaussians = document.getElementById("maxGaussians");
 const blendModeSelect = document.getElementById("blendMode");
+const maxInteractInput = document.getElementById("maxInteract");
+const maxInteractVal = document.getElementById("maxInteractVal");
+const maxInteractRow = document.getElementById("maxInteractRow");
+const cdfModeSelect = document.getElementById("cdfMode");
+const cdfModeRow = document.getElementById("cdfModeRow");
+
+function formatMaxInteract(v) {
+  return v <= 0 ? "off" : String(v);
+}
+
+function syncMaxInteractLabel() {
+  maxInteractVal.textContent = formatMaxInteract(Number(maxInteractInput.value));
+}
+
+function currentMaxInteract() {
+  return Number(maxInteractInput.value) | 0;
+}
+
+function currentCdfMode() {
+  return cdfModeSelect?.value === "as" ? "as" : "logistic";
+}
+
+function formatCdfMode(m) {
+  return m === "as" ? "A&S" : "logistic";
+}
+
+function syncApproxControls() {
+  const approx = blendModeSelect.value === "approx";
+  if (maxInteractRow) maxInteractRow.style.opacity = approx ? "1" : "0.45";
+  if (maxInteractInput) maxInteractInput.disabled = !approx;
+  if (cdfModeRow) cdfModeRow.style.opacity = approx ? "1" : "0.45";
+  if (cdfModeSelect) cdfModeSelect.disabled = !approx;
+}
+
+/** Scale the bitmap to fill the viewport while keeping aspect ratio. */
+function fitCanvasToViewport() {
+  if (!viewportEl || !canvas.width || !canvas.height) return;
+  const pad = 0;
+  const vw = Math.max(1, viewportEl.clientWidth - pad);
+  const vh = Math.max(1, viewportEl.clientHeight - pad);
+  const scale = Math.min(vw / canvas.width, vh / canvas.height);
+  canvas.style.width = `${Math.floor(canvas.width * scale)}px`;
+  canvas.style.height = `${Math.floor(canvas.height * scale)}px`;
+}
 
 let yaw = 0.55;
 let pitch = 0.22;
@@ -142,6 +188,8 @@ function requestRender(force = false) {
       eps: currentEps(),
       background: [0.03, 0.04, 0.06],
       blendMode: blendModeSelect.value,
+      maxInteract: currentMaxInteract(),
+      cdfMode: currentCdfMode(),
     },
   });
 }
@@ -151,21 +199,71 @@ function showStats(stats, fps) {
     sceneCache?.totalInFile && sceneCache.totalInFile !== sceneCache.count
       ? `\nfile  ${sceneCache.totalInFile.toLocaleString()} → ${sceneCache.count.toLocaleString()}`
       : `\nsplats ${sceneCache?.count?.toLocaleString?.() ?? "?"}`;
-  statsEl.textContent = [
+  const lines = [
     `scene ${sceneLabel}`,
     `live  ${liveToggle.checked ? "on" : "off"}`,
     `blend ${stats.blendMode || blendModeSelect.value}`,
     `fps   ${fps.toFixed(1)}`,
     `ε     ${formatEps(stats.eps)}`,
+    stats.blendMode === "approx" || blendModeSelect.value === "approx"
+      ? `maxΦ  ${formatMaxInteract(stats.maxInteract ?? currentMaxInteract())}`
+      : null,
+    stats.blendMode === "approx" || blendModeSelect.value === "approx"
+      ? `Φcdf  ${formatCdfMode(stats.cdfMode ?? currentCdfMode())}`
+      : null,
     `frame ${stats.ms.toFixed(1)} ms`,
     `proj  ${stats.projected}`,
     `evals ${stats.splatEvals.toLocaleString()}`,
     `evals/px ${stats.evalsPerPixel.toFixed(2)}`,
     `early-out px ${stats.earlyOutPixels.toLocaleString()}`,
-  ].join("\n") + extra;
+  ];
+  statsEl.textContent = lines.filter(Boolean).join("\n") + extra;
   if (stats.radiusPx) {
     const r = stats.radiusPx;
     statsEl.textContent += `\nrPx   ${r.min.toFixed(1)}…${r.mean.toFixed(1)}…${r.max.toFixed(1)}`;
+  }
+  if (stats.profile) {
+    const p = stats.profile;
+    statsEl.textContent += [
+      "",
+      "── profile ──",
+      `project  ${p.projectMs.toFixed(1)} ms`,
+      `sort     ${p.sortMs.toFixed(1)} ms`,
+      `tile     ${p.tileMs.toFixed(1)} ms`,
+      `clear    ${p.clearMs.toFixed(1)} ms`,
+      `raster   ${p.rasterMs.toFixed(1)} ms`,
+      p.compositeMs
+        ? `  ~gather    ${p.gatherMs.toFixed(1)} ms${p.phaseTimed ? " (meas.)" : ""}`
+        : null,
+      p.compositeMs
+        ? `  ~composite ${p.compositeMs.toFixed(1)} ms${p.phaseTimed ? " (meas.)" : ""}`
+        : null,
+      `listTests ${p.listTests.toLocaleString()}`,
+      stats.blendMode === "approx" && p.detail
+        ? [
+            `hits/px  ${p.hitMean.toFixed(1)} (max ${p.hitMax})`,
+            `Φ-pairs  ${p.interactPairs.toLocaleString()}  beer ${p.beerPairs.toLocaleString()}  (max interact ${p.interactMax})`,
+            `frontScans ${p.frontScans.toLocaleString()}  (pair tests; should drop with maxΦ)`,
+            p.cappedPairs
+              ? `capped  ${p.cappedPairs.toLocaleString()} overflow→Beer`
+              : null,
+            `T_slice  ${p.tSliceCalls.toLocaleString()} calls`,
+            `T_iters  ${p.tSliceIters.toLocaleString()}  (pairwise overlap only)`,
+            `cdfCalls ${p.cdfCalls.toLocaleString()}`,
+            `appendix ${p.appendixCalls.toLocaleString()}`,
+            `iters/px ${(p.pixelsComposited ? p.tSliceIters / p.pixelsComposited : 0).toFixed(1)}`,
+          ]
+            .filter(Boolean)
+            .join("\n")
+        : stats.blendMode === "approx" && p.hitMean
+          ? `hits/px  ${p.hitMean.toFixed(1)} (max ${p.hitMax})  [Profile for overlap CDF counts]`
+          : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+  if (hudEl) {
+    hudEl.textContent = `${(stats.blendMode || blendModeSelect.value)} · ${fps.toFixed(0)} fps · ${formatEps(stats.eps)} · ${stats.ms.toFixed(0)} ms`;
   }
 }
 
@@ -183,6 +281,7 @@ worker.onmessage = (ev) => {
     canvas.width = msg.width;
     canvas.height = msg.height;
     ctx.putImageData(new ImageData(rgba, msg.width, msg.height), 0, 0);
+    fitCanvasToViewport();
 
     const now = performance.now();
     const dt = now - lastFrameAt;
@@ -255,6 +354,18 @@ resSelect.addEventListener("change", () => {
 });
 
 blendModeSelect.addEventListener("change", () => {
+  syncApproxControls();
+  dirty = true;
+  requestRender(true);
+});
+
+maxInteractInput.addEventListener("input", () => {
+  syncMaxInteractLabel();
+  dirty = true;
+  requestRender(true);
+});
+
+cdfModeSelect.addEventListener("change", () => {
   dirty = true;
   requestRender(true);
 });
@@ -350,7 +461,91 @@ document.getElementById("bench").addEventListener("click", async () => {
   requestRender(true);
 });
 
+document.getElementById("profile").addEventListener("click", async () => {
+  benchOut.textContent = "Profiling alpha vs approx…";
+  const wasLive = liveToggle.checked;
+  liveToggle.checked = false;
+  await new Promise((r) => setTimeout(r, 80));
+
+  if (!sceneCache) await loadDemoScene();
+  const { renderFrame } = await import("./rasterizer.js");
+  const { width, height } = sizeFromSelect();
+  const camera = {
+    eye: orbitEye(yaw, pitch, radius, target),
+    target,
+    up: [0, 1, 0],
+    fovy: (45 * Math.PI) / 180,
+    width,
+    height,
+  };
+  const eps = currentEps();
+  const maxInteract = currentMaxInteract();
+  const cdfMode = currentCdfMode();
+  const optsBase = {
+    eps,
+    profile: true,
+    background: [0.03, 0.04, 0.06],
+    maxInteract,
+    cdfMode,
+  };
+
+  function fmt(mode, s) {
+    const p = s.profile;
+    const lines = [
+      `=== ${mode} ===`,
+      `total   ${s.ms.toFixed(1)} ms  (raster ${p.rasterMs.toFixed(1)})`,
+      `project ${p.projectMs.toFixed(1)}  sort ${p.sortMs.toFixed(1)}  tile ${p.tileMs.toFixed(1)}  clear ${p.clearMs.toFixed(1)}`,
+      `listTests ${p.listTests.toLocaleString()}  evals ${s.splatEvals.toLocaleString()}  evals/px ${s.evalsPerPixel.toFixed(2)}`,
+    ];
+    if (mode === "approx") {
+      lines.push(
+        `hits/px ${p.hitMean.toFixed(2)} max ${p.hitMax}  maxΦ ${formatMaxInteract(maxInteract)}  Φcdf ${formatCdfMode(cdfMode)}`,
+        `Φ-pairs ${p.interactPairs.toLocaleString()}  beer ${p.beerPairs.toLocaleString()}  capped ${p.cappedPairs.toLocaleString()}  maxInteract ${p.interactMax}`,
+        `frontScans ${p.frontScans.toLocaleString()}  (pair tests)`,
+        `T_slice calls ${p.tSliceCalls.toLocaleString()}  iters ${p.tSliceIters.toLocaleString()}`,
+        `cdfCalls ${p.cdfCalls.toLocaleString()}  appendix ${p.appendixCalls.toLocaleString()}`,
+        `iters/px ${(p.pixelsComposited ? p.tSliceIters / p.pixelsComposited : 0).toFixed(1)}  (pairwise overlap)`,
+        `est. gather ${p.gatherMs.toFixed(1)} ms  composite ${p.compositeMs.toFixed(1)} ms${p.phaseTimed ? "  (measured)" : ""}`,
+        `note: Appendix-A for nearest ≤maxΦ overlapping fronts; overflow+far → Beer; CDF=${formatCdfMode(cdfMode)}`,
+      );
+    }
+    return lines.join("\n");
+  }
+
+  // warmup
+  renderFrame(sceneCache, camera, { ...optsBase, blendMode: "alpha" });
+  const alphaA = renderFrame(sceneCache, camera, { ...optsBase, blendMode: "alpha" });
+  const alphaB = renderFrame(sceneCache, camera, { ...optsBase, blendMode: "alpha" });
+  renderFrame(sceneCache, camera, { ...optsBase, blendMode: "approx" });
+  const approxA = renderFrame(sceneCache, camera, { ...optsBase, blendMode: "approx" });
+  const approxB = renderFrame(sceneCache, camera, { ...optsBase, blendMode: "approx" });
+
+  const alpha = alphaA.stats.ms <= alphaB.stats.ms ? alphaA.stats : alphaB.stats;
+  const approx = approxA.stats.ms <= approxB.stats.ms ? approxA.stats : approxB.stats;
+  const slowdown = approx.ms / Math.max(alpha.ms, 1e-6);
+
+  benchOut.textContent = [
+    `Profile @ ${width}×${height}  ε=${formatEps(eps)}  maxΦ=${formatMaxInteract(maxInteract)}  Φcdf=${formatCdfMode(cdfMode)}  n=${sceneCache.count}`,
+    fmt("alpha", alpha),
+    "",
+    fmt("approx", approx),
+    "",
+    `approx / alpha = ${slowdown.toFixed(2)}×`,
+  ].join("\n");
+
+  liveToggle.checked = wasLive;
+  dirty = true;
+  requestRender(true);
+});
+
 syncEpsLabel();
+syncMaxInteractLabel();
+syncApproxControls();
+fitCanvasToViewport();
+if (typeof ResizeObserver !== "undefined" && viewportEl) {
+  new ResizeObserver(() => fitCanvasToViewport()).observe(viewportEl);
+}
+window.addEventListener("resize", fitCanvasToViewport);
 loadDemoScene().catch((err) => {
   statsEl.textContent = String(err.message || err);
 });

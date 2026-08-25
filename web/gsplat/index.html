@@ -8,93 +8,111 @@
   </head>
   <body>
     <div id="app">
-      <header>
+      <aside id="panel">
         <h1>web/gsplat</h1>
         <p>
-          Realtime Kerbl-style sorted splat compositing in a Web Worker (no
-          Unity / no CUDA). Drag to orbit, scroll to zoom, right-drag or
-          shift-drag to pan. Tunable
+          Kerbl-style sorted splat compositing in a Web Worker. Drag to orbit,
+          scroll to zoom, right-drag / shift-drag to pan. Tunable
           <code>T &lt; ε</code> early-out.
         </p>
-      </header>
 
-      <div class="layout">
-        <canvas id="view" width="320" height="180"></canvas>
+        <label class="row">
+          <input id="live" type="checkbox" checked />
+          Live render
+        </label>
 
-        <aside class="panel">
-          <label class="row">
-            <input id="live" type="checkbox" checked />
-            Live render
-          </label>
+        <label>
+          Load 3DGS file
+          <input
+            id="file"
+            type="file"
+            accept=".ply,.splat,.json,application/json"
+          />
+        </label>
 
-          <label>
-            Load 3DGS file
-            <input
-              id="file"
-              type="file"
-              accept=".ply,.splat,.json,application/json"
-            />
-          </label>
+        <label>
+          Max Gaussians
+          <select id="maxGaussians">
+            <option value="5000">5k</option>
+            <option value="15000" selected>15k</option>
+            <option value="50000">50k</option>
+            <option value="0">all (may be slow)</option>
+          </select>
+        </label>
 
-          <label>
-            Max Gaussians
-            <select id="maxGaussians">
-              <option value="5000">5k</option>
-              <option value="15000" selected>15k</option>
-              <option value="50000">50k</option>
-              <option value="0">all (may be slow)</option>
-            </select>
-          </label>
+        <button id="resetScene" type="button" class="secondary">Reset demo scene</button>
 
-          <button id="resetScene" type="button">Reset demo scene</button>
+        <label>
+          Early-out ε
+          <input id="eps" type="range" min="0.0001" max="0.05" step="0.0001" value="0.01" />
+          <span id="epsVal">1e-2</span>
+        </label>
 
-          <label>
-            Early-out ε
-            <input id="eps" type="range" min="0.0001" max="0.05" step="0.0001" value="0.01" />
-            <span id="epsVal">1e-2</span>
-          </label>
+        <label>
+          Presets
+          <select id="epsPreset">
+            <option value="0.0001">1e-4 (strict)</option>
+            <option value="0.001">1e-3</option>
+            <option value="0.01" selected>1e-2</option>
+            <option value="0.05">5e-2 (loose)</option>
+            <option value="0">off (ε→0)</option>
+          </select>
+        </label>
 
-          <label>
-            Presets
-            <select id="epsPreset">
-              <option value="0.0001">1e-4 (strict)</option>
-              <option value="0.001">1e-3</option>
-              <option value="0.01" selected>1e-2</option>
-              <option value="0.05">5e-2 (loose)</option>
-              <option value="0">off (ε→0)</option>
-            </select>
-          </label>
+        <label>
+          Resolution
+          <select id="res">
+            <option value="320x180">320×180 (fast)</option>
+            <option value="480x270">480×270</option>
+            <option value="640x360" selected>640×360</option>
+            <option value="960x540">960×540</option>
+            <option value="1280x720">1280×720</option>
+          </select>
+        </label>
 
-          <label>
-            Resolution
-            <select id="res">
-              <option value="320x180" selected>320×180 (realtime)</option>
-              <option value="480x270">480×270</option>
-              <option value="640x360">640×360</option>
-            </select>
-          </label>
+        <label>
+          Blend mode
+          <select id="blendMode">
+            <option value="alpha" selected>Alpha (classic 3DGS)</option>
+            <option value="approx">Approx transmittance (Appendix A)</option>
+          </select>
+        </label>
 
-          <label>
-            Blend mode
-            <select id="blendMode">
-              <option value="alpha" selected>Alpha (classic 3DGS)</option>
-              <option value="approx">Approx transmittance (Appendix A)</option>
-            </select>
-          </label>
+        <label id="maxInteractRow">
+          Max Φ-interact
+          <input id="maxInteract" type="range" min="0" max="64" step="1" value="0" />
+          <span id="maxInteractVal">off</span>
+        </label>
+        <p class="hint" style="margin-top: -0.4rem">
+          Approx only: cap overlapping fronts in Appendix-A (nearest kept; rest Beer).
+          0 = unlimited.
+        </p>
 
-          <button id="bench" type="button">Bench ε sweep</button>
+        <label id="cdfModeRow">
+          Φ CDF
+          <select id="cdfMode">
+            <option value="logistic" selected>Logistic (fast)</option>
+            <option value="as">Abramowitz–Stegun</option>
+          </select>
+        </label>
 
-          <pre id="stats">Loading scene…</pre>
-          <pre id="benchOut"></pre>
+        <button id="bench" type="button" class="secondary">Bench ε sweep</button>
+        <button id="profile" type="button" class="secondary">Profile alpha vs approx</button>
 
-          <p class="hint">
-            Drag to orbit · scroll to zoom · right-drag / shift-drag to pan.
-            Upload INRIA <code>.ply</code>,
-            antimatter <code>.splat</code>, or this app’s <code>.json</code>.
-            Splat size uses perspective <code>focal·σ/z</code>. Blend mode
-            switches classic α vs Appendix-A transmittance at each pixel.
-          </p>
-        </aside>
+        <pre id="stats">Loading scene…</pre>
+        <pre id="benchOut"></pre>
+
+        <p class="hint">
+          Upload INRIA <code>.ply</code>, antimatter <code>.splat</code>, or
+          this app’s <code>.json</code>. Splat size uses perspective
+          <code>focal·σ/z</code>. Stats scroll here; the scene stays visible on
+          the right.
+        </p>
+      </aside>
+
+      <div id="viewport">
+        <canvas id="view" width="640" height="360"></canvas>
+        <div id="hud"></div>
       </div>
     </div>
     <script type="module" src="/src/main.js"></script>

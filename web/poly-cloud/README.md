@@ -1,8 +1,8 @@
 # Polynomial density cloud viewer (Three.js)
 
 1. Fit `f(x,y,z)` with a 3D Chebyshev polynomial, convert to a **world monomial tensor** \(c_{ijk}\).
-2. Custom shader: each pixel **contracts** that tensor with the camera ray \(p(t)=o+td\) into a 1D poly \(\alpha(t)\).
-3. Raymarch / Path C uses only **Horner** (and analytic \(\int\alpha\)) along the ray.
+2. Shader evaluates density with **nested Horner** at world sample points (stable on long corner rays).
+3. Raymarch / Path C both use clamped \(\sigma=\max(0,s\,f)\). Path C samples \(T=\exp(-\tau)\) on Chebyshev nodes, then Gauss–Chebyshev \(\int\sigma T\).
 
 ## Run
 
@@ -17,12 +17,10 @@ npm run dev
 | Stage | Cost |
 |---|---|
 | Fit (CPU, once) | Chebyshev + monomial convert |
-| Per pixel | \(O((N+1)^3)\) build \(\alpha\) |
-| Per sample | \(O(N)\) Horner |
-
-Previously every sample paid \((N+1)^3\) for a full 3D Chebyshev eval.
+| Per sample | \(O((N+1)^3)\) nested Horner |
 
 ## Controls
 
-- **steps** — samples along the ray
-- **Path C** — \(\Delta\tau=\int\alpha\,dt\) per step from the 1D poly
+- Drag to orbit · scroll to zoom · right-drag to pan
+- **steps** — raymarch samples along the ray
+- **Path C** — Chebyshev nodes for \(T\), quadrature for \(\int\sigma T\)
