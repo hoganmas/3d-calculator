@@ -5,12 +5,10 @@ import { volumeVertex, volumeFragment } from "./shaders.js";
 import { clipGridVertex, clipGridFragment } from "./clipShaders.js";
 import { bakeClipGridFibers, MAX_DEG } from "./clipGrid.js";
 import {
-  uploadResidentAtlas,
-  bakeClipGridFibersGpu,
   initClipBakeGpu,
   isClipBakeGpuReady,
   isClipMarchReady,
-  renderClipGridGpu,
+  renderClipFrameGpu,
   setClipGpuCanvasVisible,
   resizeClipGpuCanvas,
   ensurePipelinesForDegree,
@@ -110,9 +108,24 @@ coeffTex.needsUpdate = true;
 let worldMono = null;
 let fitDeg = 4;
 let clipDirty = true;
-const lastBakeCam = new THREE.Vector3(NaN, NaN, NaN);
-const lastBakeQuat = new THREE.Quaternion(0, 0, 0, 1);
 let bakeMsSmooth = 0;
+let frameDtSmooth = 16;
+let lastRafAt = 0;
+/** Soft cap on atlas bytes. */
+const ATLAS_BYTE_BUDGET = 48 * 1024 * 1024;
+const BAKE_EDGE_MIN = 64;
+/** Per-frame dens rebuild is expensive (esp. deg≥6 exact path) — keep modest. */
+const BAKE_EDGE_MOVE = 256;
+const BAKE_EDGE_SETTLE = 512;
+/** Target JS→GPU submit cadence while orbiting. */
+const FRAME_BUDGET_MS = 14;
+let atlasEdge = BAKE_EDGE_MOVE;
+let settleHiRes = false;
+let settleTimer = 0;
+/** CPU fallback only: min ms between rebakes while orbiting. */
+const CPU_BAKE_MIN_MS = 120;
+let lastCpuBakeAt = 0;
+let cpuBakeInFlight = false;
 
 const uniforms = {
   uCoeffTex: { value: coeffTex },
@@ -162,8 +175,6 @@ alphaTex.needsUpdate = true;
 let clipAtlasTex = null;
 let clipAtlasW = 0;
 let clipAtlasH = 0;
-let lastBakeAt = 0;
-const BAKE_MIN_MS = 120;
 
 const clipUniforms = {
   uAlphaTex: { value: alphaTex },
@@ -278,38 +289,17 @@ let fps = 0;
 let fpsFrames = 0;
 let fpsLast = performance.now();
 let cpuMsSmooth = 0;
-/** Adaptive atlas edge while orbiting; grows/shrinks toward ~bake budget. */
-let bakeMaxEdge = 112;
-const BAKE_BUDGET_MS = 12;
-const BAKE_EDGE_MIN = 64;
-const BAKE_EDGE_MAX_CPU = 160;
-const BAKE_EDGE_SETTLED_CPU = 192;
-const BAKE_EDGE_MAX_GPU = 768;
-const BAKE_EDGE_SETTLED_GPU = 768;
-/** Soft cap on atlas bytes (CPU alloc + GPU upload). */ 
-const ATLAS_BYTE_BUDGET = 48 * 1024 * 1024;
-/** Display resolve scale on CPU bake frames (GPU bakes stay at full resolve). */
-const BAKE_FRAME_DISPLAY_LOD = 0.5;
-let restoreDisplayAfterBake = false;
-let bakeInFlight = false;
-let bakeBackend = "cpu";
-/** Set while a sync settle is queued because a LOD bake is in flight. */
-let pendingSettle = false;
-
-function bakeEdgeLimits() {
-  if (isClipBakeGpuReady()) {
-    return { max: BAKE_EDGE_MAX_GPU, settled: BAKE_EDGE_SETTLED_GPU };
-  }
-  return { max: BAKE_EDGE_MAX_CPU, settled: BAKE_EDGE_SETTLED_CPU };
-}
 
 function hudText() {
   const w = els.viewport.clientWidth;
   const h = Math.max(els.viewport.clientHeight, 1);
   const pr = renderer.getPixelRatio();
-  const gpu = useGpuTimer ? `${gpuMsSmooth.toFixed(1)}ms gpu` : "gpu n/a";
-  const bake = isClipMode() ? ` · bake ${bakeMsSmooth.toFixed(0)}ms` : "";
-  return `${modeLabel()} · ${Math.round(fps)} fps · ${cpuMsSmooth.toFixed(1)}ms cpu · ${gpu}${bake} · ${Math.round(w * pr)}×${Math.round(h * pr)}`;
+  // WebGL timer only sees Three (box/clear) — not WebGPU Babbage/march.
+  const gl = useGpuTimer ? `${gpuMsSmooth.toFixed(1)}ms gl` : "gl n/a";
+  const clip = isClipMode()
+    ? ` · rAF ${frameDtSmooth.toFixed(0)}ms · submit ${bakeMsSmooth.toFixed(1)}ms · edge ${Math.round(atlasEdge)}`
+    : "";
+  return `${modeLabel()} · ${Math.round(fps)} fps · ${cpuMsSmooth.toFixed(1)}ms js · ${gl}${clip} · ${Math.round(w * pr)}×${Math.round(h * pr)}`;
 }
 
 function displaySize(lod = 1) {
@@ -361,78 +351,30 @@ function configureAtlasTex(tex) {
 }
 
 function useGpuClipPath() {
-  return isClipMode() && isClipBakeGpuReady();
+  return isClipMode() && isClipBakeGpuReady() && isClipMarchReady();
 }
 
 function syncClipPresentation() {
-  const gpu = useGpuClipPath() && isClipMarchReady();
+  const gpu = useGpuClipPath();
   clipQuad.visible = isClipMode() && !gpu;
   setClipGpuCanvasVisible(gpu);
-  if (gpu) {
-    const fbW = Math.max(1, renderer.domElement.width);
-    const fbH = Math.max(1, renderer.domElement.height);
-    if (resizeClipGpuCanvas(fbW, fbH)) {
-      // Resized/cleared — redraw immediately so we never leave a blank overlay.
-      const absorb = clipUniforms.uAbsorbColor.value;
-      const emit = clipUniforms.uEmitColor.value;
-      renderClipGridGpu({
-        fbW,
-        fbH,
-        scale: clipUniforms.uScale.value,
-        steps: clipUniforms.uSteps.value | 0,
-        absorb: [absorb.r, absorb.g, absorb.b],
-        emit: [emit.r, emit.g, emit.b],
-      });
-    }
-  }
 }
 
-function presentBaked(baked, fbW, fbH, uploaded) {
-  if (uploaded && baked.gpuResident) {
-    setClipGpuCanvasVisible(true);
-    clipQuad.visible = false;
-    resizeClipGpuCanvas(fbW, fbH);
-    const absorb = clipUniforms.uAbsorbColor.value;
-    const emit = clipUniforms.uEmitColor.value;
-    const ok = renderClipGridGpu({
-      fbW,
-      fbH,
-      scale: clipUniforms.uScale.value,
-      steps: clipUniforms.uSteps.value | 0,
-      absorb: [absorb.r, absorb.g, absorb.b],
-      emit: [emit.r, emit.g, emit.b],
-    });
-    if (!ok) {
-      applyBakedAtlas(baked, fbW, fbH);
-      setClipGpuCanvasVisible(false);
-      clipQuad.visible = true;
-    }
-  } else {
-    // CPU/WebGL path: never leave a blank WebGPU overlay on top.
-    applyBakedAtlas(baked, fbW, fbH);
-    setClipGpuCanvasVisible(false);
-    clipQuad.visible = true;
-  }
-  clipUniforms.uFbW.value = fbW;
-  clipUniforms.uFbH.value = fbH;
-}
-
-function clipAtlasSize(fbW, fbH, settled) {
-  const lim = bakeEdgeLimits();
-  let maxEdge = settled ? lim.settled : Math.min(bakeMaxEdge, lim.max);
+/** Atlas size from current edge target, shrunk to stay under the byte budget. */
+function clipAtlasSize(fbW, fbH) {
+  let maxEdge = Math.max(BAKE_EDGE_MIN, Math.round(atlasEdge));
   const nAlpha = 3 * Math.max(1, fitDeg) + 1;
   for (let guard = 0; guard < 12; guard++) {
     const scale = Math.min(1, maxEdge / Math.max(fbW, fbH));
     const w = Math.max(1, Math.round(fbW * scale));
     const h = Math.max(1, Math.round(fbH * scale));
-    if (w * h * nAlpha * 4 <= ATLAS_BYTE_BUDGET) return { w, h, maxEdge };
+    if (w * h * nAlpha * 4 <= ATLAS_BYTE_BUDGET) return { w, h };
     maxEdge = Math.max(BAKE_EDGE_MIN, Math.floor(maxEdge * 0.85));
   }
   const scale = Math.min(1, maxEdge / Math.max(fbW, fbH));
   return {
     w: Math.max(1, Math.round(fbW * scale)),
     h: Math.max(1, Math.round(fbH * scale)),
-    maxEdge,
   };
 }
 
@@ -471,121 +413,103 @@ function applyBakedAtlas(baked, fbW, fbH) {
   clipUniforms.uCameraPos.value.copy(camera.position);
 }
 
-/**
- * Full bake + present. Prefers GPU tile-parallel Babbage; falls back to CPU f64.
- * Used for hi-res settle and fit — never fire-and-forget without bakeInFlight.
- */
-async function rebuildClipGridSync({ settled = false } = {}) {
-  if (!worldMono || !isClipMode()) return false;
-  if (bakeInFlight) {
-    if (settled) pendingSettle = true;
-    return false;
+/** Per-frame GPU Babbage + march only when the view is dirty (scratch atlas). */
+function drawClipGpuFrame() {
+  if (!worldMono || !useGpuClipPath()) return false;
+  // Camera still: keep last WebGPU canvas — submitting full dens every rAF is what
+  // killed FPS while WebGL timers stayed ~0 (they never see WebGPU work).
+  if (!clipDirty && !settleHiRes) return false;
+
+  if (settleHiRes) {
+    atlasEdge = BAKE_EDGE_SETTLE;
+    settleHiRes = false;
   }
-  bakeInFlight = true;
+
+  const fbW = Math.max(1, renderer.domElement.width);
+  const fbH = Math.max(1, renderer.domElement.height);
+  const { w, h } = clipAtlasSize(fbW, fbH);
+  camera.updateMatrixWorld(true);
+  const absorb = clipUniforms.uAbsorbColor.value;
+  const emit = clipUniforms.uEmitColor.value;
   const t0 = performance.now();
+  const ok = renderClipFrameGpu({
+    worldMono,
+    deg: fitDeg,
+    camera,
+    width: w,
+    height: h,
+    half: clipUniforms.uHalf.value,
+    fbW,
+    fbH,
+    scale: clipUniforms.uScale.value,
+    steps: clipUniforms.uSteps.value | 0,
+    absorb: [absorb.r, absorb.g, absorb.b],
+    emit: [emit.r, emit.g, emit.b],
+  });
+  const submitMs = performance.now() - t0;
+  if (ok) {
+    bakeMsSmooth = bakeMsSmooth * 0.85 + submitMs * 0.15;
+    clipDirty = false;
+    // Adapt dens resolution to observed rAF spacing (GPU backlog shows up there).
+    if (frameDtSmooth > FRAME_BUDGET_MS * 1.35) {
+      atlasEdge = Math.max(BAKE_EDGE_MIN, atlasEdge * 0.85);
+    } else if (frameDtSmooth < FRAME_BUDGET_MS * 0.75 && atlasEdge < BAKE_EDGE_MOVE) {
+      atlasEdge = Math.min(BAKE_EDGE_MOVE, atlasEdge + 8);
+    }
+    if (els.basisMs) {
+      els.basisMs.textContent = `gpu dens/frame · ${w}×${h} · edge ${Math.round(atlasEdge)}`;
+    }
+  }
+  return ok;
+}
+
+/** CPU f64 Babbage → WebGL atlas (only when WebGPU clip path is unavailable). */
+function rebuildClipCpuFallback() {
+  if (!worldMono || !isClipMode() || useGpuClipPath() || cpuBakeInFlight) return;
+  const tNow = performance.now();
+  if (!clipDirty && tNow - lastCpuBakeAt < CPU_BAKE_MIN_MS) return;
+  cpuBakeInFlight = true;
+  const t0 = tNow;
   try {
     const fbW = Math.max(1, renderer.domElement.width);
     const fbH = Math.max(1, renderer.domElement.height);
-    const { w, h, maxEdge } = clipAtlasSize(fbW, fbH, settled);
+    const { w, h } = clipAtlasSize(fbW, fbH);
     camera.updateMatrixWorld(true);
-
-    let baked = null;
-    let uploaded = false;
-    bakeBackend = "cpu-babbage";
-
-    if (isClipBakeGpuReady()) {
-      try {
-        const gpu = await bakeClipGridFibersGpu(
-          worldMono,
-          fitDeg,
-          camera,
-          w,
-          h,
-          clipUniforms.uHalf.value,
-        );
-        if (gpu) {
-          baked = gpu;
-          bakeBackend = "gpu-babbage";
-          uploaded = true;
-        }
-      } catch (e) {
-        console.warn("[clip-grid] GPU Babbage bake failed, CPU fallback", e);
-      }
-    }
-
-    if (!baked) {
-      baked = bakeClipGridFibers(
-        worldMono,
-        fitDeg,
-        camera,
-        w,
-        h,
-        clipUniforms.uHalf.value,
-      );
-      bakeBackend = "cpu-babbage";
-      if (isClipBakeGpuReady()) {
-        try {
-          await ensurePipelinesForDegree(baked.deg);
-          const up = uploadResidentAtlas(baked);
-          if (up) {
-            baked = up;
-            bakeBackend = "babbage+gpu";
-            uploaded = true;
-          }
-        } catch (e) {
-          console.warn("[clip-grid] GPU upload failed, WebGL atlas fallback", e);
-          bakeBackend = "cpu-babbage";
-        }
-      }
-    }
-
-    presentBaked(baked, fbW, fbH, uploaded);
-
-    lastBakeCam.copy(camera.position);
-    lastBakeQuat.copy(camera.quaternion);
-    lastBakeAt = performance.now();
+    const baked = bakeClipGridFibers(
+      worldMono,
+      fitDeg,
+      camera,
+      w,
+      h,
+      clipUniforms.uHalf.value,
+    );
+    applyBakedAtlas(baked, fbW, fbH);
+    setClipGpuCanvasVisible(false);
+    clipQuad.visible = true;
     clipDirty = false;
-    const dt = performance.now() - t0;
-    bakeMsSmooth = bakeMsSmooth * 0.7 + dt * 0.3;
-
-    if (!settled && bakeBackend === "cpu-babbage") {
-      if (dt > BAKE_BUDGET_MS * 1.15) {
-        bakeMaxEdge = Math.max(BAKE_EDGE_MIN, bakeMaxEdge - 16);
-      } else if (dt < BAKE_BUDGET_MS * 0.7) {
-        bakeMaxEdge = Math.min(bakeEdgeLimits().max, bakeMaxEdge + 8);
-      }
-    } else if (bakeBackend === "gpu-babbage" || bakeBackend.startsWith("babbage")) {
-      bakeMaxEdge = Math.min(
-        bakeEdgeLimits().max,
-        Math.max(bakeMaxEdge, 256),
-      );
-    }
-
+    lastCpuBakeAt = performance.now();
+    bakeMsSmooth = bakeMsSmooth * 0.7 + (performance.now() - t0) * 0.3;
     if (els.basisMs) {
-      const tag = settled ? "hi" : `lod${Math.round(maxEdge)}`;
-      const copy = uploaded ? "resident" : "tex";
-      els.basisMs.textContent = `bake ${bakeMsSmooth.toFixed(1)} ms · ${w}×${h} · ${bakeBackend}/${copy} · ${tag}`;
+      els.basisMs.textContent = `cpu-babbage · ${w}×${h}`;
     }
-    return true;
   } catch (e) {
-    console.error("[clip-grid] bake failed", e);
+    console.error("[clip-grid] CPU bake failed", e);
     setErr(e instanceof Error ? e.message : String(e));
-    syncClipPresentation();
-    return false;
   } finally {
-    bakeInFlight = false;
-    if (pendingSettle) {
-      pendingSettle = false;
-      void rebuildClipGridSync({ settled: true });
-    }
+    cpuBakeInFlight = false;
   }
 }
 
-/** Hi-res settle: awaitable bake on this call stack. */
-function runSettleBake() {
-  if (!isClipMode() || !worldMono) return;
-  cancelSettleTimer();
-  void rebuildClipGridSync({ settled: true });
+async function prepareClipGpuForDegree(deg) {
+  if (!isClipBakeGpuReady()) return false;
+  try {
+    await ensurePipelinesForDegree(deg);
+    syncClipPresentation();
+    return true;
+  } catch (e) {
+    console.warn("[clip-grid] pipeline specialize failed", e);
+    return false;
+  }
 }
 
 function syncModeUniforms() {
@@ -598,8 +522,11 @@ function syncModeUniforms() {
   clipUniforms.uSteps.value = uniforms.uSteps.value;
   els.modeLabel.textContent = modeLabel();
   resize();
-  if (clip) runSettleBake();
-  else {
+  syncClipPresentation();
+  if (clip) {
+    clipDirty = true;
+    if (!useGpuClipPath()) rebuildClipCpuFallback();
+  } else {
     setClipGpuCanvasVisible(false);
     clipQuad.visible = false;
   }
@@ -635,7 +562,7 @@ function uploadFit() {
     els.fitErr.className = "v " + (fit.fitRelL2 < 0.08 ? "ok" : "warn");
     els.nCoeff.textContent = String(n);
 
-    // Mode sync + resize; settle once here (syncModeUniforms also settles on clip).
+    // Mode sync + resize; GPU path draws every frame, CPU rebakes when dirty.
     const clip = isClipMode();
     volumeMesh.visible = !clip;
     uniforms.uMode.value = els.mode.value === "pathc" ? 1 : 0;
@@ -644,9 +571,14 @@ function uploadFit() {
     clipUniforms.uScale.value = densScale;
     clipUniforms.uSteps.value = steps;
     els.modeLabel.textContent = modeLabel();
-    syncClipPresentation();
     resize();
-    if (clip) runSettleBake();
+    void prepareClipGpuForDegree(fit.deg).then(() => {
+      syncClipPresentation();
+      if (clip && !useGpuClipPath()) {
+        clipDirty = true;
+        rebuildClipCpuFallback();
+      }
+    });
   } catch (e) {
     setErr(e instanceof Error ? e.message : String(e));
   }
@@ -699,85 +631,55 @@ function pollGpuTimer() {
   gpuQuery = null;
 }
 
-function camMovedEnough() {
-  if (clipDirty) return true;
-  if (lastBakeCam.distanceToSquared(camera.position) > 1e-6) return true;
-  if (Math.abs(lastBakeQuat.dot(camera.quaternion)) < 0.9995) return true;
-  return false;
-}
-
-/** Wheel fires end per notch; debounce so one sync settle runs after motion stops. */
-const SETTLE_DEBOUNCE_MS = 180;
-let settleTimer = 0;
-
-function cancelSettleTimer() {
+controls.addEventListener("start", () => {
+  if (!isClipMode()) return;
   if (settleTimer) {
     clearTimeout(settleTimer);
     settleTimer = 0;
   }
-}
-
-function scheduleSettleBake() {
-  if (!isClipMode()) return;
-  cancelSettleTimer();
-  settleTimer = window.setTimeout(() => {
-    settleTimer = 0;
-    runSettleBake();
-  }, SETTLE_DEBOUNCE_MS);
-}
-
-controls.addEventListener("start", () => {
-  if (!isClipMode()) return;
-  cancelSettleTimer();
+  atlasEdge = Math.min(atlasEdge, BAKE_EDGE_MOVE);
   clipDirty = true;
 });
 
 controls.addEventListener("change", () => {
-  if (!isClipMode()) return;
-  clipDirty = true;
+  if (isClipMode()) clipDirty = true;
 });
 
 controls.addEventListener("end", () => {
   if (!isClipMode()) return;
   clipDirty = true;
-  scheduleSettleBake();
+  if (settleTimer) clearTimeout(settleTimer);
+  // One higher-res dens rebuild after motion stops (not a resident cache).
+  settleTimer = window.setTimeout(() => {
+    settleTimer = 0;
+    settleHiRes = true;
+    clipDirty = true;
+  }, 160);
 });
 
 function frame() {
   requestAnimationFrame(frame);
   const t0 = performance.now();
+  if (lastRafAt > 0) {
+    frameDtSmooth = frameDtSmooth * 0.85 + (t0 - lastRafAt) * 0.15;
+  }
+  lastRafAt = t0;
   fpsFrames++;
   if (t0 - fpsLast >= 500) {
     fps = (fpsFrames * 1000) / (t0 - fpsLast);
     fpsFrames = 0;
     fpsLast = t0;
     if (els.hud) els.hud.textContent = hudText();
-    if (els.cpuMs) els.cpuMs.textContent = `${cpuMsSmooth.toFixed(2)} ms`;
+    if (els.cpuMs) {
+      els.cpuMs.textContent = `${cpuMsSmooth.toFixed(2)} ms js · ${frameDtSmooth.toFixed(1)} ms rAF`;
+    }
   }
 
   controls.update();
   uniforms.uCameraPos.value.copy(camera.position);
 
-  if (restoreDisplayAfterBake) {
-    const { vw, vh, rw, rh } = displaySize(1);
-    applyDisplaySize(rw, rh, vw, vh, { markClipDirty: false });
-    clipUniforms.uFbW.value = rw;
-    clipUniforms.uFbH.value = rh;
-    restoreDisplayAfterBake = false;
-  }
-
-  // LOD rebakes only while moving — hi-res settle is sync via runSettleBake().
-  if (isClipMode() && !bakeInFlight && camMovedEnough()) {
-    const due = clipDirty || t0 - lastBakeAt >= BAKE_MIN_MS;
-    if (due) {
-      const useGpu = isClipBakeGpuReady();
-      if (!useGpu) {
-        const { vw, vh, rw, rh } = displaySize(BAKE_FRAME_DISPLAY_LOD);
-        applyDisplaySize(rw, rh, vw, vh, { markClipDirty: false });
-        restoreDisplayAfterBake = true;
-      }
-      void rebuildClipGridSync({ settled: false });
-    }
+  if (isClipMode() && worldMono && !useGpuClipPath()) {
+    rebuildClipCpuFallback();
   }
 
   pollGpuTimer();
@@ -789,17 +691,8 @@ function frame() {
 
   renderer.render(scene, camera);
 
-  if (useGpuClipPath() && isClipMarchReady()) {
-    const absorb = clipUniforms.uAbsorbColor.value;
-    const emit = clipUniforms.uEmitColor.value;
-    renderClipGridGpu({
-      fbW: renderer.domElement.width,
-      fbH: renderer.domElement.height,
-      scale: clipUniforms.uScale.value,
-      steps: clipUniforms.uSteps.value | 0,
-      absorb: [absorb.r, absorb.g, absorb.b],
-      emit: [emit.r, emit.g, emit.b],
-    });
+  if (isClipMode() && worldMono && useGpuClipPath()) {
+    drawClipGpuFrame();
   }
 
   if (gpuQueryActive && gpuQuery) {
@@ -812,14 +705,17 @@ function frame() {
 }
 frame();
 
-void initClipBakeGpu(els.viewport).then((ok) => {
+void initClipBakeGpu(els.viewport).then(async (ok) => {
+  if (ok && worldMono) await prepareClipGpuForDegree(fitDeg);
   syncClipPresentation();
-  if (ok && isClipMode()) {
-    bakeMaxEdge = Math.max(bakeMaxEdge, 256);
-    if (els.basisMs) els.basisMs.textContent = "gpu-babbage bake → march";
-    runSettleBake();
-  } else if (!ok && els.basisMs && isClipMode()) {
-    els.basisMs.textContent = "cpu bake (no webgpu)";
-    runSettleBake();
+  clipDirty = true;
+  settleHiRes = true;
+  if (els.basisMs && isClipMode()) {
+    els.basisMs.textContent = ok
+      ? "gpu dens (dirty frames)"
+      : "cpu bake (no webgpu)";
+  }
+  if (isClipMode() && !useGpuClipPath()) {
+    rebuildClipCpuFallback();
   }
 });

@@ -1,4 +1,6 @@
-/** Fullscreen clip-grid raymarch from prebaked NDC density samples. */
+/** Fullscreen clip-grid Beer raymarch from prebaked NDC density samples.
+ *  Golden path marcher — not Path C (see research/poly/notes/path-c.md).
+ */
 
 export const clipGridVertex = /* glsl */ `
 void main() {

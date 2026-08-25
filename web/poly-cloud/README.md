@@ -1,8 +1,14 @@
-# Polynomial density cloud viewer (Three.js)
+# Polynomial density cloud viewer (Three.js / WebGPU)
 
-1. Fit `f(x,y,z)` with a 3D Chebyshev polynomial, convert to a **world monomial tensor** \(c_{ijk}\).
-2. **LOS modes** (raymarch / Path C): per-pixel nested Horner → univariate \(\gamma(u)\), then march / Chebyshev-\(T\).
-3. **clip-grid**: per-view bake of fiber **density samples** on Chebyshev-root \(u\)-nodes (view-fixed \(t_\mathrm{mid},t_\mathrm{hw}\)). Prefer WebGPU **tile-parallel Babbage** (f32, tile≈128px) → resident atlas march; fall back to CPU f64 Babbage (tile≈256px) + upload / WebGL DataTexture. See `research/poly/notes/clip-space-babbage.md`.
+**Golden path — clip-grid:** Fit → world monomials → per-view **GPU middle-out Babbage** dens atlas → **Beer–Lambert raymarch** from the atlas. Transmittance is numerical, not analytic.
+
+Details: [`research/poly/notes/clip-space-babbage.md`](../../research/poly/notes/clip-space-babbage.md).  
+Legacy Path C: [`research/poly/notes/path-c.md`](../../research/poly/notes/path-c.md).
+
+1. Fit `f(x,y,z)` with a 3D Chebyshev polynomial → **world monomial tensor** \(c_{ijk}\).
+2. **clip-grid (preferred):** bake dens at Chebyshev-root \(t_j\) (view-fixed \(t_\mathrm{mid},t_\mathrm{hw}\)) with tile-parallel middle-out Babbage (WebGPU f32; high \(N\) → exact dens). March with Beer F2B. CPU f64 Babbage + WebGL atlas if no WebGPU.
+3. **LOS raymarch (optional):** per-pixel nested Horner → \(\gamma(u)\) → Beer march (reference / debug).
+4. **Path C (legacy):** Horner → Chebyshev \(\hat\tau\) → \(T=e^{-\hat\tau}\); may be phased out.
 
 ## Run
 
@@ -12,20 +18,20 @@ npm install
 npm run dev
 ```
 
-Requires a browser with **WebGPU** for GPU bake + resident-atlas march (`navigator.gpu`). Without it, clip-grid falls back to CPU bake + WebGL DataTexture march automatically.
+Requires **WebGPU** (`navigator.gpu`) for GPU bake + resident-atlas march. Without it, clip-grid falls back to CPU bake + WebGL `DataTexture` march.
 
 ## Cost
 
 | Stage | Cost |
 |---|---|
 | Fit (CPU, once) | Chebyshev + monomial convert |
-| LOS per ray | \(\Theta(N^3)\) compose + \(\Theta(\mathrm{steps}\cdot 3N)\) |
-| clip-grid bake (per view) | \(\sim O\!\big((W/\mathrm{tile})\,H\,N\cdot N^3 + WH\,N^2\big)\) coarse Babbage (not \(WH N^3\)) |
-| clip-grid per sample | barycentric dens\((u)\) from atlas |
+| clip-grid bake | \(\sim O\!\big((W/\mathrm{tile})\,H\cdot(D{+}1)\,N^3 + WH\,D^2\big)\) Babbage (not \(WH N^3\)); exact at high \(N\) |
+| clip-grid march | \(O(\mathrm{steps})\) dens lookup + Beer |
+| LOS / Path C per ray | \(\Theta(N^3)\) compose + march / Cheb-\(T\) |
 
 ## Controls
 
 - Drag to orbit · scroll to zoom · right-drag to pan
-- **steps** — raymarch samples along the ray
-- **Path C** — Chebyshev nodes for \(T\), quadrature for \(\int\sigma T\)
-- **clip-grid** — NDC dens atlas; HUD shows `gpu-babbage` / `cpu-babbage` / `babbage+gpu` and time
+- **mode** — prefer **clip-grid**; LOS raymarch / Path C are secondary
+- **steps** — raymarch samples along the ray (Beer in clip-grid and LOS)
+- **T Cheb deg** / **profile stage** — Path C only (legacy)

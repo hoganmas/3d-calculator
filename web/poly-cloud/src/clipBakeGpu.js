@@ -1,8 +1,9 @@
 /**
- * WebGPU clip-grid path: tile-parallel Babbage dens atlas bake (no CPU readback),
- * then fullscreen-march directly from that buffer onto a canvas.
+ * WebGPU clip-grid path (golden): tile-parallel middle-out Babbage dens bake +
+ * Beer–Lambert fullscreen march. See research/poly/notes/clip-space-babbage.md.
  *
- * CPU/WebGL fallback remains in main.js via bakeClipGridFibers + DataTexture.
+ * CPU/WebGL fallback: main.js via bakeClipGridFibers + DataTexture.
+ * Path C is a separate legacy LOS mode — research/poly/notes/path-c.md.
  */
 
 import {
@@ -583,9 +584,9 @@ export function hasResidentAtlas() {
   return Boolean(resident && atlasFront && marchBindGroup);
 }
 
-/** True when the WebGPU overlay can actually draw this frame. */
+/** True when WebGPU clip pipelines + canvas are ready for a per-frame bake+march. */
 export function isClipMarchReady() {
-  return Boolean(device && marchPipeline && ctx && resident && atlasFront && marchBindGroup);
+  return Boolean(device && bakePipeline && marchPipeline && ctx);
 }
 
 export function clipBakeGpuStatus() {
@@ -754,6 +755,9 @@ export async function ensurePipelinesForDegree(deg) {
   marchPipeline = nextMarch;
   pipelineDeg = sz.deg;
   marchBindGroup = null;
+  bakeBindGroup = null;
+  uploadedCoeffDeg = -1;
+  uploadedCoeffRef = null;
   if (atlasFront) bindMarchToFront();
   return true;
 }
@@ -767,12 +771,11 @@ function storageBufferBudget() {
 }
 
 /**
- * Grow/shrink the double-buffered atlas without destroying the live front buffer
- * until replacements exist — avoids a blank WebGPU overlay mid-settle.
+ * Grow the dens atlas scratch buffer (bake writes, march reads same frame).
  */
 function ensureAtlasPair(byteSize) {
   const aligned = Math.max(256, Math.ceil(byteSize / 256) * 256);
-  if (atlasFront && atlasBack && atlasCapacity >= aligned) return;
+  if (atlasFront && atlasCapacity >= aligned) return;
 
   if (aligned > storageBufferBudget()) {
     throw new Error(
@@ -781,71 +784,13 @@ function ensureAtlasPair(byteSize) {
   }
 
   const usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
-  const newFront = device.createBuffer({ size: aligned, usage });
-  const newBack = device.createBuffer({ size: aligned, usage });
-
+  const next = device.createBuffer({ size: aligned, usage });
   const oldFront = atlasFront;
   const oldBack = atlasBack;
-  atlasFront = newFront;
-  atlasBack = newBack;
+  atlasFront = next;
+  atlasBack = null;
   atlasCapacity = aligned;
-  // Keep previous bind group until caller rebinds — prevents a null-bind blank frame
-  // if we only grew capacity and will bind immediately after.
-  try {
-    oldFront?.destroy();
-    oldBack?.destroy();
-  } catch (_) {
-    /* ignore */
-  }
-  marchBindGroup = null;
-}
-
-function bindMarchToFront() {
-  if (!marchPipeline || !atlasFront) return;
-  marchBindGroup = device.createBindGroup({
-    layout: marchPipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: drawParamBuf } },
-      { binding: 1, resource: { buffer: atlasFront } },
-    ],
-  });
-}
-
-/**
- * Upload a CPU-baked dens atlas and publish it as the live front buffer.
- * Call {@link ensurePipelinesForDegree}(baked.deg) first so march matches nAlpha.
- * Does **not** await the GPU — writeBuffer + later draws share the device queue
- * so presentation can stay synchronous. Old buffers are destroyed after the
- * queue catches up (deferred), so in-flight frames never see a null atlas.
- */
-export function uploadResidentAtlas(baked) {
-  if (!device || !marchPipeline) return null;
-  if (pipelineDeg != null && baked.deg != null && pipelineDeg !== (baked.deg | 0)) {
-    console.warn(
-      `[clipBakeGpu] march pipeline deg=${pipelineDeg} != atlas deg=${baked.deg}; call ensurePipelinesForDegree first`,
-    );
-  }
-
-  const outBytes = baked.data.byteLength;
-  const aligned = Math.max(256, Math.ceil(outBytes / 256) * 256);
-  if (aligned > storageBufferBudget()) {
-    throw new Error(
-      `atlas ${aligned}B exceeds GPU storage budget ${storageBufferBudget()}B`,
-    );
-  }
-
-  const usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
-  const filled = device.createBuffer({ size: aligned, usage });
-  device.queue.writeBuffer(filled, 0, baked.data);
-
-  const oldFront = atlasFront;
-  const oldBack = atlasBack;
-  atlasFront = filled;
-  atlasBack = device.createBuffer({ size: aligned, usage });
-  atlasCapacity = aligned;
-  bindMarchToFront();
-
-  // Retire previous buffers only after queued work that may still reference them.
+  invalidateAtlasBindGroups();
   const retire = [oldFront, oldBack].filter(Boolean);
   if (retire.length) {
     void device.queue.onSubmittedWorkDone().then(() => {
@@ -858,39 +803,67 @@ export function uploadResidentAtlas(baked) {
       }
     });
   }
+}
 
-  resident = {
-    gpuResident: true,
-    width: baked.width,
-    height: baked.height,
-    nAlpha: baked.nAlpha,
-    max1d: baked.max1d,
-    deg: baked.deg,
-    M: baked.M,
-    ro: baked.ro,
-    half: baked.half,
-    tMid: baked.tMid,
-    tHw: baked.tHw,
-    sx: baked.sx,
-    sy: baked.sy,
-    method: baked.method,
-  };
-  return resident;
+/** @type {GPUBindGroup | null} */
+let bakeBindGroup = null;
+/** Cached monomial upload (skip rewrite when fit unchanged). */
+let uploadedCoeffDeg = -1;
+let uploadedCoeffRef = null;
+
+function bindMarchToFront() {
+  if (!marchPipeline || !atlasFront) return;
+  marchBindGroup = device.createBindGroup({
+    layout: marchPipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: drawParamBuf } },
+      { binding: 1, resource: { buffer: atlasFront } },
+    ],
+  });
+}
+
+function bindBakeToFront() {
+  if (!bakePipeline || !atlasFront) return null;
+  if (bakeBindGroup) return bakeBindGroup;
+  bakeBindGroup = device.createBindGroup({
+    layout: bakePipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: bakeParamBuf } },
+      { binding: 1, resource: { buffer: coeffBuf } },
+      { binding: 2, resource: { buffer: atlasFront } },
+    ],
+  });
+  return bakeBindGroup;
+}
+
+function invalidateAtlasBindGroups() {
+  marchBindGroup = null;
+  bakeBindGroup = null;
 }
 
 /**
- * Tile-parallel Babbage dens bake into the back buffer, then swap → front.
- * March always reads front, so a concurrent frame never samples a half-written atlas.
+ * Per-frame GPU path: tile Babbage dens into the atlas, then march — one submit,
+ * no await. Pipelines must already match `deg` ({@link ensurePipelinesForDegree}).
  */
-export async function bakeClipGridFibersGpu(worldMono, deg, camera, width, height, half) {
-  const ok = await initClipBakeGpu();
-  if (!ok || !device) return null;
-
+export function renderClipFrameGpu({
+  worldMono,
+  deg,
+  camera,
+  width,
+  height,
+  half,
+  fbW,
+  fbH,
+  scale,
+  steps,
+  absorb = [0.15, 0.25, 0.45],
+  emit = [0.55, 0.75, 1.0],
+}) {
+  if (!device || !bakePipeline || !marchPipeline || !ctx || !worldMono) return false;
   const sz = degSizes(deg);
-  const d = sz.deg;
-  await ensurePipelinesForDegree(d);
-  if (!bakePipeline) return null;
+  if (pipelineDeg !== sz.deg) return false;
 
+  const d = sz.deg;
   const max1d = sz.max1d;
   const nAlpha = sz.max1dN;
   const o = camera.position;
@@ -905,53 +878,28 @@ export async function bakeClipGridFibersGpu(worldMono, deg, camera, width, heigh
   const xGrid0 = -Math.floor((nTilesX * tile - width) / 2);
 
   const outBytes = width * height * nAlpha * 4;
+  const prevAtlas = atlasFront;
   ensureAtlasPair(outBytes);
+  if (!atlasFront) return false;
+  if (atlasFront !== prevAtlas) invalidateAtlasBindGroups();
 
-  const coeffs = new Float32Array(sz.maxCoeffs);
-  const n = d + 1;
-  for (let i = 0; i <= d; i++) {
-    for (let j = 0; j <= d; j++) {
-      for (let k = 0; k <= d; k++) {
-        const idx = i + j * n + k * n * n;
-        coeffs[idx] = worldMono[idx] || 0;
+  if (uploadedCoeffRef !== worldMono || uploadedCoeffDeg !== d) {
+    const coeffs = new Float32Array(sz.maxCoeffs);
+    const n = d + 1;
+    for (let i = 0; i <= d; i++) {
+      for (let j = 0; j <= d; j++) {
+        for (let k = 0; k <= d; k++) {
+          const idx = i + j * n + k * n * n;
+          coeffs[idx] = worldMono[idx] || 0;
+        }
       }
     }
+    device.queue.writeBuffer(coeffBuf, 0, coeffs);
+    uploadedCoeffRef = worldMono;
+    uploadedCoeffDeg = d;
   }
 
-  device.queue.writeBuffer(coeffBuf, 0, coeffs);
-  device.queue.writeBuffer(
-    bakeParamBuf,
-    0,
-    packBakeParams(width, height, d, max1d, tile, xGrid0, nTilesX, h, tMid, tHw, ro, M),
-  );
-
-  const bindGroup = device.createBindGroup({
-    layout: bakePipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: bakeParamBuf } },
-      { binding: 1, resource: { buffer: coeffBuf } },
-      { binding: 2, resource: { buffer: atlasBack } },
-    ],
-  });
-
-  const enc = device.createCommandEncoder();
-  const pass = enc.beginComputePass();
-  pass.setPipeline(bakePipeline);
-  pass.setBindGroup(0, bindGroup);
-  pass.dispatchWorkgroups(nTilesX, height, 1);
-  pass.end();
-  device.queue.submit([enc.finish()]);
-  await device.queue.onSubmittedWorkDone();
-
-  // Publish: swap so march sees the completed atlas atomically w.r.t. JS frames.
-  const tmp = atlasFront;
-  atlasFront = atlasBack;
-  atlasBack = tmp;
-  bindMarchToFront();
-
-  const exactTiles = tile <= max1d;
-  resident = {
-    gpuResident: true,
+  const state = {
     width,
     height,
     nAlpha,
@@ -965,13 +913,61 @@ export async function bakeClipGridFibersGpu(worldMono, deg, camera, width, heigh
     sx,
     sy,
     tile,
-    method: exactTiles ? "gpu-exact-dens" : "gpu-babbage-newton-t-mid",
+    method: tile <= max1d ? "gpu-exact-dens" : "gpu-babbage-newton-t-mid",
+    gpuResident: true,
   };
-  return resident;
+
+  device.queue.writeBuffer(
+    bakeParamBuf,
+    0,
+    packBakeParams(width, height, d, max1d, tile, xGrid0, nTilesX, h, tMid, tHw, ro, M),
+  );
+  device.queue.writeBuffer(
+    drawParamBuf,
+    0,
+    packDrawParams(state, fbW, fbH, scale, steps, absorb, emit),
+  );
+
+  const bakeBind = bindBakeToFront();
+  if (!marchBindGroup) bindMarchToFront();
+  if (!bakeBind || !marchBindGroup) return false;
+
+  resizeClipGpuCanvas(fbW, fbH);
+  const enc = device.createCommandEncoder();
+
+  {
+    const pass = enc.beginComputePass();
+    pass.setPipeline(bakePipeline);
+    pass.setBindGroup(0, bakeBind);
+    pass.dispatchWorkgroups(nTilesX, height, 1);
+    pass.end();
+  }
+
+  {
+    const view = ctx.getCurrentTexture().createView();
+    const pass = enc.beginRenderPass({
+      colorAttachments: [
+        {
+          view,
+          clearValue: { r: 0, g: 0, b: 0, a: 0 },
+          loadOp: "clear",
+          storeOp: "store",
+        },
+      ],
+    });
+    pass.setPipeline(marchPipeline);
+    pass.setBindGroup(0, marchBindGroup);
+    pass.draw(3);
+    pass.end();
+  }
+
+  device.queue.submit([enc.finish()]);
+  resident = state;
+  return true;
 }
 
 /**
- * March resident (front) atlas to the WebGPU canvas.
+ * March-only (legacy). Prefer {@link renderClipFrameGpu} for the live path.
  */
 export function renderClipGridGpu({
   fbW,

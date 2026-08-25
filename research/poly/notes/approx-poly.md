@@ -1,5 +1,7 @@
 # NOTES: Approximating Polynomial Transmittance
 
+> **Viewer context:** The shipped poly-cloud **golden path** is dens atlas bake + Beer raymarch ([`clip-space-babbage.md`](./clip-space-babbage.md)), not the analytic forms below. Chebyshev-\(\hat\tau\) Path C in the explorer is documented separately in [`path-c.md`](./path-c.md) (legacy). This note is the older research writeup on approximating \(T\) with simpler summands.
+
 # Introduction
 
 For Volume Rendering, we need to efficiently determine the value of the integral:

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Poly cloud — Path C volume</title>
+    <title>Poly cloud — clip-grid Babbage</title>
     <style>
       :root {
         color-scheme: dark;
@@ -184,8 +184,8 @@
       <aside id="panel">
         <h1>Polynomial density cloud</h1>
         <p>
-          Fit → world monomials (once). Per ray: 3N+1 nested samples → Chebyshev
-          density on the segment. Raymarch vs Path C (Chebyshev τ̂, T=exp(−τ̂)).
+          Golden path: Fit → world monomials → GPU middle-out Babbage dens atlas
+          → Beer–Lambert raymarch. Path C is legacy (see research/poly/notes/path-c.md).
         </p>
 
         <label>
@@ -217,9 +217,9 @@
         <label>
           mode
           <select id="mode">
+            <option value="clipgrid">clip-grid (Babbage dens + Beer)</option>
             <option value="raymarch">raymarch (LOS γ)</option>
-            <option value="pathc">Path C (Cheb. τ̂)</option>
-            <option value="clipgrid">clip-grid (Babbage dens)</option>
+            <option value="pathc">Path C (legacy Cheb. τ̂)</option>
           </select>
         </label>
 
@@ -230,7 +230,7 @@
             <option value="1">1 · after ray→γ(u)</option>
             <option value="2">2 · + τ nodes → T</option>
             <option value="3">3 · + Cheb τ̂ at exit</option>
-            <option value="4">4 · + dense F2B (full Path C)</option>
+            <option value="4">4 · + dense F2B (full Path C, legacy)</option>
           </select>
         </label>
 
@@ -269,9 +269,9 @@
         </div>
 
         <p id="profileHint" style="font-size: 11px; color: var(--muted)">
-          LOS + clip shaders specialize to fit degree (cap 16). Clip-grid: tile-parallel
-          Babbage dens bake (WebGPU f32, or CPU f64 fallback), then dens march
-          (see research/poly/notes/clip-space-babbage.md).
+          Golden path: clip-grid — tile-parallel middle-out Babbage dens bake (WebGPU),
+          then Beer raymarch. Path C / LOS profile stages are legacy
+          (research/poly/notes/clip-space-babbage.md, path-c.md).
         </p>
       </aside>
       <main id="viewport">

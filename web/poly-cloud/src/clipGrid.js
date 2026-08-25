@@ -1,12 +1,14 @@
 import { evalMonomial3D } from "./fit.js";
 
 /**
- * Clip/NDC-grid fiber pipeline (see research/poly/notes/clip-space-babbage.md).
+ * Clip/NDC-grid fiber bake — golden path dens atlas for poly-cloud.
+ * See research/poly/notes/clip-space-babbage.md.
  *
  * Atlas stores dens at fixed ray-t Chebyshev-root nodes t_j (view-fixed window).
- * Each dens_j(x_ndc,y_ndc)=f(ro+t_j·rd) is a bivariate poly → coarse-step Babbage
- * (tile≈256px) + Newton fill in f64. On write, cells whose sample lands outside
- * the fit box are zeroed so f32/bilinear aren't poisoned by exterior Runge spikes.
+ * Each dens_j(x_ndc,y_ndc)=f(ro+t_j·rd) is filled with coarse-step middle-out
+ * Babbage + Newton (f64 on CPU; GPU port in clipBakeGpu.js). Outside-box samples
+ * are zeroed so f32/bilinear aren't poisoned by exterior Runge spikes.
+ * March is Beer–Lambert raymarch (not Path C); see research/poly/notes/path-c.md.
  */
 
 export const MAX_DEG = 16;
