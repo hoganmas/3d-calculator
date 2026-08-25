@@ -299,6 +299,27 @@ function setErr(msg) {
   els.err.textContent = msg || "";
 }
 
+/** Highlight the expression field when compileExpr fails. */
+function setExprCompileOk(ok) {
+  if (!els.expr) return;
+  els.expr.classList.toggle("invalid", !ok);
+}
+
+function syncExprCompileState() {
+  try {
+    compileExpr(els.expr.value);
+    setExprCompileOk(true);
+    setErr("");
+    return true;
+  } catch (e) {
+    setExprCompileOk(false);
+    const raw = (els.expr.value || "").trim();
+    if (raw) setErr(e instanceof Error ? e.message : String(e));
+    else setErr("");
+    return false;
+  }
+}
+
 function isClipMode() {
   return els.mode.value === "clipgrid";
 }
@@ -657,6 +678,7 @@ function uploadFit() {
     if (deg < 1 || deg > MAX_DEG) throw new Error(`poly deg must be 1…${MAX_DEG}`);
 
     const fn = compileExpr(els.expr.value);
+    setExprCompileOk(true);
     const fit = fitChebyshev3D(fn, half, deg);
 
     worldMono = fit.mono;
@@ -685,6 +707,8 @@ function uploadFit() {
     clipUniforms.uSteps.value = steps;
     els.modeLabel.textContent = modeLabel();
     resize();
+    clipDirty = true;
+    settleHiRes = true;
     void prepareClipGpuForDegree(fit.deg).then(() => {
       syncClipPresentation();
       if (clip && !useGpuClipPath()) {
@@ -693,24 +717,65 @@ function uploadFit() {
       }
     });
   } catch (e) {
+    try {
+      compileExpr(els.expr.value);
+      setExprCompileOk(true);
+    } catch {
+      setExprCompileOk(false);
+    }
     setErr(e instanceof Error ? e.message : String(e));
   }
 }
 
+/** Debounced Chebyshev refit when expr / deg / half become valid. */
+let fitTimer = 0;
+const FIT_DEBOUNCE_MS = 320;
+
+function scheduleUploadFit(delay = FIT_DEBOUNCE_MS) {
+  if (fitTimer) clearTimeout(fitTimer);
+  fitTimer = window.setTimeout(() => {
+    fitTimer = 0;
+    if (!syncExprCompileState()) return;
+    uploadFit();
+  }, delay);
+}
+
+/** Scale / steps: no refit — update render uniforms only. */
+function applyRenderHyperparams() {
+  const densScale = Number(els.scale.value) || 1;
+  const steps = Math.min(96, Math.max(8, Number(els.steps.value) || 32));
+  els.steps.value = String(steps);
+  uniforms.uScale.value = densScale;
+  uniforms.uSteps.value = steps;
+  clipUniforms.uScale.value = densScale;
+  clipUniforms.uSteps.value = steps;
+  clipDirty = true;
+}
+
 els.preset.addEventListener("change", () => {
   applyPreset(els.preset.value);
+  if (fitTimer) clearTimeout(fitTimer);
   uploadFit();
 });
-els.fit.addEventListener("click", uploadFit);
+els.fit.addEventListener("click", () => {
+  if (fitTimer) clearTimeout(fitTimer);
+  uploadFit();
+});
+els.expr.addEventListener("input", () => {
+  syncExprCompileState();
+  scheduleUploadFit();
+});
+els.deg.addEventListener("input", () => scheduleUploadFit(200));
+els.deg.addEventListener("change", () => scheduleUploadFit(0));
+els.half.addEventListener("input", () => scheduleUploadFit(200));
+els.half.addEventListener("change", () => scheduleUploadFit(0));
+els.scale.addEventListener("input", applyRenderHyperparams);
+els.scale.addEventListener("change", applyRenderHyperparams);
 els.mode.addEventListener("change", syncModeUniforms);
 els.tDeg?.addEventListener("change", syncModeUniforms);
 els.profileStage?.addEventListener("change", syncModeUniforms);
-els.steps.addEventListener("change", () => {
-  const s = Math.min(96, Math.max(8, Number(els.steps.value) || 32));
-  uniforms.uSteps.value = s;
-  clipUniforms.uSteps.value = s;
-  resize();
-});
+els.steps.addEventListener("input", applyRenderHyperparams);
+els.steps.addEventListener("change", applyRenderHyperparams);
 els.resolve?.addEventListener("input", resize);
 els.resolve?.addEventListener("change", resize);
 els.babbageTile?.addEventListener("change", () => {
@@ -720,11 +785,6 @@ els.babbageTile?.addEventListener("change", () => {
 els.densFill?.addEventListener("change", () => {
   clipDirty = true;
   settleHiRes = true;
-});
-els.scale.addEventListener("change", () => {
-  const v = Number(els.scale.value) || 1;
-  uniforms.uScale.value = v;
-  clipUniforms.uScale.value = v;
 });
 els.reset.addEventListener("click", () => {
   camera.position.set(3.2, 2.4, 4.2);
