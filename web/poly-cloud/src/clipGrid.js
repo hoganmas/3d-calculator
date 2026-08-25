@@ -8,7 +8,7 @@ import { evalMonomial3D } from "./fit.js";
  * Each dens_j(x_ndc,y_ndc)=f(ro+t_j·rd) is filled with coarse-step middle-out
  * Babbage + Newton (f64 on CPU; GPU port in clipBakeGpu.js). Outside-box samples
  * are zeroed so f32/bilinear aren't poisoned by exterior Runge spikes.
- * March is Beer–Lambert raymarch (not Path C); see research/poly/notes/path-c.md.
+ * March is Beer–Lambert raymarch.
  */
 
 export const MAX_DEG = 16;

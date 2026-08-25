@@ -1,6 +1,6 @@
-# Path C — Chebyshev optical-depth transmittance (legacy / optional)
+# Path C — Chebyshev optical-depth transmittance (archived)
 
-> **Status:** Still available in `web/poly-cloud` as mode **Path C**, but **not** the golden path. Prefer **clip-grid** (GPU middle-out Babbage dens bake + Beer–Lambert raymarch). Path C may be phased out; this note preserves the design for reference.
+> **Status:** Removed from `web/poly-cloud`. Prefer **clip-grid** (GPU dens atlas + Beer–Lambert raymarch). This note keeps the design for reference.
 
 Related golden-path dens bake: [`clip-space-babbage.md`](./clip-space-babbage.md).
 
@@ -10,14 +10,14 @@ Related golden-path dens bake: [`clip-space-babbage.md`](./clip-space-babbage.md
 
 **Path C** approximates transmittance along a primary ray by fitting a low-degree Chebyshev model to optical depth \(\tau\), then setting \(T=\exp(-\hat\tau)\).
 
-Pipeline (LOS volume shader in `web/poly-cloud/src/shaders.js`, `uMode == 1`):
+Pipeline (formerly in `web/poly-cloud/src/shaders.js`, `uMode == 1`):
 
 1. **Per pixel:** nested Horner contraction of the world monomial tensor → univariate \(\gamma(u)\) on the box segment (degree \(\le 3N\)). Cost \(\Theta(N^3)\) per ray.
 2. **Trapezoid-integrate** \(\sigma(u)=\max(0,s\cdot\gamma(u))\) on a fixed \(u\)-grid to accumulate \(\tau\) at Chebyshev nodes of the first kind.
 3. **Discrete Chebyshev** fit \(\hat\tau(u)=\sum_{k=0}^{T_d} c_k T_k(u)\).
 4. **Front-to-back:** sample \(\hat\tau\) via Clenshaw, \(T=\exp(-\hat\tau)\), emit with \(\sigma\) from Horner on \(\gamma\).
 
-Profile stages in the UI (0–4) peel this pipeline for timing: after \(\gamma\), after \(\tau\) nodes, after exit \(T\), then full F2B.
+Profile stages in the old UI (0–4) peeled this pipeline for timing: after \(\gamma\), after \(\tau\) nodes, after exit \(T\), then full F2B.
 
 ---
 
@@ -43,20 +43,6 @@ If revisiting analytic \(\tau\) on a clip/homogeneous fiber (e.g. integrate \(F/
 
 ---
 
-## Viewer hooks
+## Viewer hooks (removed)
 
-- Mode: `pathc` in `web/poly-cloud/index.html`
-- Shader: `web/poly-cloud/src/shaders.js` (`uMode`, `uTDeg`, `uProfileStage`)
-- Controls: **T Cheb deg**, **profile stage**
-
----
-
-## Phase-out notes
-
-Safe to remove or hide once clip-grid covers the intended demos:
-
-- UI option + profile stages
-- `uMode == 1` branch in `shaders.js`
-- This note (or keep as historical)
-
-Keep Fit → world monomials; that is shared with clip-grid.
+Formerly: mode `pathc`, `uMode` / `uTDeg` / `uProfileStage` in `shaders.js`, **T Cheb deg** and **profile stage** controls. All removed from the explorer; LOS Beer raymarch remains as the non–clip-grid volume mode.

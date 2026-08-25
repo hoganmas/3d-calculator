@@ -80,7 +80,8 @@ Steps are controlled by the UI **steps** slider. Early-out on small \(T\).
 |------|------|
 | **clip-grid** | Golden path (this note) |
 | raymarch (LOS \(\gamma\)) | Debug / reference: per-ray Horner + Beer |
-| Path C | Legacy Chebyshev-\(\hat\tau\); see [`path-c.md`](./path-c.md) |
+
+Archived Chebyshev-\(\hat\tau\) Path C design notes: [`path-c.md`](./path-c.md) (removed from the explorer).
 
 ---
 
@@ -94,4 +95,4 @@ and 2D/1D differences on fiber coeffs remain a **target architecture**.
 
 ## One-paragraph abstract (shipped)
 
-*For realtime polynomial density volumes, the poly-cloud explorer fits a world monomial field once, then each view materializes a screen-space atlas of density samples at fixed Chebyshev ray-\(t\) nodes using tile-parallel Chebyshev interpolation in \(x\) with Clenshaw evaluation (GPU), and composites with standard Beer–Lambert raymarching. Path C Chebyshev transmittance is an optional legacy LOS path, not part of this dens-atlas pipeline.*
+*For realtime polynomial density volumes, the poly-cloud explorer fits a world monomial field once, then each view materializes a screen-space atlas of density samples at fixed Chebyshev ray-\(t\) nodes using tile-parallel Chebyshev interpolation in \(x\) with Clenshaw evaluation (GPU), and composites with standard Beer–Lambert raymarching.*

@@ -22,14 +22,11 @@ const els = {
   deg: document.getElementById("deg"),
   scale: document.getElementById("scale"),
   steps: document.getElementById("steps"),
-  tDeg: document.getElementById("tDeg"),
   half: document.getElementById("half"),
   resolve: document.getElementById("resolve"),
   babbageTile: document.getElementById("babbageTile"),
   densFill: document.getElementById("densFill"),
   mode: document.getElementById("mode"),
-  profileStage: document.getElementById("profileStage"),
-  fit: document.getElementById("fit"),
   reset: document.getElementById("reset"),
   err: document.getElementById("err"),
   fitErr: document.getElementById("fitErr"),
@@ -59,7 +56,6 @@ function applyPreset(key) {
   els.scale.value = String(p.scale);
   els.half.value = String(p.half);
   els.steps.value = "32";
-  if (els.tDeg) els.tDeg.value = "6";
   if (els.resolve) els.resolve.value = "85";
 }
 
@@ -160,9 +156,6 @@ const uniforms = {
   uHalf: { value: 2 },
   uScale: { value: 2.5 },
   uSteps: { value: 32 },
-  uMode: { value: 0 },
-  uTDeg: { value: 6 },
-  uProfileStage: { value: 0 },
   uCameraPos: { value: new THREE.Vector3() },
   uAbsorbColor: { value: new THREE.Color(0.15, 0.25, 0.45) },
   uEmitColor: { value: new THREE.Color(0.55, 0.75, 1.0) },
@@ -325,11 +318,8 @@ function isClipMode() {
 }
 
 function modeLabel() {
-  const stage = Number(els.profileStage?.value || 0);
-  let base = "raymarch";
-  if (els.mode.value === "pathc") base = "Path C Cheb-T";
-  if (els.mode.value === "clipgrid") base = "clip-grid";
-  return stage > 0 && !isClipMode() ? `${base} · P${stage}` : base;
+  if (els.mode.value === "clipgrid") return "clip-grid";
+  return "raymarch";
 }
 
 let fps = 0;
@@ -649,9 +639,6 @@ async function prepareClipGpuForDegree(deg) {
 function syncModeUniforms() {
   const clip = isClipMode();
   volumeMesh.visible = !clip;
-  uniforms.uMode.value = els.mode.value === "pathc" ? 1 : 0;
-  uniforms.uTDeg.value = Math.min(8, Math.max(2, Number(els.tDeg?.value) || 6));
-  uniforms.uProfileStage.value = Math.min(4, Math.max(0, Number(els.profileStage?.value) || 0));
   clipUniforms.uScale.value = uniforms.uScale.value;
   clipUniforms.uSteps.value = uniforms.uSteps.value;
   els.modeLabel.textContent = modeLabel();
@@ -700,9 +687,6 @@ function uploadFit() {
     // Mode sync + resize; GPU path draws every frame, CPU rebakes when dirty.
     const clip = isClipMode();
     volumeMesh.visible = !clip;
-    uniforms.uMode.value = els.mode.value === "pathc" ? 1 : 0;
-    uniforms.uTDeg.value = Math.min(8, Math.max(2, Number(els.tDeg?.value) || 6));
-    uniforms.uProfileStage.value = Math.min(4, Math.max(0, Number(els.profileStage?.value) || 0));
     clipUniforms.uScale.value = densScale;
     clipUniforms.uSteps.value = steps;
     els.modeLabel.textContent = modeLabel();
@@ -757,10 +741,6 @@ els.preset.addEventListener("change", () => {
   if (fitTimer) clearTimeout(fitTimer);
   uploadFit();
 });
-els.fit.addEventListener("click", () => {
-  if (fitTimer) clearTimeout(fitTimer);
-  uploadFit();
-});
 els.expr.addEventListener("input", () => {
   syncExprCompileState();
   scheduleUploadFit();
@@ -772,8 +752,6 @@ els.half.addEventListener("change", () => scheduleUploadFit(0));
 els.scale.addEventListener("input", applyRenderHyperparams);
 els.scale.addEventListener("change", applyRenderHyperparams);
 els.mode.addEventListener("change", syncModeUniforms);
-els.tDeg?.addEventListener("change", syncModeUniforms);
-els.profileStage?.addEventListener("change", syncModeUniforms);
 els.steps.addEventListener("input", applyRenderHyperparams);
 els.steps.addEventListener("change", applyRenderHyperparams);
 els.resolve?.addEventListener("input", resize);

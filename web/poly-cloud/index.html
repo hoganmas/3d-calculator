@@ -222,7 +222,7 @@
         <h1>Polynomial density cloud</h1>
         <p>
           Golden path: Fit → world monomials → GPU Chebyshev+Clenshaw dens atlas
-          → Beer–Lambert raymarch. Path C is legacy (see research/poly/notes/path-c.md).
+          → Beer–Lambert raymarch.
         </p>
 
         <label>
@@ -241,10 +241,7 @@
           <label>steps<input id="steps" type="number" min="8" max="96" step="4" value="32" /></label>
         </div>
 
-        <div class="row">
-          <label>T Cheb deg<input id="tDeg" type="number" min="2" max="8" step="1" value="6" /></label>
-          <label>box half-size<input id="half" type="number" min="0.5" max="5" step="0.1" /></label>
-        </div>
+        <label>box half-size<input id="half" type="number" min="0.5" max="5" step="0.1" /></label>
 
         <label>
           resolve %
@@ -283,23 +280,10 @@
           <select id="mode">
             <option value="clipgrid">clip-grid (Cheb dens + Beer)</option>
             <option value="raymarch">raymarch (LOS γ)</option>
-            <option value="pathc">Path C (legacy Cheb. τ̂)</option>
-          </select>
-        </label>
-
-        <label>
-          profile stage
-          <select id="profileStage">
-            <option value="0">0 · full render</option>
-            <option value="1">1 · after ray→γ(u)</option>
-            <option value="2">2 · + τ nodes → T</option>
-            <option value="3">3 · + Cheb τ̂ at exit</option>
-            <option value="4">4 · + dense F2B (full Path C, legacy)</option>
           </select>
         </label>
 
         <div class="row">
-          <button id="fit" type="button">Fit &amp; upload</button>
           <button id="reset" class="secondary" type="button">Reset view</button>
         </div>
 
@@ -342,8 +326,8 @@
 
         <p id="profileHint" style="font-size: 11px; color: var(--muted)">
           Golden path: clip-grid — tile-parallel Chebyshev+Clenshaw dens bake (WebGPU),
-          then Beer raymarch. Path C / LOS profile stages are legacy
-          (research/poly/notes/clip-space-babbage.md, path-c.md).
+          then Beer raymarch (research/poly/notes/clip-space-babbage.md). LOS raymarch
+          is a per-ray Horner reference.
         </p>
       </aside>
       <main id="viewport">

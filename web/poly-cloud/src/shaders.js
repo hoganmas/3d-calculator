@@ -9,9 +9,9 @@ void main() {
 `;
 
 /**
- * World monomials. FIT_DEG / FIT_N / FIT_1D / FIT_1D_N are compile-time
- * defines (set on fit) so loops and arrays scale with degree — no fixed
- * max-N tax from unrolled deg-8 bodies or a fixed local coeff buffer.
+ * LOS reference raymarch: nested Horner → γ(u) → Beer–Lambert.
+ * FIT_DEG / FIT_N / FIT_1D / FIT_1D_N are compile-time defines (set on fit).
+ * Golden path is clip-grid (clipBakeGpu.js), not this shader.
  */
 export const volumeFragment = /* glsl */ `
 precision highp float;
@@ -36,9 +36,6 @@ uniform float uCoeffTexH;
 uniform float uHalf;
 uniform float uScale;
 uniform int uSteps;
-uniform int uMode;
-uniform int uTDeg;
-uniform int uProfileStage;
 uniform vec3 uCameraPos;
 uniform vec3 uAbsorbColor;
 uniform vec3 uEmitColor;
@@ -91,32 +88,6 @@ void mulLinear(inout float p[FIT_1D_N], float a, float b) {
     if (i + 1 < FIT_1D_N) n[i + 1] += v * b;
   }
   for (int i = 0; i < FIT_1D_N; i++) p[i] = n[i];
-}
-
-float chebT(int k, float u) {
-  if (k == 0) return 1.0;
-  if (k == 1) return u;
-  float t0 = 1.0;
-  float t1 = u;
-  for (int j = 2; j <= 8; j++) {
-    if (j > k) break;
-    float t2 = 2.0 * u * t1 - t0;
-    t0 = t1;
-    t1 = t2;
-  }
-  return t1;
-}
-
-float clenshaw9(float ck[9], int deg, float u) {
-  float b1 = 0.0;
-  float b2 = 0.0;
-  for (int k = 8; k >= 1; k--) {
-    if (k > deg) continue;
-    float b0 = 2.0 * u * b1 - b2 + ck[k];
-    b2 = b1;
-    b1 = b0;
-  }
-  return u * b1 - b2 + ck[0];
 }
 
 float sigmaU(float gamma[FIT_1D_N], float u) {
@@ -181,112 +152,6 @@ void main() {
       mulLinear(gamma, P0.x, Du.x);
     }
     for (int m = 0; m < FIT_1D_N; m++) gamma[m] += si[m];
-  }
-
-  if (uProfileStage == 1) {
-    float s0 = abs(uScale * horner(gamma, 0.0));
-    gl_FragColor = vec4(uEmitColor * s0, clamp(s0, 0.05, 1.0));
-    return;
-  }
-
-  if (uMode == 1) {
-    int TD = uTDeg;
-    if (TD < 1) TD = 1;
-    if (TD > 8) TD = 8;
-    int nNodes = TD + 1;
-
-    float uNode[9];
-    float tauNode[9];
-    float got[9];
-    for (int j = 0; j <= 8; j++) {
-      if (j >= nNodes) break;
-      float theta = 3.141592653589793 * (2.0 * float(j) + 1.0) / (2.0 * float(nNodes));
-      uNode[j] = cos(theta);
-      tauNode[j] = 0.0;
-      got[j] = 0.0;
-    }
-
-    int nGrid = 32;
-    float duG = 2.0 / float(nGrid);
-    float prevS = sigmaU(gamma, -1.0);
-    float tau = 0.0;
-    for (int s = 1; s <= 64; s++) {
-      if (s > nGrid) break;
-      float u = -1.0 + duG * float(s);
-      float sg = sigmaU(gamma, u);
-      tau += 0.5 * (prevS + sg) * duG * tHw;
-      prevS = sg;
-      for (int j = 0; j <= 8; j++) {
-        if (j >= nNodes) break;
-        if (got[j] < 0.5 && uNode[j] <= u) {
-          tauNode[j] = tau;
-          got[j] = 1.0;
-        }
-      }
-    }
-    for (int j = 0; j <= 8; j++) {
-      if (j >= nNodes) break;
-      if (got[j] < 0.5) tauNode[j] = tau;
-    }
-
-    float tauCk[9];
-    for (int k = 0; k <= 8; k++) {
-      if (k > TD) {
-        tauCk[k] = 0.0;
-        continue;
-      }
-      float s = 0.0;
-      for (int j = 0; j <= 8; j++) {
-        if (j >= nNodes) break;
-        s += tauNode[j] * chebT(k, uNode[j]);
-      }
-      tauCk[k] = (k == 0 ? 1.0 : 2.0) * s / float(nNodes);
-    }
-
-    if (uProfileStage == 2) {
-      float s = 0.0;
-      for (int j = 0; j <= 8; j++) {
-        if (j >= nNodes) break;
-        s += exp(-min(tauNode[j], 80.0));
-      }
-      s /= float(nNodes);
-      gl_FragColor = vec4(uEmitColor * s, clamp(1.0 - s, 0.05, 1.0));
-      return;
-    }
-
-    if (uProfileStage == 3) {
-      float te = exp(-min(max(0.0, clenshaw9(tauCk, TD, 1.0)), 80.0));
-      gl_FragColor = vec4(uEmitColor * te, clamp(1.0 - te, 0.05, 1.0));
-      return;
-    }
-
-    int steps = uSteps;
-    if (steps < 16) steps = 16;
-    if (steps > 96) steps = 96;
-    float dt = (tExit - tEnter) / float(steps);
-    float du = dt / tHw;
-
-    vec3 rgb = vec3(0.0);
-    float u = -1.0 + 0.5 * du;
-    for (int s = 0; s < 96; s++) {
-      if (s >= steps) break;
-      float tauHat = max(0.0, clenshaw9(tauCk, TD, u));
-      if (tauHat > 80.0) tauHat = 80.0;
-      float T = exp(-tauHat);
-      if (T < 0.002) break;
-
-      float sigma = sigmaU(gamma, u);
-      float absorb = exp(-sigma * dt);
-      float opacity = 1.0 - absorb;
-      rgb += T * opacity * (uEmitColor * sigma + uAbsorbColor * 0.15);
-      u += du;
-    }
-
-    float tauExit = max(0.0, clenshaw9(tauCk, TD, 1.0));
-    float opacity = clamp(1.0 - exp(-min(tauExit, 80.0)), 0.0, 1.0);
-    if (opacity < 0.001 && dot(rgb, rgb) < 1e-10) discard;
-    gl_FragColor = vec4(rgb, opacity);
-    return;
   }
 
   int steps = uSteps;

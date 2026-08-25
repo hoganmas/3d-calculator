@@ -4,7 +4,6 @@
  * See research/poly/notes/clip-space-babbage.md.
  *
  * CPU/WebGL fallback: main.js via bakeClipGridFibers + DataTexture.
- * Path C is a separate legacy LOS mode — research/poly/notes/path-c.md.
  */
 
 import {
