@@ -81,7 +81,7 @@ def dump_curves(scene: PolyScene, path: Path, n: int = 500) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--out", type=Path, default=Path("poly_stress_results.json"))
+    ap.add_argument("--out", type=Path, default=Path(__file__).resolve().parent / "results" / "poly_stress_results.json")
     ap.add_argument("--curves-dir", type=Path, default=None)
     args = ap.parse_args()
 

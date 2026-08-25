@@ -312,7 +312,7 @@ def main() -> None:
             "total_optical_weight": float(np.sum(g.w)),
         }
 
-    out_path = Path(__file__).with_name("stress_results.json")
+    out_path = Path(__file__).resolve().parent / "results" / "stress_results.json"
     out_path.write_text(json.dumps(results, indent=2))
     print(f"\nWrote {out_path}")
 

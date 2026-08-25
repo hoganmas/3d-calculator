@@ -222,3 +222,7 @@ __marimo__/
 # DS Store
 .DS_Store
 *.DS_Store
+
+# Node / Vite viewer
+node_modules/
+web/*/dist/

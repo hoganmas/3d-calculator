@@ -486,7 +486,7 @@ def main() -> None:
     ap.add_argument("--suite", choices=["default", "random", "all"], default="default")
     ap.add_argument("--n-random", type=int, default=20)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--out", type=Path, default=Path("poly_validation_results.json"))
+    ap.add_argument("--out", type=Path, default=Path(__file__).resolve().parent / "results" / "poly_validation_results.json")
     ap.add_argument("--grid", type=int, default=2001)
     args = ap.parse_args()
 

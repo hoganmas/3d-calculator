@@ -60,17 +60,58 @@ def emission(z: np.ndarray, g: Gaussians) -> np.ndarray:
     return out
 
 
-def optical_depth_exact(z: np.ndarray, zf: float, g: Gaussians) -> np.ndarray:
-    """τ(z) = ∫_z^{zf} f(z') dz' = sum_i w_i (Φ_i(zf) - Φ_i(z))."""
-    z = np.asarray(z, dtype=float)
+def optical_depth_exact(
+    z: np.ndarray,
+    zf: float,
+    g: Gaussians,
+    *,
+    early_out_eps: float | None = None,
+    front_first: bool = True,
+) -> np.ndarray:
+    """τ(z) = ∫_z^{zf} f(z') dz' = sum_i w_i (Φ_i(zf) - Φ_i(z)).
+
+    If early_out_eps is set, stop adding Gaussians once τ >= -log(eps) at a
+    sample depth (remaining terms only increase τ / decrease T). Process
+    larger-μ (front) Gaussians first so depths behind opaque fronts saturate
+    sooner.
+    """
+    z = np.atleast_1d(np.asarray(z, dtype=float))
     tau = np.zeros_like(z, dtype=float)
-    for mu, sigma, w in zip(g.mu, g.sigma, g.w):
-        tau += w * (CDF((zf - mu) / sigma) - CDF((z - mu) / sigma))
+    order = np.argsort(-g.mu) if front_first else np.arange(len(g.mu))
+    tau_max = None if early_out_eps is None else float(-np.log(early_out_eps))
+
+    for i in order:
+        if tau_max is not None and not np.any(tau < tau_max):
+            break
+        mu, sigma, w = float(g.mu[i]), float(g.sigma[i]), float(g.w[i])
+        if tau_max is None:
+            tau += w * (CDF((zf - mu) / sigma) - CDF((z - mu) / sigma))
+        else:
+            active = tau < tau_max
+            contrib = w * (
+                CDF((zf - mu) / sigma) - CDF((z[active] - mu) / sigma)
+            )
+            tau[active] += contrib
+
+    if tau_max is not None:
+        np.minimum(tau, tau_max, out=tau)
     return tau
 
 
-def T_exact(z: np.ndarray, zf: float, g: Gaussians) -> np.ndarray:
-    return np.exp(-optical_depth_exact(z, zf, g))
+def T_exact(
+    z: np.ndarray,
+    zf: float,
+    g: Gaussians,
+    *,
+    early_out_eps: float | None = None,
+    front_first: bool = True,
+) -> np.ndarray:
+    """T(z) = exp(-τ(z)). Optional early_out_eps ≈ floor on T."""
+    z_arr = np.asarray(z, dtype=float)
+    tau = optical_depth_exact(
+        z_arr, zf, g, early_out_eps=early_out_eps, front_first=front_first
+    )
+    return np.exp(-tau).reshape(z_arr.shape)
 
 
 def appendix_a_params(
@@ -412,7 +453,7 @@ def main() -> None:
         },
     }
 
-    out_path = Path(__file__).with_name("validation_results.json")
+    out_path = Path(__file__).resolve().parent / "results" / "validation_results.json"
     out_path.write_text(json.dumps(out, indent=2))
     print(f"Wrote {out_path}")
 

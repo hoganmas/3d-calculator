@@ -1,0 +1,531 @@
+{
+  "interval": {
+    "zi": -4.0,
+    "zf": 8.0
+  },
+  "scenes": [
+    {
+      "name": "two_separated",
+      "N": 2,
+      "gt": 0.864664716763383,
+      "clusters": {
+        "n": 2,
+        "sizes": [
+          1,
+          1
+        ],
+        "singleton": 2,
+        "pair": 0,
+        "large": 0
+      },
+      "rel_err": {
+        "global_hermite": 6.333364561623129e-05,
+        "global_analytic": 0.02333932320928721,
+        "global_alpha": 5.00757080992699e-15,
+        "cluster_hermite": 0.0001486910208720554,
+        "cluster_analytic_n2": 0.023376926589218076,
+        "cluster_analytic_n3": 0.023376926589218076,
+        "cluster_alpha": 5.00757080992699e-15
+      },
+      "values": {
+        "global_hermite": 0.8647194791321313,
+        "cluster_hermite": 0.8645361488839354,
+        "cluster_analytic_n2": 0.8444515131553183,
+        "cluster_analytic_n3": 0.8444515131553183
+      },
+      "analytic_pair_detail": [
+        {
+          "size": 1,
+          "integrator": "analytic",
+          "I_cl": 0.617343522929284,
+          "T_front": 1.0,
+          "contrib": 0.617343522929284,
+          "T_exit": 0.36787944117144233
+        },
+        {
+          "size": 1,
+          "integrator": "analytic",
+          "I_cl": 0.6173435229292837,
+          "T_front": 0.36787944117144233,
+          "contrib": 0.2271079902260344,
+          "T_exit": 0.36787944117144233
+        }
+      ]
+    },
+    {
+      "name": "two_heavy_overlap",
+      "N": 2,
+      "gt": 0.9092820467105875,
+      "clusters": {
+        "n": 1,
+        "sizes": [
+          2
+        ],
+        "singleton": 0,
+        "pair": 1,
+        "large": 0
+      },
+      "rel_err": {
+        "global_hermite": 7.321320115320208e-06,
+        "global_analytic": 0.06594213757677388,
+        "global_alpha": 1.220988612544909e-16,
+        "cluster_hermite": 0.00012734426962146957,
+        "cluster_analytic_n2": 0.0659365158719999,
+        "cluster_analytic_n3": 0.0659365158719999,
+        "cluster_alpha": 1.220988612544909e-16
+      },
+      "values": {
+        "global_hermite": 0.9092753895656485,
+        "cluster_hermite": 0.9091662548524693,
+        "cluster_analytic_n2": 0.9692369368156448,
+        "cluster_analytic_n3": 0.9692369368156448
+      },
+      "analytic_pair_detail": [
+        {
+          "size": 2,
+          "integrator": "analytic",
+          "I_cl": 0.9692369368156448,
+          "T_front": 1.0,
+          "contrib": 0.9692369368156448,
+          "T_exit": 0.09071795328941251
+        }
+      ]
+    },
+    {
+      "name": "overlap_diff_albedo",
+      "N": 2,
+      "gt": 1.1083406045899415,
+      "clusters": {
+        "n": 1,
+        "sizes": [
+          2
+        ],
+        "singleton": 0,
+        "pair": 1,
+        "large": 0
+      },
+      "rel_err": {
+        "global_hermite": 0.00015433347915359735,
+        "global_analytic": 0.018789511604259835,
+        "global_alpha": 0.18262377451110884,
+        "cluster_hermite": 1.9162669279211774e-05,
+        "cluster_analytic_n2": 0.018764325317152608,
+        "cluster_analytic_n3": 0.018764325317152608,
+        "cluster_alpha": 0.18262377451110884
+      },
+      "values": {
+        "global_hermite": 1.1085116586515351,
+        "cluster_hermite": 1.108319365825487,
+        "cluster_analytic_n2": 1.1291378682566768,
+        "cluster_analytic_n3": 1.1291378682566768
+      },
+      "analytic_pair_detail": [
+        {
+          "size": 2,
+          "integrator": "analytic",
+          "I_cl": 1.1291378682566768,
+          "T_front": 1.0,
+          "contrib": 1.1291378682566768,
+          "T_exit": 0.1353352832366127
+        }
+      ]
+    },
+    {
+      "name": "sep_diff_albedo",
+      "N": 2,
+      "gt": 1.3107499492435504,
+      "clusters": {
+        "n": 2,
+        "sizes": [
+          1,
+          1
+        ],
+        "singleton": 2,
+        "pair": 0,
+        "large": 0
+      },
+      "rel_err": {
+        "global_hermite": 6.333364587960224e-05,
+        "global_analytic": 0.023339323209123353,
+        "global_alpha": 4.05041900388509e-13,
+        "cluster_hermite": 0.00014869102047221006,
+        "cluster_analytic_n2": 0.023376926588827295,
+        "cluster_analytic_n3": 0.023376926588827295,
+        "cluster_alpha": 4.05041900388509e-13
+      },
+      "values": {
+        "global_hermite": 1.3108329638166725,
+        "cluster_hermite": 1.3105550524960135,
+        "cluster_analytic_n2": 1.2801086439037748,
+        "cluster_analytic_n3": 1.2801086439037748
+      },
+      "analytic_pair_detail": [
+        {
+          "size": 1,
+          "integrator": "analytic",
+          "I_cl": 1.234687045858568,
+          "T_front": 1.0,
+          "contrib": 1.234687045858568,
+          "T_exit": 0.36787944117144233
+        },
+        {
+          "size": 1,
+          "integrator": "analytic",
+          "I_cl": 0.12346870458585678,
+          "T_front": 0.36787944117144233,
+          "contrib": 0.045421598045206894,
+          "T_exit": 0.36787944117144233
+        }
+      ]
+    },
+    {
+      "name": "three_clustered",
+      "N": 3,
+      "gt": 0.9502129316321363,
+      "clusters": {
+        "n": 1,
+        "sizes": [
+          3
+        ],
+        "singleton": 0,
+        "pair": 0,
+        "large": 1
+      },
+      "rel_err": {
+        "global_hermite": 3.9640423976833635e-05,
+        "global_analytic": 0.01980171703373208,
+        "global_alpha": 2.336787866522038e-16,
+        "cluster_hermite": 5.294379346110008e-05,
+        "cluster_analytic_n2": 5.294379346110008e-05,
+        "cluster_analytic_n3": 0.01979901199252786,
+        "cluster_alpha": 2.336787866522038e-16
+      },
+      "values": {
+        "global_hermite": 0.9502505984756144,
+        "cluster_hermite": 0.9501626237549399,
+        "cluster_analytic_n2": 0.9501626237549399,
+        "cluster_analytic_n3": 0.969026208860976
+      },
+      "analytic_pair_detail": [
+        {
+          "size": 3,
+          "integrator": "hermite",
+          "I_cl": 0.9501626237549399,
+          "T_front": 1.0,
+          "contrib": 0.9501626237549399,
+          "T_exit": 0.049787068367863944
+        }
+      ]
+    },
+    {
+      "name": "three_overlap_diff_alb",
+      "N": 3,
+      "gt": 1.1743100133795195,
+      "clusters": {
+        "n": 1,
+        "sizes": [
+          3
+        ],
+        "singleton": 0,
+        "pair": 0,
+        "large": 1
+      },
+      "rel_err": {
+        "global_hermite": 6.975390305584055e-06,
+        "global_analytic": 0.028729352969072187,
+        "global_alpha": 0.05495752455285071,
+        "cluster_hermite": 7.660455147068224e-05,
+        "cluster_analytic_n2": 7.660455147068224e-05,
+        "cluster_analytic_n3": 0.028723790663717094,
+        "cluster_alpha": 0.05495752455285071
+      },
+      "values": {
+        "global_hermite": 1.1743018221088364,
+        "cluster_hermite": 1.174220055887657,
+        "cluster_analytic_n2": 1.174220055887657,
+        "cluster_analytic_n3": 1.2080406483781396
+      },
+      "analytic_pair_detail": [
+        {
+          "size": 3,
+          "integrator": "hermite",
+          "I_cl": 1.174220055887657,
+          "T_front": 1.0,
+          "contrib": 1.174220055887657,
+          "T_exit": 0.09071795328941251
+        }
+      ]
+    },
+    {
+      "name": "two_pairs",
+      "N": 4,
+      "gt": 1.5531204857985899,
+      "clusters": {
+        "n": 2,
+        "sizes": [
+          2,
+          2
+        ],
+        "singleton": 0,
+        "pair": 2,
+        "large": 0
+      },
+      "rel_err": {
+        "global_hermite": 8.231430353392552e-05,
+        "global_analytic": 0.005277632475451191,
+        "global_alpha": 0.15179253622746455,
+        "cluster_hermite": 0.00011046368887949322,
+        "cluster_analytic_n2": 0.0052707781484957784,
+        "cluster_analytic_n3": 0.0052707781484957784,
+        "cluster_alpha": 0.15179253622746455
+      },
+      "values": {
+        "global_hermite": 1.552992641767497,
+        "cluster_hermite": 1.5529489223804542,
+        "cluster_analytic_n2": 1.5613066393171182,
+        "cluster_analytic_n3": 1.5613066393171182
+      },
+      "analytic_pair_detail": [
+        {
+          "size": 2,
+          "integrator": "analytic",
+          "I_cl": 1.3629062177100806,
+          "T_front": 1.0,
+          "contrib": 1.3629062177100806,
+          "T_exit": 0.22313016014842982
+        },
+        {
+          "size": 2,
+          "integrator": "analytic",
+          "I_cl": 0.8891690010667244,
+          "T_front": 0.22313016014842982,
+          "contrib": 0.19840042160703758,
+          "T_exit": 0.20189651799465538
+        }
+      ]
+    },
+    {
+      "name": "five_crowd_diff_alb",
+      "N": 5,
+      "gt": 1.177135669071166,
+      "clusters": {
+        "n": 1,
+        "sizes": [
+          5
+        ],
+        "singleton": 0,
+        "pair": 0,
+        "large": 1
+      },
+      "rel_err": {
+        "global_hermite": 1.560656724276821e-05,
+        "global_analytic": 0.06616909814177827,
+        "global_alpha": 0.033252255672023896,
+        "cluster_hermite": 5.405772455133572e-05,
+        "cluster_analytic_n2": 5.405772455133572e-05,
+        "cluster_analytic_n3": 5.405772455133572e-05,
+        "cluster_alpha": 0.033252255672023896
+      },
+      "values": {
+        "global_hermite": 1.1771172980241928,
+        "cluster_hermite": 1.1770720357954079,
+        "cluster_analytic_n2": 1.1770720357954079,
+        "cluster_analytic_n3": 1.1770720357954079
+      },
+      "analytic_pair_detail": [
+        {
+          "size": 5,
+          "integrator": "hermite",
+          "I_cl": 1.1770720357954079,
+          "T_front": 1.0,
+          "contrib": 1.1770720357954079,
+          "T_exit": 0.01831563888873418
+        }
+      ]
+    },
+    {
+      "name": "mostly_sep_one_pair",
+      "N": 8,
+      "gt": 1.5705161204634779,
+      "clusters": {
+        "n": 2,
+        "sizes": [
+          4,
+          4
+        ],
+        "singleton": 0,
+        "pair": 0,
+        "large": 2
+      },
+      "rel_err": {
+        "global_hermite": 0.05261652600562102,
+        "global_analytic": 0.00561304819770739,
+        "global_alpha": 0.056580935584427235,
+        "cluster_hermite": 0.06637754846910887,
+        "cluster_analytic_n2": 0.06637754846910887,
+        "cluster_analytic_n3": 0.06637754846910887,
+        "cluster_alpha": 0.05658093558442737
+      },
+      "values": {
+        "global_hermite": 1.6531512227580916,
+        "cluster_hermite": 1.4662691105558965,
+        "cluster_analytic_n2": 1.4662691105558965,
+        "cluster_analytic_n3": 1.4662691105558965
+      },
+      "analytic_pair_detail": [
+        {
+          "size": 4,
+          "integrator": "hermite",
+          "I_cl": 1.2379230441016185,
+          "T_front": 1.0,
+          "contrib": 1.2379230441016185,
+          "T_exit": 0.1353352832366127
+        },
+        {
+          "size": 4,
+          "integrator": "hermite",
+          "I_cl": 1.6872618950008058,
+          "T_front": 0.1353352832366127,
+          "contrib": 0.22834606645427794,
+          "T_exit": 0.1353352832366127
+        }
+      ]
+    }
+  ],
+  "k_sigma_sweep": [
+    {
+      "k_sigma": 1.0,
+      "clusters": {
+        "n": 1,
+        "sizes": [
+          5
+        ],
+        "singleton": 0,
+        "pair": 0,
+        "large": 1
+      },
+      "rel_err": {
+        "global_hermite": 1.560656724276821e-05,
+        "global_analytic": 0.06616909814177827,
+        "global_alpha": 0.033252255672023896,
+        "cluster_hermite": 5.405772455133572e-05,
+        "cluster_analytic_n2": 5.405772455133572e-05,
+        "cluster_analytic_n3": 5.405772455133572e-05,
+        "cluster_alpha": 0.033252255672023896
+      }
+    },
+    {
+      "k_sigma": 1.5,
+      "clusters": {
+        "n": 1,
+        "sizes": [
+          5
+        ],
+        "singleton": 0,
+        "pair": 0,
+        "large": 1
+      },
+      "rel_err": {
+        "global_hermite": 1.560656724276821e-05,
+        "global_analytic": 0.06616909814177827,
+        "global_alpha": 0.033252255672023896,
+        "cluster_hermite": 5.405772455133572e-05,
+        "cluster_analytic_n2": 5.405772455133572e-05,
+        "cluster_analytic_n3": 5.405772455133572e-05,
+        "cluster_alpha": 0.033252255672023896
+      }
+    },
+    {
+      "k_sigma": 2.0,
+      "clusters": {
+        "n": 1,
+        "sizes": [
+          5
+        ],
+        "singleton": 0,
+        "pair": 0,
+        "large": 1
+      },
+      "rel_err": {
+        "global_hermite": 1.560656724276821e-05,
+        "global_analytic": 0.06616909814177827,
+        "global_alpha": 0.033252255672023896,
+        "cluster_hermite": 5.405772455133572e-05,
+        "cluster_analytic_n2": 5.405772455133572e-05,
+        "cluster_analytic_n3": 5.405772455133572e-05,
+        "cluster_alpha": 0.033252255672023896
+      }
+    },
+    {
+      "k_sigma": 2.5,
+      "clusters": {
+        "n": 1,
+        "sizes": [
+          5
+        ],
+        "singleton": 0,
+        "pair": 0,
+        "large": 1
+      },
+      "rel_err": {
+        "global_hermite": 1.560656724276821e-05,
+        "global_analytic": 0.06616909814177827,
+        "global_alpha": 0.033252255672023896,
+        "cluster_hermite": 5.405772455133572e-05,
+        "cluster_analytic_n2": 5.405772455133572e-05,
+        "cluster_analytic_n3": 5.405772455133572e-05,
+        "cluster_alpha": 0.033252255672023896
+      }
+    },
+    {
+      "k_sigma": 3.0,
+      "clusters": {
+        "n": 1,
+        "sizes": [
+          5
+        ],
+        "singleton": 0,
+        "pair": 0,
+        "large": 1
+      },
+      "rel_err": {
+        "global_hermite": 1.560656724276821e-05,
+        "global_analytic": 0.06616909814177827,
+        "global_alpha": 0.033252255672023896,
+        "cluster_hermite": 5.405772455133572e-05,
+        "cluster_analytic_n2": 5.405772455133572e-05,
+        "cluster_analytic_n3": 5.405772455133572e-05,
+        "cluster_alpha": 0.033252255672023896
+      }
+    },
+    {
+      "k_sigma": 4.0,
+      "clusters": {
+        "n": 1,
+        "sizes": [
+          5
+        ],
+        "singleton": 0,
+        "pair": 0,
+        "large": 1
+      },
+      "rel_err": {
+        "global_hermite": 1.560656724276821e-05,
+        "global_analytic": 0.06616909814177827,
+        "global_alpha": 0.033252255672023896,
+        "cluster_hermite": 5.405772455133572e-05,
+        "cluster_analytic_n2": 5.405772455133572e-05,
+        "cluster_analytic_n3": 5.405772455133572e-05,
+        "cluster_alpha": 0.033252255672023896
+      }
+    }
+  ],
+  "sketch": {
+    "idea": "Overlap clusters + T_front compositing; Hermite oracle inside clusters; Appendix-A analytic as drop-in for N<=2 (or 3) cells.",
+    "next": [
+      "Replace pair analytic with exact-T Hermite residual fit / better \u03a6i\u03a6j",
+      "GPU: tile-local clustering on sorted hit lists",
+      "Train with cluster-Hermite teacher, analytic student"
+    ]
+  }
+}
