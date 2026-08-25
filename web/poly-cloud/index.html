@@ -216,6 +216,55 @@
         font-size: 12px;
         min-height: 1.2em;
       }
+      .march-slider-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .march-scale-badge {
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+        color: var(--text);
+        text-transform: none;
+        letter-spacing: 0;
+      }
+      .march-slider-wrap {
+        position: relative;
+        margin-top: 2px;
+        padding-top: 10px;
+      }
+      .march-slider-ticks {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 0;
+        height: 8px;
+        pointer-events: none;
+      }
+      .march-slider-ticks span {
+        position: absolute;
+        left: var(--tick);
+        transform: translateX(-50%);
+        width: 1px;
+        height: 8px;
+        background: var(--stroke);
+      }
+      .march-slider-labels {
+        position: relative;
+        height: 14px;
+        margin-top: 4px;
+        font-size: 10px;
+        color: var(--muted);
+        text-transform: none;
+        letter-spacing: 0;
+        font-variant-numeric: tabular-nums;
+      }
+      .march-slider-labels span {
+        position: absolute;
+        transform: translateX(-50%);
+        left: var(--tick);
+      }
       @media (max-width: 800px) {
         #app {
           grid-template-columns: 1fr;
@@ -261,10 +310,20 @@
 
         <label>box half-size<input id="half" type="number" min="0.5" max="5" step="0.1" /></label>
 
-        <label>
-          resolve %
-          <input id="resolve" type="range" min="40" max="100" step="5" value="85" />
+        <label class="march-slider-label">
+          <span class="march-slider-head">
+            <span>march downscale</span>
+            <span id="marchScaleLabel" class="march-scale-badge">2×</span>
+          </span>
+          <div class="march-slider-wrap">
+            <div class="march-slider-ticks" id="marchSliderTicks" aria-hidden="true"></div>
+            <input id="marchDownscale" type="range" min="1" max="16" step="1" value="2" />
+            <div class="march-slider-labels" id="marchSliderLabels" aria-hidden="true"></div>
+          </div>
         </label>
+        <p style="font-size: 11px; color: var(--muted); margin-top: -6px">
+          1× native (left) → 16× fewer march rays (right). CSS upscales; dens bake unchanged.
+        </p>
 
         <label>
           Dens fill

@@ -11,7 +11,7 @@ void main() {
 /**
  * Atlas: RedFormat, width=gridW, height=gridH*nAlpha (flipY=false).
  * Block j stores dens at Chebyshev-root node u_j on the view-fixed fiber
- * t = tMid + u·tHw. Bilinear in screen; barycentric in u.
+ * t = tMid + u·tHw. Bilinear in (x,y); u-DCT + Clenshaw along the fiber.
  */
 export const clipGridFragment = /* glsl */ `
 precision highp float;
@@ -63,29 +63,23 @@ float densTexel(int px, int py, int j) {
   return texture2D(uAlphaTex, vec2(tu, tv)).r;
 }
 
-// Piecewise-linear in u between adjacent Chebyshev roots.
-// Global barycentric through zeroed/exterior nodes overshoots → white fireflies.
 #ifndef CLIP_1D_N
 #define CLIP_1D_N 49
 #endif
 
-float densAtU(float u, float dens[CLIP_1D_N], int M) {
-  if (M <= 1) return dens[0];
-  float invM = 1.0 / float(M);
-  float uFirst = cos(3.141592653589793 * 0.5 * invM);
-  float uLast = cos(3.141592653589793 * (float(M) - 0.5) * invM);
-  if (u >= uFirst) return dens[0];
-  if (u <= uLast) return dens[M - 1];
-  for (int j = 0; j < CLIP_1D_N - 1; j++) {
-    if (j + 1 >= M) break;
-    float u0 = cos(3.141592653589793 * (float(j) + 0.5) * invM);
-    float u1 = cos(3.141592653589793 * (float(j) + 1.5) * invM);
-    if (u <= u0 && u >= u1) {
-      float t = (u0 - u) / max(u0 - u1, 1e-12);
-      return mix(dens[j], dens[j + 1], clamp(t, 0.0, 1.0));
-    }
+float chebTAtRoot(int k, int j, int M) {
+  return cos(3.141592653589793 * float(k) * (float(j) + 0.5) / float(M));
+}
+
+float clenshaw1D(float coeff[CLIP_1D_N], int D, float u) {
+  float b1 = 0.0;
+  float b2 = 0.0;
+  for (int k = D; k >= 1; k--) {
+    float b0 = coeff[k] + 2.0 * u * b1 - b2;
+    b2 = b1;
+    b1 = b0;
   }
-  return dens[M - 1];
+  return coeff[0] + u * b1 - b2;
 }
 
 void main() {
@@ -128,6 +122,35 @@ void main() {
     dens[k] = mix(mix(g00, g10, tx), mix(g01, g11, tx), ty);
   }
 
+  float uCoeff[CLIP_1D_N];
+  int D = int(uMax1d);
+  float dMin = dens[0];
+  float dMax = dens[0];
+  if (M > 1) {
+    float invM = 1.0 / float(M);
+    for (int k = 0; k < CLIP_1D_N; k++) {
+      if (k > D) {
+        uCoeff[k] = 0.0;
+        continue;
+      }
+      float s = 0.0;
+      for (int j = 0; j < CLIP_1D_N; j++) {
+        if (j >= M) break;
+        s += dens[j] * chebTAtRoot(k, j, M);
+      }
+      uCoeff[k] = (k == 0 ? invM : 2.0 * invM) * s;
+    }
+    dMin = dens[0];
+    dMax = dens[0];
+    for (int k = 1; k < CLIP_1D_N; k++) {
+      if (k >= M) break;
+      dMin = min(dMin, dens[k]);
+      dMax = max(dMax, dens[k]);
+    }
+  } else {
+    uCoeff[0] = dens[0];
+  }
+
   int steps = uSteps;
   if (steps < 8) steps = 8;
   if (steps > 96) steps = 96;
@@ -143,10 +166,19 @@ void main() {
     if (T < 0.002) break;
 
     float u = (s - uTMid) / uTHw;
-    float dval = densAtU(u, dens, M);
-    // Sample point outside the fit box → no density (and kill NaNs/spikes).
     vec3 p = ro + s * dirRaw;
-    if (abs(p.x) > uHalf || abs(p.y) > uHalf || abs(p.z) > uHalf) dval = 0.0;
+
+    float dval = 0.0;
+    bool inBox = abs(p.x) <= uHalf && abs(p.y) <= uHalf && abs(p.z) <= uHalf;
+    bool inU = abs(u) <= 1.0;
+    if (inBox && inU) {
+      if (D <= 0) {
+        dval = uCoeff[0];
+      } else {
+        dval = clamp(clenshaw1D(uCoeff, D, u), dMin, dMax);
+      }
+    }
+
     if (!(dval == dval)) dval = 0.0;
     dval = clamp(dval, -4.0, 8.0);
 

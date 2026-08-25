@@ -15,6 +15,7 @@ import {
   resizeClipGpuCanvas,
   ensurePipelinesForDegree,
   getClipGpuProfile,
+  resetClipGpuProfile,
   MAX_COEFFS,
 } from "./clipBakeGpu.js";
 
@@ -25,7 +26,8 @@ const els = {
   scale: document.getElementById("scale"),
   steps: document.getElementById("steps"),
   half: document.getElementById("half"),
-  resolve: document.getElementById("resolve"),
+  marchDownscale: document.getElementById("marchDownscale"),
+  marchScaleLabel: document.getElementById("marchScaleLabel"),
   babbageTile: document.getElementById("babbageTile"),
   densFill: document.getElementById("densFill"),
   mode: document.getElementById("mode"),
@@ -73,10 +75,58 @@ function applyPreset(key) {
   els.scale.value = String(p.scale);
   els.half.value = String(p.half);
   els.steps.value = "32";
-  if (els.resolve) els.resolve.value = "85";
+  if (els.marchDownscale) els.marchDownscale.value = "2";
+}
+
+const MARCH_DOWNSCALE_MIN = 1;
+const MARCH_DOWNSCALE_MAX = 16;
+/** Label only these notches (every integer still snaps). */
+const MARCH_DOWNSCALE_LABELS = new Set([1, 2, 4, 8, 16]);
+
+function marchDownscaleTickPct(n) {
+  return ((n - MARCH_DOWNSCALE_MIN) / (MARCH_DOWNSCALE_MAX - MARCH_DOWNSCALE_MIN)) * 100;
+}
+
+function initMarchSliderUi() {
+  const ticks = document.getElementById("marchSliderTicks");
+  const labels = document.getElementById("marchSliderLabels");
+  if (!ticks || !labels) return;
+  ticks.replaceChildren();
+  labels.replaceChildren();
+  for (let n = MARCH_DOWNSCALE_MIN; n <= MARCH_DOWNSCALE_MAX; n++) {
+    const pct = `${marchDownscaleTickPct(n)}%`;
+    const tick = document.createElement("span");
+    tick.style.setProperty("--tick", pct);
+    ticks.appendChild(tick);
+    if (MARCH_DOWNSCALE_LABELS.has(n)) {
+      const lab = document.createElement("span");
+      lab.style.setProperty("--tick", pct);
+      lab.textContent = `${n}×`;
+      labels.appendChild(lab);
+    }
+  }
+}
+
+function readMarchDownscale() {
+  if (!els.marchDownscale) return 2;
+  const n = Math.round(Number(els.marchDownscale.value) || 2);
+  return Math.min(MARCH_DOWNSCALE_MAX, Math.max(MARCH_DOWNSCALE_MIN, n));
+}
+
+function syncMarchSlider() {
+  const n = readMarchDownscale();
+  if (els.marchDownscale) els.marchDownscale.value = String(n);
+  if (els.marchScaleLabel) els.marchScaleLabel.textContent = `${n}×`;
+  return n;
+}
+
+function marchDownscale() {
+  return readMarchDownscale();
 }
 
 applyPreset("blob");
+initMarchSliderUi();
+syncMarchSlider();
 
 const renderer = new THREE.WebGLRenderer({
   antialias: true,
@@ -464,10 +514,33 @@ function modeLabel() {
   return "raymarch";
 }
 
-let fps = 0;
-let fpsFrames = 0;
-let fpsLast = performance.now();
+let loopFps = 0;
+let loopFpsFrames = 0;
+let loopFpsLast = performance.now();
+let densFps = 0;
+let densFpsFrames = 0;
 let cpuMsSmooth = 0;
+
+/** FPS shown in HUD — GPU present rate when clip/WebGPU is active, else rAF spacing. */
+function hudFpsText() {
+  const loop = 1000 / Math.max(1, frameDtSmooth);
+  if (isClipMode() && useGpuClipPath()) {
+    const p = getClipGpuProfile();
+    const presentFresh =
+      p.presentIntervalMs > 0 && performance.now() - p.lastPresentAt < 1200;
+    if (presentFresh) {
+      const gpu = 1000 / p.presentIntervalMs;
+      if (loop > gpu * 1.12) {
+        return `${Math.round(gpu)} fps · loop ${Math.round(loop)}`;
+      }
+      return `${Math.round(gpu)} fps`;
+    }
+    if (!clipDirty && !settleHiRes) {
+      return `${Math.round(loop)} fps · dens idle`;
+    }
+  }
+  return `${Math.round(loop)} fps`;
+}
 
 function hudText() {
   const w = els.viewport.clientWidth;
@@ -484,9 +557,13 @@ function hudText() {
     const gpuSplit = p.timestamps
       ? ` · gpu seed ${p.seedMs.toFixed(1)}/fill ${p.fillMs.toFixed(1)}/march ${p.marchMs.toFixed(1)}`
       : "";
-    clip = ` · rAF ${frameDtSmooth.toFixed(0)}ms · ${submit}${gpuSplit} · edge ${Math.round(atlasEdge)}`;
+    const present =
+      p.presentIntervalMs > 0 && performance.now() - p.lastPresentAt < 1200
+        ? ` · present ${p.presentIntervalMs.toFixed(0)}ms`
+        : "";
+    clip = ` · rAF ${frameDtSmooth.toFixed(0)}ms · ${submit}${gpuSplit}${present} · edge ${Math.round(atlasEdge)}`;
   }
-  return `${modeLabel()} · ${Math.round(fps)} fps · ${cpuMsSmooth.toFixed(1)}ms js · ${gl}${clip} · ${Math.round(w * pr)}×${Math.round(h * pr)}`;
+  return `${modeLabel()} · ${hudFpsText()} · ${cpuMsSmooth.toFixed(1)}ms js · ${gl}${clip} · ${Math.round(w * pr)}×${Math.round(h * pr)}`;
 }
 
 function buildMetricsReport() {
@@ -500,10 +577,14 @@ function buildMetricsReport() {
     `scale           ${uniforms.uScale.value}`,
     `steps           ${uniforms.uSteps.value}`,
     `half            ${uniforms.uHalf.value}`,
-    `resolve%        ${els.resolve?.value ?? "—"}`,
-    `framebuffer     ${fbW}×${fbH}`,
-    `fps             ${Math.round(fps)}`,
-    `rAF_ms          ${frameDtSmooth.toFixed(2)}`,
+    `march_downscale   ${marchDownscale()}×`,
+    `march_resolution  ${(100 / marchDownscale()).toFixed(1)}%`,
+    `viewport        ${fbW}×${fbH}`,
+    `march_fb_req    ${marchFramebufferSize().mw}×${marchFramebufferSize().mh}`,
+    `gpu_march_fb    ${p.marchFbW && p.marchFbH ? `${p.marchFbW}×${p.marchFbH}` : "—"}`,
+    `loop_fps        ${Math.round(loopFps)}`,
+    `loop_ms         ${frameDtSmooth.toFixed(2)}`,
+    `dens_fps        ${Math.round(densFps)}`,
     `js_frame_ms     ${cpuMsSmooth.toFixed(2)}`,
     `webgl_ms        ${useGpuTimer ? gpuMsSmooth.toFixed(2) : "n/a"}`,
   ];
@@ -523,6 +604,11 @@ function buildMetricsReport() {
       `gpu_seed_ms     ${p.timestamps ? p.seedMs.toFixed(3) : "n/a"}`,
       `gpu_fill_ms     ${p.timestamps ? p.fillMs.toFixed(3) : "n/a"}`,
       `gpu_march_ms    ${p.timestamps ? p.marchMs.toFixed(3) : "n/a"}`,
+      `gpu_present_ms  ${p.presentWallMs > 0 ? p.presentWallMs.toFixed(2) : "n/a"}`,
+      `gpu_present_iv  ${p.presentIntervalMs > 0 ? p.presentIntervalMs.toFixed(2) : "n/a"}`,
+      `gpu_present_fps ${
+        p.presentIntervalMs > 0 ? Math.round(1000 / p.presentIntervalMs) : "n/a"
+      }`,
       `gpu_dens_ms     ${
         p.timestamps ? (p.seedMs + p.fillMs).toFixed(3) : "n/a"
       }`,
@@ -554,16 +640,23 @@ async function copyMetricsToClipboard() {
   }
 }
 
-function displaySize(lod = 1) {
+function viewportSize() {
   const vw = els.viewport.clientWidth;
   const vh = Math.max(els.viewport.clientHeight, 1);
-  const res =
-    (Math.min(100, Math.max(40, Number(els.resolve?.value) || 85)) / 100) * lod;
+  return { vw, vh };
+}
+
+/** Clip-grid Beer march internal resolution (CSS-upscaled to the viewport). */
+function marchResolutionScale() {
+  return 1 / marchDownscale();
+}
+
+function marchFramebufferSize() {
+  const { vw, vh } = viewportSize();
+  const s = marchResolutionScale();
   return {
-    vw,
-    vh,
-    rw: Math.max(1, Math.round(vw * res)),
-    rh: Math.max(1, Math.round(vh * res)),
+    mw: Math.max(1, Math.round(vw * s)),
+    mh: Math.max(1, Math.round(vh * s)),
   };
 }
 
@@ -574,13 +667,12 @@ function applyDisplaySize(rw, rh, vw, vh, { markClipDirty = true } = {}) {
   renderer.domElement.style.width = "100%";
   renderer.domElement.style.height = "100%";
   if (markClipDirty) clipDirty = true;
-  if (useGpuClipPath()) resizeClipGpuCanvas(rw, rh);
   if (els.hud) els.hud.textContent = hudText();
 }
 
 function resize() {
-  const { vw, vh, rw, rh } = displaySize(1);
-  applyDisplaySize(rw, rh, vw, vh, { markClipDirty: true });
+  const { vw, vh } = viewportSize();
+  applyDisplaySize(vw, vh, vw, vh, { markClipDirty: true });
 }
 
 function uploadWorldCoeffs() {
@@ -678,9 +770,9 @@ function drawClipGpuFrame() {
     settleHiRes = false;
   }
 
-  const fbW = Math.max(1, renderer.domElement.width);
-  const fbH = Math.max(1, renderer.domElement.height);
-  const { w, h } = clipAtlasSize(fbW, fbH);
+  const { vw, vh } = viewportSize();
+  const { mw, mh } = marchFramebufferSize();
+  const { w, h } = clipAtlasSize(vw, vh);
   camera.updateMatrixWorld(true);
   const absorb = clipUniforms.uAbsorbColor.value;
   const emit = clipUniforms.uEmitColor.value;
@@ -692,8 +784,8 @@ function drawClipGpuFrame() {
     width: w,
     height: h,
     half: clipUniforms.uHalf.value,
-    fbW,
-    fbH,
+    fbW: mw,
+    fbH: mh,
     scale: clipUniforms.uScale.value,
     steps: clipUniforms.uSteps.value | 0,
     absorb: [absorb.r, absorb.g, absorb.b],
@@ -704,6 +796,7 @@ function drawClipGpuFrame() {
   const submitMs = performance.now() - t0;
   if (ok) {
     densSubmittedThisFrame = true;
+    densFpsFrames++;
     lastDensSubmitMs = submitMs;
     lastDensAtlasW = w;
     lastDensAtlasH = h;
@@ -721,7 +814,7 @@ function drawClipGpuFrame() {
       const split = p.timestamps
         ? ` · seed ${p.seedMs.toFixed(1)}ms · fill ${p.fillMs.toFixed(1)}ms · march ${p.marchMs.toFixed(1)}ms`
         : " · gpu stamps n/a";
-      els.basisMs.textContent = `gpu dens · ${w}×${h} · tile ${p.tile}×${p.nTilesX}${split} · ${p.method || ""}`;
+      els.basisMs.textContent = `gpu dens · atlas ${w}×${h} · march ${p.marchFbW || mw}×${p.marchFbH || mh} · tile ${p.tile}×${p.nTilesX}${split} · ${p.method || ""}`;
     }
   }
   return ok;
@@ -735,9 +828,9 @@ function rebuildClipCpuFallback() {
   cpuBakeInFlight = true;
   const t0 = tNow;
   try {
-    const fbW = Math.max(1, renderer.domElement.width);
-    const fbH = Math.max(1, renderer.domElement.height);
-    const { w, h } = clipAtlasSize(fbW, fbH);
+    const { vw, vh } = viewportSize();
+    const { mw, mh } = marchFramebufferSize();
+    const { w, h } = clipAtlasSize(vw, vh);
     camera.updateMatrixWorld(true);
     const baked = bakeClipGridFibers(
       worldMono,
@@ -747,7 +840,7 @@ function rebuildClipCpuFallback() {
       h,
       clipUniforms.uHalf.value,
     );
-    applyBakedAtlas(baked, fbW, fbH);
+    applyBakedAtlas(baked, mw, mh);
     setClipGpuCanvasVisible(false);
     clipQuad.visible = true;
     clipDirty = false;
@@ -896,8 +989,14 @@ els.scale.addEventListener("change", applyRenderHyperparams);
 els.mode.addEventListener("change", syncModeUniforms);
 els.steps.addEventListener("input", applyRenderHyperparams);
 els.steps.addEventListener("change", applyRenderHyperparams);
-els.resolve?.addEventListener("input", resize);
-els.resolve?.addEventListener("change", resize);
+function markMarchDirty() {
+  syncMarchSlider();
+  resetClipGpuProfile();
+  clipDirty = true;
+  settleHiRes = true;
+}
+els.marchDownscale?.addEventListener("input", markMarchDirty);
+els.marchDownscale?.addEventListener("change", markMarchDirty);
 els.babbageTile?.addEventListener("change", () => {
   clipDirty = true;
   settleHiRes = true;
@@ -961,21 +1060,31 @@ controls.addEventListener("end", () => {
   }, 160);
 });
 
-function frame() {
-  requestAnimationFrame(frame);
+function frame(rafNow) {
   const t0 = performance.now();
   if (lastRafAt > 0) {
-    frameDtSmooth = frameDtSmooth * 0.85 + (t0 - lastRafAt) * 0.15;
+    const rafDt = rafNow > 0 ? rafNow - lastRafAt : t0 - lastRafAt;
+    if (rafDt > 0 && rafDt < 500) {
+      frameDtSmooth = frameDtSmooth * 0.85 + rafDt * 0.15;
+    }
   }
-  lastRafAt = t0;
-  fpsFrames++;
-  if (t0 - fpsLast >= 500) {
-    fps = (fpsFrames * 1000) / (t0 - fpsLast);
-    fpsFrames = 0;
-    fpsLast = t0;
+  lastRafAt = rafNow > 0 ? rafNow : t0;
+  loopFpsFrames++;
+  if (t0 - loopFpsLast >= 500) {
+    const winMs = t0 - loopFpsLast;
+    loopFps = (loopFpsFrames * 1000) / winMs;
+    densFps = (densFpsFrames * 1000) / winMs;
+    loopFpsFrames = 0;
+    densFpsFrames = 0;
+    loopFpsLast = t0;
     if (els.hud) els.hud.textContent = hudText();
     if (els.cpuMs) {
-      els.cpuMs.textContent = `${cpuMsSmooth.toFixed(2)} ms js · ${frameDtSmooth.toFixed(1)} ms rAF`;
+      const p = isClipMode() && useGpuClipPath() ? getClipGpuProfile() : null;
+      const present =
+        p?.presentIntervalMs > 0
+          ? ` · ${p.presentIntervalMs.toFixed(1)} ms gpu present`
+          : "";
+      els.cpuMs.textContent = `${cpuMsSmooth.toFixed(2)} ms js · ${frameDtSmooth.toFixed(1)} ms rAF${present}`;
     }
     refreshMetricsDump();
   }
@@ -1007,8 +1116,9 @@ function frame() {
 
   const dt = performance.now() - t0;
   cpuMsSmooth = cpuMsSmooth * 0.85 + dt * 0.15;
+  requestAnimationFrame(frame);
 }
-frame();
+requestAnimationFrame(frame);
 
 void initClipBakeGpu(els.viewport).then(async (ok) => {
   if (ok && worldMono) await prepareClipGpuForDegree(fitDeg);

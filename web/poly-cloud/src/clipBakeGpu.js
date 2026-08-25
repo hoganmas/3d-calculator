@@ -495,6 +495,47 @@ fn gammaAt(px: i32, py: i32, k: u32) -> f32 {
   return atlas[(k * h + u32(y)) * w + u32(x)];
 }
 
+/** T_k at Chebyshev root ξ_j = cos(π(j+½)/M). Same as bake pass. */
+fn chebTAtRoot(k: u32, j: u32, M: u32) -> f32 {
+  return cos(3.141592653589793 * f32(k) * (f32(j) + 0.5) / f32(M));
+}
+
+/** Nodal samples at Cheb u-roots → Cheb coeffs (discrete transform). */
+fn uChebDCT(
+  samples: ptr<function, array<f32, MAX_1D_N>>,
+  coeff: ptr<function, array<f32, MAX_1D_N>>,
+  nA: u32,
+) {
+  let D = nA - 1u;
+  let M = nA;
+  let invM = 1.0 / f32(M);
+  for (var k: u32 = 0u; k < MAX_1D_N; k++) {
+    if (k > D) {
+      (*coeff)[k] = 0.0;
+      continue;
+    }
+    var s = 0.0;
+    for (var j: u32 = 0u; j < MAX_1D_N; j++) {
+      if (j >= M) { break; }
+      s += (*samples)[j] * chebTAtRoot(k, j, M);
+    }
+    let scale = select(invM, 2.0 * invM, k > 0u);
+    (*coeff)[k] = scale * s;
+  }
+}
+
+/** Σ_{k=0..D} c_k T_k(u) via Clenshaw (matches bake x-fill). */
+fn clenshaw1D(coeff: ptr<function, array<f32, MAX_1D_N>>, D: u32, u: f32) -> f32 {
+  var b1 = 0.0;
+  var b2 = 0.0;
+  for (var k: i32 = i32(D); k >= 1; k--) {
+    let b0 = (*coeff)[u32(k)] + 2.0 * u * b1 - b2;
+    b2 = b1;
+    b1 = b0;
+  }
+  return (*coeff)[0] + u * b1 - b2;
+}
+
 @fragment
 fn fsMain(in: VSOut) -> @location(0) vec4f {
   // WebGPU framebuffer origin is top-left; bake atlas py=0 is NDC y=-1 (bottom).
@@ -555,6 +596,20 @@ fn fsMain(in: VSOut) -> @location(0) vec4f {
     densSamp[k] = mix(mix(g00, g10, tx), mix(g01, g11, tx), ty);
   }
 
+  var uCoeff: array<f32, MAX_1D_N>;
+  let D = draw.max1d;
+  var dMin = densSamp[0];
+  var dMax = densSamp[0];
+  if (nA > 1u) {
+    uChebDCT(&densSamp, &uCoeff, nA);
+    dMin = densSamp[0];
+    dMax = densSamp[0];
+    for (var k: u32 = 1u; k < nA; k++) {
+      dMin = min(dMin, densSamp[k]);
+      dMax = max(dMax, densSamp[k]);
+    }
+  }
+
   var steps = draw.steps;
   if (steps < 8u) { steps = 8u; }
   if (steps > 96u) { steps = 96u; }
@@ -572,36 +627,20 @@ fn fsMain(in: VSOut) -> @location(0) vec4f {
     if (T < 0.002) { break; }
 
     let u = (s - tMid) / tHw;
-    var dval = densSamp[0];
-    if (nA > 1u) {
-      let invM = 1.0 / f32(nA);
-      let uFirst = cos(3.141592653589793 * 0.5 * invM);
-      let uLast = cos(3.141592653589793 * (f32(nA) - 0.5) * invM);
-      if (u >= uFirst) {
-        dval = densSamp[0];
-      } else if (u <= uLast) {
-        dval = densSamp[nA - 1u];
+    let p = draw.anchor + (rd - vec3f(draw.m0.z, draw.m1.z, draw.m2.z)) * tMid + rd * (s - tMid);
+
+    var dval = 0.0;
+    let inBox = abs(p.x) <= half && abs(p.y) <= half && abs(p.z) <= half;
+    let inU = abs(u) <= 1.0;
+    if (inBox && inU) {
+      if (nA > 1u) {
+        dval = clenshaw1D(&uCoeff, D, u);
+        dval = clamp(dval, dMin, dMax);
       } else {
-        var found = false;
-        for (var j: u32 = 0u; j < MAX_1D_N; j++) {
-          if (j + 1u >= nA) { break; }
-          let u0 = cos(3.141592653589793 * (f32(j) + 0.5) * invM);
-          let u1 = cos(3.141592653589793 * (f32(j) + 1.5) * invM);
-          if (u <= u0 && u >= u1) {
-            let tt = (u0 - u) / max(u0 - u1, 1e-12);
-            dval = mix(densSamp[j], densSamp[j + 1u], clamp(tt, 0.0, 1.0));
-            found = true;
-            break;
-          }
-        }
-        if (!found) { dval = densSamp[nA - 1u]; }
+        dval = densSamp[0];
       }
     }
 
-    let p = draw.anchor + (rd - vec3f(draw.m0.z, draw.m1.z, draw.m2.z)) * tMid + rd * (s - tMid);
-    if (abs(p.x) > half || abs(p.y) > half || abs(p.z) > half) {
-      dval = 0.0;
-    }
     if (dval != dval) { dval = 0.0; }
     dval = clamp(dval, -4.0, 8.0);
 
@@ -666,6 +705,11 @@ let stampReadPending = false;
 let profileSeedMs = 0;
 let profileFillMs = 0;
 let profileMarchMs = 0;
+let profileMarchFbW = 0;
+let profileMarchFbH = 0;
+let profilePresentWallMs = 0;
+let profilePresentIntervalMs = 0;
+let lastPresentAt = 0;
 let profileMethod = "";
 let profileTile = 0;
 let profileNTilesX = 0;
@@ -787,17 +831,45 @@ export function isClipMarchReady() {
   return Boolean(device && bakeSeedPipeline && bakeFillPipeline && marchPipeline && ctx);
 }
 
+/** Wall-clock from queue.submit until onSubmittedWorkDone (includes GPU + driver). */
+function noteGpuPresent(submitWallAt) {
+  const now = performance.now();
+  profilePresentWallMs =
+    profilePresentWallMs * 0.85 + (now - submitWallAt) * 0.15;
+  if (lastPresentAt > 0) {
+    profilePresentIntervalMs =
+      profilePresentIntervalMs * 0.85 + (now - lastPresentAt) * 0.15;
+  } else {
+    profilePresentIntervalMs = now - submitWallAt;
+  }
+  lastPresentAt = now;
+}
+
 /** Latest GPU timestamp profile (ms). Zeros if timestamps unavailable / not yet resolved. */
 export function getClipGpuProfile() {
   return {
     seedMs: profileSeedMs,
     fillMs: profileFillMs,
     marchMs: profileMarchMs,
+    marchFbW: profileMarchFbW,
+    marchFbH: profileMarchFbH,
+    presentWallMs: profilePresentWallMs,
+    presentIntervalMs: profilePresentIntervalMs,
+    lastPresentAt,
     method: profileMethod,
     tile: profileTile,
     nTilesX: profileNTilesX,
     timestamps: timestampsSupported,
   };
+}
+
+/** Clear smoothed GPU timestamps (e.g. when march scale changes). */
+export function resetClipGpuProfile() {
+  profileSeedMs = 0;
+  profileFillMs = 0;
+  profileMarchMs = 0;
+  profileMarchFbW = 0;
+  profileMarchFbH = 0;
 }
 
 /**
@@ -1284,17 +1356,22 @@ export function renderClipFrameGpu({
       M,
     ),
   );
-  device.queue.writeBuffer(
-    drawParamBuf,
-    0,
-    packDrawParams(state, fbW, fbH, scale, steps, absorb, emit),
-  );
-
   const bakeBind = bindBakeToFront();
   if (!marchBindGroup) bindMarchToFront();
   if (!bakeBind || !marchBindGroup) return false;
 
+  // Resize WebGPU canvas before packing march uniforms (must match fragment count).
   resizeClipGpuCanvas(fbW, fbH);
+  const marchW = canvas?.width ?? fbW;
+  const marchH = canvas?.height ?? fbH;
+  profileMarchFbW = marchW;
+  profileMarchFbH = marchH;
+  device.queue.writeBuffer(
+    drawParamBuf,
+    0,
+    packDrawParams(state, marchW, marchH, scale, steps, absorb, emit),
+  );
+
   const enc = device.createCommandEncoder();
   const useStamps = timestampsSupported && stampQuerySet;
 
@@ -1366,9 +1443,11 @@ export function renderClipFrameGpu({
     enc.copyBufferToBuffer(stampResolveBuf, 0, stampReadBuf, 0, 48);
   }
 
+  const submitWallAt = performance.now();
   device.queue.submit([enc.finish()]);
-  if (useStamps) {
-    void device.queue.onSubmittedWorkDone().then(() => scheduleStampReadback());
-  }
+  void device.queue.onSubmittedWorkDone().then(() => {
+    noteGpuPresent(submitWallAt);
+    if (useStamps) scheduleStampReadback();
+  });
   return true;
 }
