@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Poly cloud — clip-grid Babbage</title>
+    <title>Poly cloud — clip-grid dens</title>
     <style>
       :root {
         color-scheme: dark;
@@ -136,6 +136,38 @@
       .stat .v.warn {
         color: var(--warn);
       }
+      .metrics-block {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .metrics-block .metrics-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .metrics-block .metrics-head span {
+        font-size: 11px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .metrics-block button {
+        padding: 4px 8px;
+        font-size: 11px;
+        font-weight: 500;
+      }
+      #metricsDump {
+        min-height: 140px;
+        max-height: 220px;
+        resize: vertical;
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 11px;
+        line-height: 1.4;
+        white-space: pre;
+        overflow: auto;
+      }
       #viewport {
         position: relative;
         min-width: 0;
@@ -184,7 +216,7 @@
       <aside id="panel">
         <h1>Polynomial density cloud</h1>
         <p>
-          Golden path: Fit → world monomials → GPU middle-out Babbage dens atlas
+          Golden path: Fit → world monomials → GPU Chebyshev+Clenshaw dens atlas
           → Beer–Lambert raymarch. Path C is legacy (see research/poly/notes/path-c.md).
         </p>
 
@@ -215,9 +247,36 @@
         </label>
 
         <label>
+          Dens fill
+          <select id="densFill">
+            <option value="chebyshev" selected>Chebyshev + Clenshaw</option>
+            <option value="newton">Newton forward (Babbage)</option>
+          </select>
+        </label>
+        <p style="font-size: 11px; color: var(--muted); margin-top: -6px">
+          Intra-tile interpolant. Newton is faster arithmetically but unstable in f32 at high deg.
+        </p>
+
+        <label>
+          Dens tile
+          <select id="babbageTile">
+            <option value="auto" selected>auto (tile ≥ 128)</option>
+            <option value="exact">exact dens (no interpolate)</option>
+            <option value="64">64 px</option>
+            <option value="128">128 px</option>
+            <option value="256">256 px</option>
+            <option value="512">512 px</option>
+            <option value="1024">1024 px</option>
+          </select>
+        </label>
+        <p id="tileHint" style="font-size: 11px; color: var(--muted); margin-top: -6px">
+          Larger tiles → fewer seed sets (cheaper dens). Applies to both fill modes.
+        </p>
+
+        <label>
           mode
           <select id="mode">
-            <option value="clipgrid">clip-grid (Babbage dens + Beer)</option>
+            <option value="clipgrid">clip-grid (Cheb dens + Beer)</option>
             <option value="raymarch">raymarch (LOS γ)</option>
             <option value="pathc">Path C (legacy Cheb. τ̂)</option>
           </select>
@@ -268,8 +327,16 @@
           </div>
         </div>
 
+        <div class="metrics-block">
+          <div class="metrics-head">
+            <span>Metrics</span>
+            <button id="copyMetrics" class="secondary" type="button">Copy</button>
+          </div>
+          <textarea id="metricsDump" readonly spellcheck="false"></textarea>
+        </div>
+
         <p id="profileHint" style="font-size: 11px; color: var(--muted)">
-          Golden path: clip-grid — tile-parallel middle-out Babbage dens bake (WebGPU),
+          Golden path: clip-grid — tile-parallel Chebyshev+Clenshaw dens bake (WebGPU),
           then Beer raymarch. Path C / LOS profile stages are legacy
           (research/poly/notes/clip-space-babbage.md, path-c.md).
         </p>

@@ -1,6 +1,6 @@
 # 3dgs-approx
 
-Research sandbox for Gaussian-mixture transmittance / radiance approximations and a small realtime web splat viewer with `T < ε` early-out. Polynomial track: **clip-grid** dens bake (GPU middle-out Babbage) + Beer raymarch in `web/poly-cloud`.
+Research sandbox for Gaussian-mixture transmittance / radiance approximations and a small realtime web splat viewer with `T < ε` early-out. Polynomial track: **clip-grid** dens bake (GPU Chebyshev + Clenshaw) + Beer raymarch in `web/poly-cloud`.
 
 ## Layout
 

@@ -12,6 +12,7 @@ import {
   setClipGpuCanvasVisible,
   resizeClipGpuCanvas,
   ensurePipelinesForDegree,
+  getClipGpuProfile,
   MAX_COEFFS,
 } from "./clipBakeGpu.js";
 
@@ -24,6 +25,8 @@ const els = {
   tDeg: document.getElementById("tDeg"),
   half: document.getElementById("half"),
   resolve: document.getElementById("resolve"),
+  babbageTile: document.getElementById("babbageTile"),
+  densFill: document.getElementById("densFill"),
   mode: document.getElementById("mode"),
   profileStage: document.getElementById("profileStage"),
   fit: document.getElementById("fit"),
@@ -37,6 +40,8 @@ const els = {
   modeLabel: document.getElementById("modeLabel"),
   viewport: document.getElementById("viewport"),
   hud: document.getElementById("hud"),
+  metricsDump: document.getElementById("metricsDump"),
+  copyMetrics: document.getElementById("copyMetrics"),
 };
 
 for (const [key, p] of Object.entries(PRESETS)) {
@@ -109,12 +114,14 @@ let worldMono = null;
 let fitDeg = 4;
 let clipDirty = true;
 let bakeMsSmooth = 0;
+let lastDensSubmitMs = 0;
+let densSubmittedThisFrame = false;
 let frameDtSmooth = 16;
 let lastRafAt = 0;
 /** Soft cap on atlas bytes. */
 const ATLAS_BYTE_BUDGET = 48 * 1024 * 1024;
 const BAKE_EDGE_MIN = 64;
-/** Per-frame dens rebuild is expensive (esp. deg≥6 exact path) — keep modest. */
+/** Per-frame dens rebuild is expensive — keep modest atlas edge while orbiting. */
 const BAKE_EDGE_MOVE = 256;
 const BAKE_EDGE_SETTLE = 512;
 /** Target JS→GPU submit cadence while orbiting. */
@@ -126,6 +133,25 @@ let settleTimer = 0;
 const CPU_BAKE_MIN_MS = 120;
 let lastCpuBakeAt = 0;
 let cpuBakeInFlight = false;
+let lastDensAtlasW = 0;
+let lastDensAtlasH = 0;
+let lastDensTile = 0;
+let lastMetricsText = "";
+let copyMetricsResetTimer = 0;
+
+/** @returns {"auto" | "exact" | number} */
+function readTileOverride() {
+  const v = els.babbageTile?.value ?? "auto";
+  if (v === "auto") return null;
+  if (v === "exact") return "exact";
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** @returns {"chebyshev" | "newton"} */
+function readDensFillMode() {
+  return els.densFill?.value === "newton" ? "newton" : "chebyshev";
+}
 
 const uniforms = {
   uCoeffTex: { value: coeffTex },
@@ -296,10 +322,83 @@ function hudText() {
   const pr = renderer.getPixelRatio();
   // WebGL timer only sees Three (box/clear) — not WebGPU Babbage/march.
   const gl = useGpuTimer ? `${gpuMsSmooth.toFixed(1)}ms gl` : "gl n/a";
-  const clip = isClipMode()
-    ? ` · rAF ${frameDtSmooth.toFixed(0)}ms · submit ${bakeMsSmooth.toFixed(1)}ms · edge ${Math.round(atlasEdge)}`
-    : "";
+  let clip = "";
+  if (isClipMode()) {
+    const submit = densSubmittedThisFrame
+      ? `submit ${bakeMsSmooth.toFixed(0)}ms`
+      : `submit idle (last dens ${lastDensSubmitMs.toFixed(0)}ms)`;
+    const p = getClipGpuProfile();
+    const gpuSplit = p.timestamps
+      ? ` · gpu seed ${p.seedMs.toFixed(1)}/fill ${p.fillMs.toFixed(1)}/march ${p.marchMs.toFixed(1)}`
+      : "";
+    clip = ` · rAF ${frameDtSmooth.toFixed(0)}ms · ${submit}${gpuSplit} · edge ${Math.round(atlasEdge)}`;
+  }
   return `${modeLabel()} · ${Math.round(fps)} fps · ${cpuMsSmooth.toFixed(1)}ms js · ${gl}${clip} · ${Math.round(w * pr)}×${Math.round(h * pr)}`;
+}
+
+function buildMetricsReport() {
+  const fbW = Math.max(1, renderer.domElement.width);
+  const fbH = Math.max(1, renderer.domElement.height);
+  const p = getClipGpuProfile();
+  const lines = [
+    `poly-cloud metrics  ${new Date().toISOString()}`,
+    `mode            ${modeLabel()}`,
+    `deg             ${fitDeg}`,
+    `scale           ${uniforms.uScale.value}`,
+    `steps           ${uniforms.uSteps.value}`,
+    `half            ${uniforms.uHalf.value}`,
+    `resolve%        ${els.resolve?.value ?? "—"}`,
+    `framebuffer     ${fbW}×${fbH}`,
+    `fps             ${Math.round(fps)}`,
+    `rAF_ms          ${frameDtSmooth.toFixed(2)}`,
+    `js_frame_ms     ${cpuMsSmooth.toFixed(2)}`,
+    `webgl_ms        ${useGpuTimer ? gpuMsSmooth.toFixed(2) : "n/a"}`,
+  ];
+  if (isClipMode()) {
+    lines.push(
+      `dens_path       ${useGpuClipPath() ? "webgpu" : "cpu/webgl"}`,
+      `dens_method     ${p.method || "—"}`,
+      `dens_atlas      ${lastDensAtlasW}×${lastDensAtlasH}`,
+      `dens_edge       ${Math.round(atlasEdge)}`,
+      `dens_tile       ${lastDensTile || "—"}`,
+      `dens_tiles_x    ${getClipGpuProfile().nTilesX || "—"}`,
+      `dens_tile_ui    ${els.babbageTile?.value ?? "auto"}`,
+      `dens_fill_ui    ${els.densFill?.value ?? "chebyshev"}`,
+      `dens_submit_ms  ${densSubmittedThisFrame ? bakeMsSmooth.toFixed(2) : "idle"}`,
+      `dens_last_ms    ${lastDensSubmitMs.toFixed(2)}`,
+      `gpu_timestamps  ${p.timestamps ? "yes" : "no"}`,
+      `gpu_seed_ms     ${p.timestamps ? p.seedMs.toFixed(3) : "n/a"}`,
+      `gpu_fill_ms     ${p.timestamps ? p.fillMs.toFixed(3) : "n/a"}`,
+      `gpu_march_ms    ${p.timestamps ? p.marchMs.toFixed(3) : "n/a"}`,
+      `gpu_dens_ms     ${
+        p.timestamps ? (p.seedMs + p.fillMs).toFixed(3) : "n/a"
+      }`,
+    );
+  }
+  lines.push(`fit_rel_L2      ${els.fitErr?.textContent ?? "—"}`);
+  lines.push(`n_coeffs       ${els.nCoeff?.textContent ?? "—"}`);
+  return lines.join("\n");
+}
+
+function refreshMetricsDump() {
+  lastMetricsText = buildMetricsReport();
+  if (els.metricsDump) els.metricsDump.value = lastMetricsText;
+}
+
+async function copyMetricsToClipboard() {
+  const text = lastMetricsText || buildMetricsReport();
+  try {
+    await navigator.clipboard.writeText(text);
+    if (els.copyMetrics) {
+      els.copyMetrics.textContent = "Copied";
+      if (copyMetricsResetTimer) clearTimeout(copyMetricsResetTimer);
+      copyMetricsResetTimer = window.setTimeout(() => {
+        if (els.copyMetrics) els.copyMetrics.textContent = "Copy";
+      }, 1200);
+    }
+  } catch (e) {
+    setErr(e instanceof Error ? e.message : "clipboard failed");
+  }
 }
 
 function displaySize(lod = 1) {
@@ -413,8 +512,9 @@ function applyBakedAtlas(baked, fbW, fbH) {
   clipUniforms.uCameraPos.value.copy(camera.position);
 }
 
-/** Per-frame GPU Babbage + march only when the view is dirty (scratch atlas). */
+/** Per-frame GPU dens bake + march only when the view is dirty (scratch atlas). */
 function drawClipGpuFrame() {
+  densSubmittedThisFrame = false;
   if (!worldMono || !useGpuClipPath()) return false;
   // Camera still: keep last WebGPU canvas — submitting full dens every rAF is what
   // killed FPS while WebGL timers stayed ~0 (they never see WebGPU work).
@@ -445,9 +545,17 @@ function drawClipGpuFrame() {
     steps: clipUniforms.uSteps.value | 0,
     absorb: [absorb.r, absorb.g, absorb.b],
     emit: [emit.r, emit.g, emit.b],
+    tileOverride: readTileOverride(),
+    fillMode: readDensFillMode(),
   });
   const submitMs = performance.now() - t0;
   if (ok) {
+    densSubmittedThisFrame = true;
+    lastDensSubmitMs = submitMs;
+    lastDensAtlasW = w;
+    lastDensAtlasH = h;
+    const p = getClipGpuProfile();
+    lastDensTile = p.tile || 0;
     bakeMsSmooth = bakeMsSmooth * 0.85 + submitMs * 0.15;
     clipDirty = false;
     // Adapt dens resolution to observed rAF spacing (GPU backlog shows up there).
@@ -457,7 +565,10 @@ function drawClipGpuFrame() {
       atlasEdge = Math.min(BAKE_EDGE_MOVE, atlasEdge + 8);
     }
     if (els.basisMs) {
-      els.basisMs.textContent = `gpu dens/frame · ${w}×${h} · edge ${Math.round(atlasEdge)}`;
+      const split = p.timestamps
+        ? ` · seed ${p.seedMs.toFixed(1)}ms · fill ${p.fillMs.toFixed(1)}ms · march ${p.marchMs.toFixed(1)}ms`
+        : " · gpu stamps n/a";
+      els.basisMs.textContent = `gpu dens · ${w}×${h} · tile ${p.tile}×${p.nTilesX}${split} · ${p.method || ""}`;
     }
   }
   return ok;
@@ -488,6 +599,8 @@ function rebuildClipCpuFallback() {
     clipQuad.visible = true;
     clipDirty = false;
     lastCpuBakeAt = performance.now();
+    lastDensAtlasW = w;
+    lastDensAtlasH = h;
     bakeMsSmooth = bakeMsSmooth * 0.7 + (performance.now() - t0) * 0.3;
     if (els.basisMs) {
       els.basisMs.textContent = `cpu-babbage · ${w}×${h}`;
@@ -600,6 +713,14 @@ els.steps.addEventListener("change", () => {
 });
 els.resolve?.addEventListener("input", resize);
 els.resolve?.addEventListener("change", resize);
+els.babbageTile?.addEventListener("change", () => {
+  clipDirty = true;
+  settleHiRes = true;
+});
+els.densFill?.addEventListener("change", () => {
+  clipDirty = true;
+  settleHiRes = true;
+});
 els.scale.addEventListener("change", () => {
   const v = Number(els.scale.value) || 1;
   uniforms.uScale.value = v;
@@ -610,6 +731,9 @@ els.reset.addEventListener("click", () => {
   controls.target.set(0, 0, 0);
   controls.update();
   clipDirty = true;
+});
+els.copyMetrics?.addEventListener("click", () => {
+  void copyMetricsToClipboard();
 });
 
 window.addEventListener("resize", resize);
@@ -673,6 +797,7 @@ function frame() {
     if (els.cpuMs) {
       els.cpuMs.textContent = `${cpuMsSmooth.toFixed(2)} ms js · ${frameDtSmooth.toFixed(1)} ms rAF`;
     }
+    refreshMetricsDump();
   }
 
   controls.update();

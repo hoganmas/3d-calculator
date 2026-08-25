@@ -1,6 +1,7 @@
 /**
- * WebGPU clip-grid path (golden): tile-parallel middle-out Babbage dens bake +
- * Beer–Lambert fullscreen march. See research/poly/notes/clip-space-babbage.md.
+ * WebGPU clip-grid path (golden): tile-parallel dens bake (Chebyshev nodes +
+ * Clenshaw fill; exact dens for narrow tiles) + Beer–Lambert fullscreen march.
+ * See research/poly/notes/clip-space-babbage.md.
  *
  * CPU/WebGL fallback: main.js via bakeClipGridFibers + DataTexture.
  * Path C is a separate legacy LOS mode — research/poly/notes/path-c.md.
@@ -17,22 +18,30 @@ import {
 export const MAX_N = MAX_DEG + 1;
 export const MAX_1D_N = 3 * MAX_DEG + 1;
 export const MAX_COEFFS = MAX_N * MAX_N * MAX_N;
-/** f32-friendly default tile (CPU Babbage uses 256 in f64). */
+/** Default tile width for amortized dens fill (CPU Babbage uses 256 in f64). */
 export const GPU_BABBAGE_TILE = 128;
 const WG_SIZE = 64;
 
 /**
- * Tile width for GPU Babbage. High D=3N makes f32 Δ^k / Newton blow up when the
- * coarse step h is large (Δ^k ~ h^k). Shrink tiles with degree so coarseStep
- * yields h=1, or skip Newton entirely (exact dens) at the highest degrees.
+ * Tile width for GPU dens bake.
+ * @param {number} deg
+ * @param {number} max1d  3N
+ * @param {number | null | undefined} tileOverride
+ *   null/`auto`: large tiles + Chebyshev/Clenshaw (stable in f32 at high N).
+ *   `exact`: tile=D → per-pixel exact dens.
+ *   positive: force that tile width (≥ D+1 for Clenshaw path).
  */
-export function gpuBabbageTile(deg, max1d) {
-  const D = max1d | 0;
-  const d = deg | 0;
-  // N≥6 (D≥18): exact per pixel — order-18+ Newton in f32 is not usable.
-  if (d >= 6) return Math.max(1, D);
-  // N=5 (D=15): h=1 Babbage (tile = D+1 → span = D → coarseStep returns 1).
-  if (d >= 5) return D + 1;
+export function gpuBabbageTile(deg, max1d, tileOverride = null) {
+  const D = Math.max(1, max1d | 0);
+
+  if (tileOverride === "exact") {
+    return D; // span < D → exact dens path
+  }
+  if (typeof tileOverride === "number" && Number.isFinite(tileOverride) && tileOverride > 0) {
+    return Math.max(D + 1, tileOverride | 0);
+  }
+
+  // Auto: Chebyshev + Clenshaw stays stable in f32 at high D — keep large tiles.
   return Math.max(D + 1, GPU_BABBAGE_TILE);
 }
 
@@ -73,7 +82,7 @@ struct Params {
   tile: u32,
   xGrid0: i32,
   nTilesX: u32,
-  _pad0: u32,
+  fillMode: u32, // 0 = Chebyshev+Clenshaw, 1 = equispaced Newton (Babbage)
   half: f32,
   tMid: f32,
   tHw: f32,
@@ -88,6 +97,7 @@ struct Params {
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var<storage, read> coeffs: array<f32>;
 @group(0) @binding(2) var<storage, read_write> outAtlas: array<f32>;
+@group(0) @binding(3) var<storage, read_write> diffStore: array<f32>;
 
 var<workgroup> seedSamples: array<f32, SEED_DIFF_N>;
 var<workgroup> diffTable: array<f32, SEED_DIFF_N>;
@@ -119,11 +129,11 @@ fn evalMonomial3D(deg: u32, p: vec3f) -> f32 {
   return s;
 }
 
-fn rayDir(px: i32, py: i32) -> vec3f {
+fn rayDir(px: f32, py: f32) -> vec3f {
   let width = params.width;
   let height = params.height;
-  let ndcX = -1.0 + (2.0 / f32(width)) * (f32(px) + 0.5);
-  let ndcY = -1.0 + (2.0 / f32(height)) * (f32(py) + 0.5);
+  let ndcX = -1.0 + (2.0 / f32(width)) * (px + 0.5);
+  let ndcY = -1.0 + (2.0 / f32(height)) * (py + 0.5);
   let xy1 = vec3f(ndcX, ndcY, 1.0);
   return vec3f(
     dot(params.m0.xyz, xy1),
@@ -136,12 +146,9 @@ fn chebRoot(j: u32, M: u32) -> f32 {
   return cos(3.141592653589793 * (f32(j) + 0.5) / f32(M));
 }
 
-fn coarseStep(span: u32, D: u32) -> u32 {
-  if (span <= D) { return 1u; }
-  let hNeed = max(1u, (span + D - 1u) / D);
-  var h = 1u;
-  while (h < hNeed) { h = h * 2u; }
-  return h;
+/** T_k(ξ_j) at Chebyshev roots ξ_j = cos(π(j+½)/M). */
+fn chebTAtRoot(k: u32, j: u32, M: u32) -> f32 {
+  return cos(3.141592653589793 * f32(k) * (f32(j) + 0.5) / f32(M));
 }
 
 fn writePixel(px: u32, py: u32, dens: ptr<function, array<f32, MAX_1D_N>>, nAlpha: u32) {
@@ -149,7 +156,7 @@ fn writePixel(px: u32, py: u32, dens: ptr<function, array<f32, MAX_1D_N>>, nAlph
   let height = params.height;
   let half = params.half;
   let ro = params.ro;
-  let rd = rayDir(i32(px), i32(py));
+  let rd = rayDir(f32(px), f32(py));
   for (var j: u32 = 0u; j < MAX_1D_N; j++) {
     if (j >= nAlpha) { break; }
     let t = params.tMid + params.tHw * chebRoot(j, nAlpha);
@@ -162,7 +169,7 @@ fn writePixel(px: u32, py: u32, dens: ptr<function, array<f32, MAX_1D_N>>, nAlph
   }
 }
 
-fn exactDensAt(px: i32, py: i32, dens: ptr<function, array<f32, MAX_1D_N>>, deg: u32, nAlpha: u32) {
+fn exactDensAt(px: f32, py: f32, dens: ptr<function, array<f32, MAX_1D_N>>, deg: u32, nAlpha: u32) {
   let rd = rayDir(px, py);
   let ro = params.ro;
   for (var j: u32 = 0u; j < MAX_1D_N; j++) {
@@ -176,103 +183,216 @@ fn exactDensAt(px: i32, py: i32, dens: ptr<function, array<f32, MAX_1D_N>>, deg:
   }
 }
 
-fn evalNewtonForward(base: u32, D: u32, t: f32) -> f32 {
-  var acc = diffTable[base];
+fn tileSpan(tx: u32, py: u32) -> vec4i {
+  let tile = params.tile;
+  let xBase = max(0i, params.xGrid0 + i32(tx * tile));
+  let xEnd = min(i32(params.width), params.xGrid0 + i32((tx + 1u) * tile));
+  return vec4i(xBase, xEnd, 0, 0);
+}
+
+/** Map pixel index to Chebyshev parameter u∈[-1,1] on [xBase, xEnd). */
+fn pixelToChebU(px: f32, xFirst: f32, xLast: f32) -> f32 {
+  let hw = 0.5 * (xLast - xFirst);
+  if (abs(hw) < 1e-8) { return 0.0; }
+  return clamp((px - 0.5 * (xFirst + xLast)) / hw, -1.0, 1.0);
+}
+
+/** Clenshaw: Σ_{k=0}^D c_k T_k(x), coeffs in diffStore[base..]. */
+fn clenshawStore(base: u32, D: u32, x: f32) -> f32 {
+  var b1 = 0.0;
+  var b2 = 0.0;
+  for (var k: i32 = i32(D); k >= 1; k--) {
+    let b0 = diffStore[base + u32(k)] + 2.0 * x * b1 - b2;
+    b2 = b1;
+    b1 = b0;
+  }
+  return diffStore[base] + x * b1 - b2;
+}
+
+fn coarseStep(span: u32, D: u32) -> u32 {
+  if (span <= D) { return 1u; }
+  let hNeed = max(1u, (span + D - 1u) / D);
+  var h = 1u;
+  while (h < hNeed) { h = h * 2u; }
+  return h;
+}
+
+fn computeOrigin(xBase: i32, xEnd: i32, D: u32) -> vec2u {
+  let span = u32(xEnd - xBase - 1);
+  let h = coarseStep(span, D);
+  let cover = D * h;
+  var xOrigin = xBase + ((i32(span) - i32(cover)) >> 1);
+  if (xOrigin < 0) { xOrigin = 0; }
+  if (xOrigin + i32(cover) >= i32(params.width)) {
+    xOrigin = max(0i, i32(params.width) - i32(cover));
+  }
+  return vec2u(u32(xOrigin), h);
+}
+
+fn evalNewtonStore(tileRow: u32, j: u32, D: u32, t: f32) -> f32 {
+  let base = tileRow * SEED_DIFF_N + j * MAX_1D_N;
+  var acc = diffStore[base];
   var binom = 1.0;
   for (var k: u32 = 1u; k <= D; k++) {
     binom = binom * (t - f32(k - 1u)) / f32(k);
-    acc += binom * diffTable[base + k];
+    acc += binom * diffStore[base + k];
   }
   return acc;
 }
 
+/** Pass A: seeds + Chebyshev coeffs or Newton Δ (exact tiles write atlas). */
 @compute @workgroup_size(${WG_SIZE}, 1, 1)
-fn bakeBabbageMain(
+fn bakeSeedMain(
   @builtin(workgroup_id) wid: vec3u,
   @builtin(local_invocation_id) lid3: vec3u,
 ) {
   let lid = lid3.x;
   let tx = wid.x;
   let py = wid.y;
-  let width = params.width;
-  let height = params.height;
-  if (py >= height || tx >= params.nTilesX) { return; }
+  if (py >= params.height || tx >= params.nTilesX) { return; }
 
   let deg = params.deg;
-  let max1d = params.max1d;
-  let D = max1d;
-  let nAlpha = max1d + 1u;
-  let tile = params.tile;
-
-  let xBase = max(0i, params.xGrid0 + i32(tx * tile));
-  let xEnd = min(i32(width), params.xGrid0 + i32((tx + 1u) * tile));
+  let D = params.max1d;
+  let nAlpha = D + 1u;
+  let M = D + 1u;
+  let useNewton = params.fillMode == 1u;
+  let bounds = tileSpan(tx, py);
+  let xBase = bounds.x;
+  let xEnd = bounds.y;
   if (xBase >= xEnd) { return; }
 
   let span = u32(xEnd - xBase - 1);
+  let tileRow = py * params.nTilesX + tx;
 
-  // Narrow / single-pixel tiles: exact eval (no Babbage).
   if (span < D) {
     var densExact: array<f32, MAX_1D_N>;
     for (var px: u32 = u32(xBase) + lid; px < u32(xEnd); px += WG_SIZE) {
-      exactDensAt(i32(px), i32(py), &densExact, deg, nAlpha);
+      exactDensAt(f32(px), f32(py), &densExact, deg, nAlpha);
       writePixel(px, py, &densExact, nAlpha);
     }
     return;
   }
 
-  let h = coarseStep(span, D);
-  let cover = D * h;
-  // Must match Math.floor((span-cover)/2). WGSL i32 division truncates toward
-  // zero (not floor); arithmetic >> 1 is signed floor-halve.
-  var xOrigin = xBase + ((i32(span) - i32(cover)) >> 1);
-  // Keep coarse seeds inside the atlas. Middle-out often places xOrigin < 0 on
-  // the leftmost tile (and past width on the right); those out-of-frame NDC
-  // monomial samples explode in f32 and poison the whole tile Δ table.
-  if (xOrigin < 0) {
-    xOrigin = 0;
-  }
-  if (xOrigin + i32(cover) >= i32(width)) {
-    xOrigin = max(0i, i32(width) - i32(cover));
+  if (useNewton) {
+    let oh = computeOrigin(xBase, xEnd, D);
+    let xOrigin = i32(oh.x);
+    let h = oh.y;
+    if (lid <= D) {
+      var densSeed: array<f32, MAX_1D_N>;
+      exactDensAt(f32(xOrigin + i32(lid * h)), f32(py), &densSeed, deg, nAlpha);
+      for (var j: u32 = 0u; j < MAX_1D_N; j++) {
+        if (j >= nAlpha) { break; }
+        seedSamples[j * MAX_1D_N + lid] = densSeed[j];
+      }
+    }
+    workgroupBarrier();
+    if (lid < nAlpha) {
+      let base = lid * MAX_1D_N;
+      for (var i: u32 = 0u; i <= D; i++) {
+        diffTable[base + i] = seedSamples[base + i];
+      }
+      for (var k: u32 = 1u; k <= D; k++) {
+        var i: u32 = D;
+        loop {
+          if (i < k) { break; }
+          diffTable[base + i] -= diffTable[base + i - 1u];
+          if (i == 0u) { break; }
+          i -= 1u;
+        }
+      }
+      let outBase = tileRow * SEED_DIFF_N + base;
+      for (var i2: u32 = 0u; i2 <= D; i2++) {
+        diffStore[outBase + i2] = diffTable[base + i2];
+      }
+    }
+    return;
   }
 
-  // Seed dens at middle-out coarse lattice → workgroup memory.
+  // Chebyshev + Clenshaw
+  let xFirst = f32(xBase);
+  let xLast = f32(xEnd - 1);
   if (lid <= D) {
+    let xi = chebRoot(lid, M);
+    let px = 0.5 * (xFirst + xLast) + 0.5 * (xLast - xFirst) * xi;
     var densSeed: array<f32, MAX_1D_N>;
-    exactDensAt(xOrigin + i32(lid * h), i32(py), &densSeed, deg, nAlpha);
+    exactDensAt(px, f32(py), &densSeed, deg, nAlpha);
     for (var j: u32 = 0u; j < MAX_1D_N; j++) {
       if (j >= nAlpha) { break; }
       seedSamples[j * MAX_1D_N + lid] = densSeed[j];
     }
   }
   workgroupBarrier();
-
-  // Build forward-difference tables (one channel per thread when possible).
   if (lid < nAlpha) {
     let base = lid * MAX_1D_N;
-    for (var i: u32 = 0u; i <= D; i++) {
-      diffTable[base + i] = seedSamples[base + i];
-    }
-    for (var k: u32 = 1u; k <= D; k++) {
-      var i: u32 = D;
-      loop {
-        if (i < k) { break; }
-        diffTable[base + i] -= diffTable[base + i - 1u];
-        if (i == 0u) { break; }
-        i -= 1u;
+    let invM = 1.0 / f32(M);
+    for (var k: u32 = 0u; k <= D; k++) {
+      var s = 0.0;
+      for (var i: u32 = 0u; i <= D; i++) {
+        s += seedSamples[base + i] * chebTAtRoot(k, i, M);
       }
+      let scale = select(invM, 2.0 * invM, k > 0u);
+      diffTable[base + k] = scale * s;
+    }
+    let outBase = tileRow * SEED_DIFF_N + base;
+    for (var i2: u32 = 0u; i2 <= D; i2++) {
+      diffStore[outBase + i2] = diffTable[base + i2];
     }
   }
-  workgroupBarrier();
+}
 
+/** Pass B: Clenshaw or Newton fill (no-op for exact tiles). */
+@compute @workgroup_size(${WG_SIZE}, 1, 1)
+fn bakeFillMain(
+  @builtin(workgroup_id) wid: vec3u,
+  @builtin(local_invocation_id) lid3: vec3u,
+) {
+  let lid = lid3.x;
+  let tx = wid.x;
+  let py = wid.y;
+  if (py >= params.height || tx >= params.nTilesX) { return; }
+
+  let D = params.max1d;
+  let nAlpha = D + 1u;
+  let useNewton = params.fillMode == 1u;
+  let bounds = tileSpan(tx, py);
+  let xBase = bounds.x;
+  let xEnd = bounds.y;
+  if (xBase >= xEnd) { return; }
+
+  let span = u32(xEnd - xBase - 1);
+  if (span < D) { return; }
+
+  let tileRow = py * params.nTilesX + tx;
   var dens: array<f32, MAX_1D_N>;
+
+  if (useNewton) {
+    let oh = computeOrigin(xBase, xEnd, D);
+    let xOrigin = i32(oh.x);
+    let h = oh.y;
+    for (var px: u32 = u32(xBase) + lid; px < u32(xEnd); px += WG_SIZE) {
+      let t = (f32(i32(px) - xOrigin)) / f32(h);
+      for (var j: u32 = 0u; j < MAX_1D_N; j++) {
+        if (j >= nAlpha) {
+          dens[j] = 0.0;
+          continue;
+        }
+        dens[j] = evalNewtonStore(tileRow, j, D, t);
+      }
+      writePixel(px, py, &dens, nAlpha);
+    }
+    return;
+  }
+
+  let xFirst = f32(xBase);
+  let xLast = f32(xEnd - 1);
   for (var px: u32 = u32(xBase) + lid; px < u32(xEnd); px += WG_SIZE) {
-    let t = (f32(i32(px) - xOrigin)) / f32(h);
+    let u = pixelToChebU(f32(px), xFirst, xLast);
     for (var j: u32 = 0u; j < MAX_1D_N; j++) {
       if (j >= nAlpha) {
         dens[j] = 0.0;
         continue;
       }
-      dens[j] = evalNewtonForward(j * MAX_1D_N, D, t);
+      dens[j] = clenshawStore(tileRow * SEED_DIFF_N + j * MAX_1D_N, D, u);
     }
     writePixel(px, py, &dens, nAlpha);
   }
@@ -467,7 +587,14 @@ let device = null;
 /** Active pipeline specialization degree (null until built). */
 let pipelineDeg = null;
 /** @type {GPUComputePipeline | null} */
-let bakePipeline = null;
+let bakeSeedPipeline = null;
+/** @type {GPUComputePipeline | null} */
+let bakeFillPipeline = null;
+/** Shared explicit layout so seed+fill share one bind group. */
+/** @type {GPUBindGroupLayout | null} */
+let bakeBindGroupLayout = null;
+/** @type {GPUPipelineLayout | null} */
+let bakePipelineLayout = null;
 /** @type {GPURenderPipeline | null} */
 let marchPipeline = null;
 /** @type {GPUBuffer | null} */
@@ -479,10 +606,29 @@ let drawParamBuf = null;
 /** @type {GPUBuffer | null} */
 let atlasFront = null; // march reads
 /** @type {GPUBuffer | null} */
-let atlasBack = null; // bake writes
+let atlasBack = null; // unused (kept for retire compatibility)
 let atlasCapacity = 0;
+/** @type {GPUBuffer | null} */
+let diffBuf = null;
+let diffCapacity = 0;
 /** @type {GPUBindGroup | null} */
 let marchBindGroup = null;
+
+/** Timestamp profiling (seed / fill / march). */
+let timestampsSupported = false;
+/** @type {GPUQuerySet | null} */
+let stampQuerySet = null;
+/** @type {GPUBuffer | null} */
+let stampResolveBuf = null;
+/** @type {GPUBuffer | null} */
+let stampReadBuf = null;
+let stampReadPending = false;
+let profileSeedMs = 0;
+let profileFillMs = 0;
+let profileMarchMs = 0;
+let profileMethod = "";
+let profileTile = 0;
+let profileNTilesX = 0;
 
 /** @type {HTMLCanvasElement | null} */
 let canvas = null;
@@ -496,7 +642,21 @@ let initFailed = false;
 let resident = null;
 
 /** Pack Bake Params (must match BAKE_WGSL Params; size 112, buffer 128). */
-function packBakeParams(width, height, deg, max1d, tile, xGrid0, nTilesX, half, tMid, tHw, ro, M) {
+function packBakeParams(
+  width,
+  height,
+  deg,
+  max1d,
+  tile,
+  xGrid0,
+  nTilesX,
+  fillMode,
+  half,
+  tMid,
+  tHw,
+  ro,
+  M,
+) {
   const buf = new ArrayBuffer(128);
   const u32 = new Uint32Array(buf, 0, 8);
   u32[0] = width;
@@ -505,7 +665,7 @@ function packBakeParams(width, height, deg, max1d, tile, xGrid0, nTilesX, half, 
   u32[3] = max1d;
   u32[4] = tile;
   u32[6] = nTilesX;
-  u32[7] = 0;
+  u32[7] = fillMode | 0;
   new Int32Array(buf, 0, 8)[5] = xGrid0 | 0;
   const f32 = new Float32Array(buf, 32);
   f32[0] = half;
@@ -577,7 +737,7 @@ function packDrawParams(state, fbW, fbH, scale, steps, absorb, emit) {
 }
 
 export function isClipBakeGpuReady() {
-  return Boolean(device && bakePipeline && marchPipeline);
+  return Boolean(device && bakeSeedPipeline && bakeFillPipeline && marchPipeline);
 }
 
 export function hasResidentAtlas() {
@@ -586,7 +746,20 @@ export function hasResidentAtlas() {
 
 /** True when WebGPU clip pipelines + canvas are ready for a per-frame bake+march. */
 export function isClipMarchReady() {
-  return Boolean(device && bakePipeline && marchPipeline && ctx);
+  return Boolean(device && bakeSeedPipeline && bakeFillPipeline && marchPipeline && ctx);
+}
+
+/** Latest GPU timestamp profile (ms). Zeros if timestamps unavailable / not yet resolved. */
+export function getClipGpuProfile() {
+  return {
+    seedMs: profileSeedMs,
+    fillMs: profileFillMs,
+    marchMs: profileMarchMs,
+    method: profileMethod,
+    tile: profileTile,
+    nTilesX: profileNTilesX,
+    timestamps: timestampsSupported,
+  };
 }
 
 export function clipBakeGpuStatus() {
@@ -653,14 +826,30 @@ export async function initClipBakeGpu(viewportEl) {
         initFailed = true;
         return false;
       }
-      device = await adapter.requestDevice();
+      timestampsSupported = adapter.features.has("timestamp-query");
+      const requiredFeatures = [];
+      if (timestampsSupported) requiredFeatures.push("timestamp-query");
+      device = await adapter.requestDevice({ requiredFeatures });
       device.lost.then(() => {
         device = null;
-        bakePipeline = null;
+        bakeSeedPipeline = null;
+        bakeFillPipeline = null;
         marchPipeline = null;
         pipelineDeg = null;
         initFailed = true;
       });
+
+      if (timestampsSupported) {
+        stampQuerySet = device.createQuerySet({ type: "timestamp", count: 6 });
+        stampResolveBuf = device.createBuffer({
+          size: 6 * 8,
+          usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
+        });
+        stampReadBuf = device.createBuffer({
+          size: 6 * 8,
+          usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        });
+      }
 
       coeffBuf = device.createBuffer({
         size: MAX_COEFFS * 4,
@@ -687,7 +876,8 @@ export async function initClipBakeGpu(viewportEl) {
       console.warn("[clipBakeGpu] init failed", e);
       initFailed = true;
       device = null;
-      bakePipeline = null;
+      bakeSeedPipeline = null;
+      bakeFillPipeline = null;
       marchPipeline = null;
       pipelineDeg = null;
       return false;
@@ -704,17 +894,57 @@ export async function initClipBakeGpu(viewportEl) {
 export async function ensurePipelinesForDegree(deg) {
   if (!device) return false;
   const sz = degSizes(deg);
-  if (pipelineDeg === sz.deg && bakePipeline && marchPipeline) return true;
+  if (pipelineDeg === sz.deg && bakeSeedPipeline && bakeFillPipeline && marchPipeline) {
+    return true;
+  }
 
   const bakeMod = device.createShaderModule({ code: makeBakeWgsl(sz) });
+
+  bakeBindGroupLayout = device.createBindGroupLayout({
+    entries: [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: { type: "uniform" },
+      },
+      {
+        binding: 1,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: { type: "read-only-storage" },
+      },
+      {
+        binding: 2,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: { type: "storage" },
+      },
+      {
+        binding: 3,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: { type: "storage" },
+      },
+    ],
+  });
+  bakePipelineLayout = device.createPipelineLayout({
+    bindGroupLayouts: [bakeBindGroupLayout],
+  });
+
   device.pushErrorScope("validation");
-  const nextBake = device.createComputePipeline({
-    layout: "auto",
-    compute: { module: bakeMod, entryPoint: "bakeBabbageMain" },
+  const nextSeed = device.createComputePipeline({
+    layout: bakePipelineLayout,
+    compute: { module: bakeMod, entryPoint: "bakeSeedMain" },
   });
   {
     const err = await device.popErrorScope();
-    if (err) throw new Error(`bake pipeline deg=${sz.deg}: ${err.message}`);
+    if (err) throw new Error(`bake seed pipeline deg=${sz.deg}: ${err.message}`);
+  }
+  device.pushErrorScope("validation");
+  const nextFill = device.createComputePipeline({
+    layout: bakePipelineLayout,
+    compute: { module: bakeMod, entryPoint: "bakeFillMain" },
+  });
+  {
+    const err = await device.popErrorScope();
+    if (err) throw new Error(`bake fill pipeline deg=${sz.deg}: ${err.message}`);
   }
 
   const marchMod = device.createShaderModule({ code: makeMarchWgsl(sz) });
@@ -751,7 +981,8 @@ export async function ensurePipelinesForDegree(deg) {
     if (err) throw new Error(`march pipeline deg=${sz.deg}: ${err.message}`);
   }
 
-  bakePipeline = nextBake;
+  bakeSeedPipeline = nextSeed;
+  bakeFillPipeline = nextFill;
   marchPipeline = nextMarch;
   pipelineDeg = sz.deg;
   marchBindGroup = null;
@@ -811,6 +1042,30 @@ let bakeBindGroup = null;
 let uploadedCoeffDeg = -1;
 let uploadedCoeffRef = null;
 
+function ensureDiffBuf(floatCount) {
+  const aligned = Math.max(256, Math.ceil((floatCount * 4) / 256) * 256);
+  if (diffBuf && diffCapacity >= aligned) return;
+  if (aligned > storageBufferBudget()) {
+    throw new Error(`diff ${aligned}B exceeds GPU storage budget`);
+  }
+  const old = diffBuf;
+  diffBuf = device.createBuffer({
+    size: aligned,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  });
+  diffCapacity = aligned;
+  bakeBindGroup = null;
+  if (old) {
+    void device.queue.onSubmittedWorkDone().then(() => {
+      try {
+        old.destroy();
+      } catch (_) {
+        /* ignore */
+      }
+    });
+  }
+}
+
 function bindMarchToFront() {
   if (!marchPipeline || !atlasFront) return;
   marchBindGroup = device.createBindGroup({
@@ -823,14 +1078,15 @@ function bindMarchToFront() {
 }
 
 function bindBakeToFront() {
-  if (!bakePipeline || !atlasFront) return null;
+  if (!bakeBindGroupLayout || !atlasFront || !diffBuf) return null;
   if (bakeBindGroup) return bakeBindGroup;
   bakeBindGroup = device.createBindGroup({
-    layout: bakePipeline.getBindGroupLayout(0),
+    layout: bakeBindGroupLayout,
     entries: [
       { binding: 0, resource: { buffer: bakeParamBuf } },
       { binding: 1, resource: { buffer: coeffBuf } },
       { binding: 2, resource: { buffer: atlasFront } },
+      { binding: 3, resource: { buffer: diffBuf } },
     ],
   });
   return bakeBindGroup;
@@ -841,9 +1097,27 @@ function invalidateAtlasBindGroups() {
   bakeBindGroup = null;
 }
 
+function scheduleStampReadback() {
+  if (!timestampsSupported || !stampReadBuf || stampReadPending) return;
+  stampReadPending = true;
+  stampReadBuf
+    .mapAsync(GPUMapMode.READ)
+    .then(() => {
+      const stamps = new BigInt64Array(stampReadBuf.getMappedRange().slice(0));
+      stampReadBuf.unmap();
+      stampReadPending = false;
+      const ns = (a, b) => Number(stamps[b] - stamps[a]) / 1e6;
+      if (stamps[1] > stamps[0]) profileSeedMs = profileSeedMs * 0.7 + ns(0, 1) * 0.3;
+      if (stamps[3] > stamps[2]) profileFillMs = profileFillMs * 0.7 + ns(2, 3) * 0.3;
+      if (stamps[5] > stamps[4]) profileMarchMs = profileMarchMs * 0.7 + ns(4, 5) * 0.3;
+    })
+    .catch(() => {
+      stampReadPending = false;
+    });
+}
+
 /**
- * Per-frame GPU path: tile Babbage dens into the atlas, then march — one submit,
- * no await. Pipelines must already match `deg` ({@link ensurePipelinesForDegree}).
+ * Per-frame GPU path: seed pass → fill pass → march, with optional timestamps.
  */
 export function renderClipFrameGpu({
   worldMono,
@@ -858,8 +1132,13 @@ export function renderClipFrameGpu({
   steps,
   absorb = [0.15, 0.25, 0.45],
   emit = [0.55, 0.75, 1.0],
+  tileOverride = null,
+  /** @type {"chebyshev" | "newton"} */
+  fillMode = "chebyshev",
 }) {
-  if (!device || !bakePipeline || !marchPipeline || !ctx || !worldMono) return false;
+  if (!device || !bakeSeedPipeline || !bakeFillPipeline || !marchPipeline || !ctx || !worldMono) {
+    return false;
+  }
   const sz = degSizes(deg);
   if (pipelineDeg !== sz.deg) return false;
 
@@ -873,14 +1152,17 @@ export function renderClipFrameGpu({
   const h = half ?? 2;
   const { tMid, tHw } = viewFiberWindow(ro, h, M);
 
-  const tile = gpuBabbageTile(d, max1d);
+  const tile = gpuBabbageTile(d, max1d, tileOverride);
   const nTilesX = Math.max(1, Math.ceil(width / tile));
   const xGrid0 = -Math.floor((nTilesX * tile - width) / 2);
+  const exactPath = tile <= max1d;
+  const fillModeU32 = fillMode === "newton" ? 1 : 0;
 
   const outBytes = width * height * nAlpha * 4;
   const prevAtlas = atlasFront;
   ensureAtlasPair(outBytes);
-  if (!atlasFront) return false;
+  ensureDiffBuf(nTilesX * height * sz.seedDiffN);
+  if (!atlasFront || !diffBuf) return false;
   if (atlasFront !== prevAtlas) invalidateAtlasBindGroups();
 
   if (uploadedCoeffRef !== worldMono || uploadedCoeffDeg !== d) {
@@ -899,6 +1181,12 @@ export function renderClipFrameGpu({
     uploadedCoeffDeg = d;
   }
 
+  const method = exactPath
+    ? "gpu-exact-dens"
+    : fillModeU32 === 1
+      ? "gpu-babbage-newton"
+      : "gpu-cheb-clenshaw";
+
   const state = {
     width,
     height,
@@ -913,14 +1201,32 @@ export function renderClipFrameGpu({
     sx,
     sy,
     tile,
-    method: tile <= max1d ? "gpu-exact-dens" : "gpu-babbage-newton-t-mid",
+    fillMode: fillModeU32 === 1 ? "newton" : "chebyshev",
+    method,
     gpuResident: true,
   };
+  profileMethod = state.method;
+  profileTile = tile;
+  profileNTilesX = nTilesX;
 
   device.queue.writeBuffer(
     bakeParamBuf,
     0,
-    packBakeParams(width, height, d, max1d, tile, xGrid0, nTilesX, h, tMid, tHw, ro, M),
+    packBakeParams(
+      width,
+      height,
+      d,
+      max1d,
+      tile,
+      xGrid0,
+      nTilesX,
+      fillModeU32,
+      h,
+      tMid,
+      tHw,
+      ro,
+      M,
+    ),
   );
   device.queue.writeBuffer(
     drawParamBuf,
@@ -934,10 +1240,39 @@ export function renderClipFrameGpu({
 
   resizeClipGpuCanvas(fbW, fbH);
   const enc = device.createCommandEncoder();
+  const useStamps = timestampsSupported && stampQuerySet;
 
   {
-    const pass = enc.beginComputePass();
-    pass.setPipeline(bakePipeline);
+    const pass = enc.beginComputePass(
+      useStamps
+        ? {
+            timestampWrites: {
+              querySet: stampQuerySet,
+              beginningOfPassWriteIndex: 0,
+              endOfPassWriteIndex: 1,
+            },
+          }
+        : undefined,
+    );
+    pass.setPipeline(bakeSeedPipeline);
+    pass.setBindGroup(0, bakeBind);
+    pass.dispatchWorkgroups(nTilesX, height, 1);
+    pass.end();
+  }
+
+  {
+    const pass = enc.beginComputePass(
+      useStamps
+        ? {
+            timestampWrites: {
+              querySet: stampQuerySet,
+              beginningOfPassWriteIndex: 2,
+              endOfPassWriteIndex: 3,
+            },
+          }
+        : undefined,
+    );
+    pass.setPipeline(bakeFillPipeline);
     pass.setBindGroup(0, bakeBind);
     pass.dispatchWorkgroups(nTilesX, height, 1);
     pass.end();
@@ -954,6 +1289,15 @@ export function renderClipFrameGpu({
           storeOp: "store",
         },
       ],
+      ...(useStamps
+        ? {
+            timestampWrites: {
+              querySet: stampQuerySet,
+              beginningOfPassWriteIndex: 4,
+              endOfPassWriteIndex: 5,
+            },
+          }
+        : {}),
     });
     pass.setPipeline(marchPipeline);
     pass.setBindGroup(0, marchBindGroup);
@@ -961,7 +1305,15 @@ export function renderClipFrameGpu({
     pass.end();
   }
 
+  if (useStamps && stampResolveBuf && stampReadBuf && !stampReadPending) {
+    enc.resolveQuerySet(stampQuerySet, 0, 6, stampResolveBuf, 0);
+    enc.copyBufferToBuffer(stampResolveBuf, 0, stampReadBuf, 0, 48);
+  }
+
   device.queue.submit([enc.finish()]);
+  if (useStamps) {
+    void device.queue.onSubmittedWorkDone().then(() => scheduleStampReadback());
+  }
   resident = state;
   return true;
 }
