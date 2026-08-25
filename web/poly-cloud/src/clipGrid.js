@@ -207,6 +207,13 @@ export function fillGammaGrid(worldMono, deg, width, height, x0, dx, y0, dy, ro,
   const D = max1d;
   const out = new Float32Array(width * height * nAlpha);
   const { tMid, tHw } = viewFiberWindow(ro, half, M);
+  // Center-ray mid-fiber point (f64): far-camera cancel done once, not per sample.
+  const rdCenter = [M[2], M[5], M[8]];
+  const anchor = [
+    ro[0] + tMid * rdCenter[0],
+    ro[1] + tMid * rdCenter[1],
+    ro[2] + tMid * rdCenter[2],
+  ];
   const tile = Math.max(D + 1, tilePx | 0);
   const uNodes = chebRootNodes(nAlpha);
   const tNodes = new Float64Array(nAlpha);
@@ -221,18 +228,31 @@ export function fillGammaGrid(worldMono, deg, width, height, x0, dx, y0, dy, ro,
   const seedSamples = new Array(nAlpha);
   for (let k = 0; k < nAlpha; k++) seedSamples[k] = new Float64Array(D + 1);
 
+  function rayPoint(t) {
+    // p = anchor + tMid·(rd−rdC) + (t−tMid)·rd  (= ro + t·rd)
+    const dt = t - tMid;
+    p[0] = anchor[0] + tMid * (rd[0] - rdCenter[0]) + dt * rd[0];
+    p[1] = anchor[1] + tMid * (rd[1] - rdCenter[1]) + dt * rd[1];
+    p[2] = anchor[2] + tMid * (rd[2] - rdCenter[2]) + dt * rd[2];
+  }
+
   function exactDensAt(px, py) {
     const x = x0 + dx * (px + 0.5);
     const y = y0 + dy * (py + 0.5);
     rd[0] = M[0] * x + M[1] * y + M[2];
     rd[1] = M[3] * x + M[4] * y + M[5];
     rd[2] = M[6] * x + M[7] * y + M[8];
-    // Direct world eval (stable); avoid Horner on raw α(t) with |t|≳1, deg∼3N.
     for (let j = 0; j < nAlpha; j++) {
-      const t = tNodes[j];
-      p[0] = ro[0] + t * rd[0];
-      p[1] = ro[1] + t * rd[1];
-      p[2] = ro[2] + t * rd[2];
+      rayPoint(tNodes[j]);
+      // Outside fit box → 0 before Babbage (exterior ||p||^N poisons Δ).
+      if (
+        Math.abs(p[0]) > half ||
+        Math.abs(p[1]) > half ||
+        Math.abs(p[2]) > half
+      ) {
+        dens[j] = 0;
+        continue;
+      }
       dens[j] = evalMonomial3D(worldMono, deg, p[0], p[1], p[2]);
     }
   }
@@ -248,10 +268,7 @@ export function fillGammaGrid(worldMono, deg, width, height, x0, dx, y0, dy, ro,
     // (they turn into white fireflies under any high-order u-interp).
     const CAP = 8;
     for (let j = 0; j < nAlpha; j++) {
-      const t = tNodes[j];
-      p[0] = ro[0] + t * rd[0];
-      p[1] = ro[1] + t * rd[1];
-      p[2] = ro[2] + t * rd[2];
+      rayPoint(tNodes[j]);
       const inside =
         Math.abs(p[0]) <= half && Math.abs(p[1]) <= half && Math.abs(p[2]) <= half;
       let v = inside ? samples[j] : 0;
@@ -345,6 +362,13 @@ export function bakeClipGridFibers(worldMono, deg, camera, width, height, half) 
   const dy = 2 / height;
   const ro = [o.x, o.y, o.z];
   const h = half ?? 2;
-  const grid = fillGammaGrid(worldMono, deg, width, height, -1, dx, -1, dy, ro, h, M);
+  const { tMid } = viewFiberWindow(ro, h, M);
+  // Match GPU auto: tile ~ projected fit-box span in atlas pixels.
+  const ndcRx = h / (Math.max(Math.abs(tMid), 1e-6) * Math.max(sx, 1e-6));
+  const ndcRy = h / (Math.max(Math.abs(tMid), 1e-6) * Math.max(sy, 1e-6));
+  const pixSpan = Math.min(ndcRx * width, ndcRy * height);
+  const D = 3 * deg;
+  const tilePx = Math.max(D + 1, Math.min(BABBAGE_TILE, Math.ceil(pixSpan * 1.25)));
+  const grid = fillGammaGrid(worldMono, deg, width, height, -1, dx, -1, dy, ro, h, M, tilePx);
   return { ...grid, sx, sy, deg, M, ro, half: h };
 }

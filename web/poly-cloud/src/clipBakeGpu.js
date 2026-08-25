@@ -19,19 +19,20 @@ export const MAX_N = MAX_DEG + 1;
 export const MAX_1D_N = 3 * MAX_DEG + 1;
 export const MAX_COEFFS = MAX_N * MAX_N * MAX_N;
 /** Default tile width for amortized dens fill (CPU Babbage uses 256 in f64). */
-export const GPU_BABBAGE_TILE = 128;
+export const GPU_BABBAGE_TILE = 1024;
 const WG_SIZE = 64;
 
 /**
  * Tile width for GPU dens bake.
  * @param {number} deg
  * @param {number} max1d  3N
- * @param {number | null | undefined} tileOverride
- *   null/`auto`: large tiles + Chebyshev/Clenshaw (stable in f32 at high N).
+ * @param {number | null | undefined | "exact"} tileOverride
+ *   null/`auto`: distance-adaptive (shrink when the fit box is a small screen footprint).
  *   `exact`: tile=D → per-pixel exact dens.
  *   positive: force that tile width (≥ D+1 for Clenshaw path).
+ * @param {{ half?: number, tMid?: number, sx?: number, sy?: number, width?: number, height?: number }} [view]
  */
-export function gpuBabbageTile(deg, max1d, tileOverride = null) {
+export function gpuBabbageTile(deg, max1d, tileOverride = null, view = null) {
   const D = Math.max(1, max1d | 0);
 
   if (tileOverride === "exact") {
@@ -41,8 +42,22 @@ export function gpuBabbageTile(deg, max1d, tileOverride = null) {
     return Math.max(D + 1, tileOverride | 0);
   }
 
-  // Auto: Chebyshev + Clenshaw stays stable in f32 at high D — keep large tiles.
-  return Math.max(D + 1, GPU_BABBAGE_TILE);
+  // Auto: match tile to projected fit-box size. Far away the box is a few pixels
+  // of signal in a field of exterior zeros — large tiles waste Clenshaw on empty
+  // space and soften the bump. Near: keep large tiles (amortize seeds).
+  const half = view?.half ?? 2;
+  const tMid = Math.max(Math.abs(view?.tMid ?? half), 1e-6);
+  const sx = Math.max(view?.sx ?? 1, 1e-6);
+  const sy = Math.max(view?.sy ?? 1, 1e-6);
+  const w = Math.max(1, view?.width | 0);
+  const h = Math.max(1, view?.height | 0);
+  // NDC half-extent of a world offset `half` at depth tMid (perspective chart).
+  const ndcRx = half / (tMid * sx);
+  const ndcRy = half / (tMid * sy);
+  const pixSpan = Math.min(ndcRx * w, ndcRy * h); // full box width in atlas px
+  // Cover the footprint with some slack; never below D+1, never above default.
+  const target = Math.ceil(pixSpan * 25.0);
+  return Math.max(D + 1, Math.min(GPU_BABBAGE_TILE, target));
 }
 
 /** Per-degree sizes — WGSL locals/workgroup memory match fit deg (no max-N tax). */
@@ -87,7 +102,11 @@ struct Params {
   tMid: f32,
   tHw: f32,
   _pad1: f32,
-  ro: vec3f,
+  // Fiber mid-point on the *center* ray, computed CPU-side in f64:
+  //   anchor = ro + tMid·rdCenter,  rdCenter = M·(0,0,1).
+  // Bake seeds use p = anchor + tMid·(rd−rdC) + (t−tMid)·rd so far-camera
+  // cancellation is not done in f32.
+  anchor: vec3f,
   _pad2: f32,
   m0: vec4f,
   m1: vec4f,
@@ -129,6 +148,17 @@ fn evalMonomial3D(deg: u32, p: vec3f) -> f32 {
   return s;
 }
 
+/**
+ * Stable world point on a pixel ray when the camera is far from the fit box.
+ * Algebraically equal to ro + t*rd, but the large cancel happens on the CPU
+ * when forming anchor; GPU only adds O(box)-sized terms.
+ */
+fn rayPoint(rd: vec3f, t: f32) -> vec3f {
+  let tMid = params.tMid;
+  let rdC = vec3f(params.m0.z, params.m1.z, params.m2.z);
+  return params.anchor + (rd - rdC) * tMid + rd * (t - tMid);
+}
+
 fn rayDir(px: f32, py: f32) -> vec3f {
   let width = params.width;
   let height = params.height;
@@ -155,12 +185,11 @@ fn writePixel(px: u32, py: u32, dens: ptr<function, array<f32, MAX_1D_N>>, nAlph
   let width = params.width;
   let height = params.height;
   let half = params.half;
-  let ro = params.ro;
   let rd = rayDir(f32(px), f32(py));
   for (var j: u32 = 0u; j < MAX_1D_N; j++) {
     if (j >= nAlpha) { break; }
     let t = params.tMid + params.tHw * chebRoot(j, nAlpha);
-    let p = ro + rd * t;
+    let p = rayPoint(rd, t);
     let inside = abs(p.x) <= half && abs(p.y) <= half && abs(p.z) <= half;
     var v = select(0.0, (*dens)[j], inside);
     if (v != v) { v = 0.0; }
@@ -169,17 +198,27 @@ fn writePixel(px: u32, py: u32, dens: ptr<function, array<f32, MAX_1D_N>>, nAlph
   }
 }
 
+/**
+ * Dens seed at pixel (px,py): evaluate in box-normalized coords ξ = p/half ∈ [-1,1]^3.
+ * Coeffs are pre-scaled ĉ_ijk = c_ijk half^{i+j+k} so eval(ĉ, ξ) = f(p).
+ * Outside the fit box → 0 before Chebyshev/Newton (exterior world powers poison Δ/DCT).
+ */
 fn exactDensAt(px: f32, py: f32, dens: ptr<function, array<f32, MAX_1D_N>>, deg: u32, nAlpha: u32) {
   let rd = rayDir(px, py);
-  let ro = params.ro;
+  let half = params.half;
+  let invH = 1.0 / half;
   for (var j: u32 = 0u; j < MAX_1D_N; j++) {
     if (j >= nAlpha) {
       (*dens)[j] = 0.0;
       continue;
     }
     let t = params.tMid + params.tHw * chebRoot(j, nAlpha);
-    let p = ro + rd * t;
-    (*dens)[j] = evalMonomial3D(deg, p);
+    let p = rayPoint(rd, t);
+    if (abs(p.x) > half || abs(p.y) > half || abs(p.z) > half) {
+      (*dens)[j] = 0.0;
+      continue;
+    }
+    (*dens)[j] = evalMonomial3D(deg, p * invH);
   }
 }
 
@@ -425,6 +464,8 @@ struct DrawParams {
   m2: vec4f,
   absorb: vec4f,
   emit: vec4f,
+  anchor: vec3f,
+  _p4: f32,
 }
 
 @group(0) @binding(0) var<uniform> draw: DrawParams;
@@ -558,7 +599,7 @@ fn fsMain(in: VSOut) -> @location(0) vec4f {
       }
     }
 
-    let p = ro + rd * s;
+    let p = draw.anchor + (rd - vec3f(draw.m0.z, draw.m1.z, draw.m2.z)) * tMid + rd * (s - tMid);
     if (abs(p.x) > half || abs(p.y) > half || abs(p.z) > half) {
       dval = 0.0;
     }
@@ -654,7 +695,7 @@ function packBakeParams(
   half,
   tMid,
   tHw,
-  ro,
+  anchor,
   M,
 ) {
   const buf = new ArrayBuffer(128);
@@ -672,9 +713,9 @@ function packBakeParams(
   f32[1] = tMid;
   f32[2] = tHw;
   f32[3] = 0;
-  f32[4] = ro[0];
-  f32[5] = ro[1];
-  f32[6] = ro[2];
+  f32[4] = anchor[0];
+  f32[5] = anchor[1];
+  f32[6] = anchor[2];
   f32[7] = 0;
   f32[8] = M[0];
   f32[9] = M[1];
@@ -733,6 +774,11 @@ function packDrawParams(state, fbW, fbH, scale, steps, absorb, emit) {
   f32[25] = emit[1];
   f32[26] = emit[2];
   f32[27] = 1;
+  const anchor = state.anchor || state.ro;
+  f32[28] = anchor[0];
+  f32[29] = anchor[1];
+  f32[30] = anchor[2];
+  f32[31] = 0;
   return buf;
 }
 
@@ -988,6 +1034,7 @@ export async function ensurePipelinesForDegree(deg) {
   marchBindGroup = null;
   bakeBindGroup = null;
   uploadedCoeffDeg = -1;
+  uploadedCoeffHalf = NaN;
   uploadedCoeffRef = null;
   if (atlasFront) bindMarchToFront();
   return true;
@@ -1040,6 +1087,7 @@ function ensureAtlasPair(byteSize) {
 let bakeBindGroup = null;
 /** Cached monomial upload (skip rewrite when fit unchanged). */
 let uploadedCoeffDeg = -1;
+let uploadedCoeffHalf = NaN;
 let uploadedCoeffRef = null;
 
 function ensureDiffBuf(floatCount) {
@@ -1151,8 +1199,22 @@ export function renderClipFrameGpu({
   const ro = [o.x, o.y, o.z];
   const h = half ?? 2;
   const { tMid, tHw } = viewFiberWindow(ro, h, M);
+  // Center-ray world point at tMid — f64 cancel, then upload as f32 O(box) anchor.
+  const rdCenter = [M[2], M[5], M[8]];
+  const anchor = [
+    ro[0] + tMid * rdCenter[0],
+    ro[1] + tMid * rdCenter[1],
+    ro[2] + tMid * rdCenter[2],
+  ];
 
-  const tile = gpuBabbageTile(d, max1d, tileOverride);
+  const tile = gpuBabbageTile(d, max1d, tileOverride, {
+    half: h,
+    tMid,
+    sx,
+    sy,
+    width,
+    height,
+  });
   const nTilesX = Math.max(1, Math.ceil(width / tile));
   const xGrid0 = -Math.floor((nTilesX * tile - width) / 2);
   const exactPath = tile <= max1d;
@@ -1165,20 +1227,28 @@ export function renderClipFrameGpu({
   if (!atlasFront || !diffBuf) return false;
   if (atlasFront !== prevAtlas) invalidateAtlasBindGroups();
 
-  if (uploadedCoeffRef !== worldMono || uploadedCoeffDeg !== d) {
+  // Upload ĉ_ijk = c_ijk · half^{i+j+k} so GPU seeds eval at ξ = p/half ∈ [-1,1]^3.
+  if (
+    uploadedCoeffRef !== worldMono ||
+    uploadedCoeffDeg !== d ||
+    uploadedCoeffHalf !== h
+  ) {
     const coeffs = new Float32Array(sz.maxCoeffs);
     const n = d + 1;
     for (let i = 0; i <= d; i++) {
+      const hi = h ** i;
       for (let j = 0; j <= d; j++) {
+        const hij = hi * h ** j;
         for (let k = 0; k <= d; k++) {
           const idx = i + j * n + k * n * n;
-          coeffs[idx] = worldMono[idx] || 0;
+          coeffs[idx] = (worldMono[idx] || 0) * hij * h ** k;
         }
       }
     }
     device.queue.writeBuffer(coeffBuf, 0, coeffs);
     uploadedCoeffRef = worldMono;
     uploadedCoeffDeg = d;
+    uploadedCoeffHalf = h;
   }
 
   const method = exactPath
@@ -1195,6 +1265,7 @@ export function renderClipFrameGpu({
     deg: d,
     M,
     ro,
+    anchor,
     half: h,
     tMid,
     tHw,
@@ -1224,7 +1295,7 @@ export function renderClipFrameGpu({
       h,
       tMid,
       tHw,
-      ro,
+      anchor,
       M,
     ),
   );

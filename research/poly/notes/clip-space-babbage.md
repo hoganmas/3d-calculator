@@ -37,6 +37,15 @@ Along each tile row, dens\((x)\) at fixed \(t_j\) is a univariate poly of degree
 3. **Clenshaw** recurrence at every integer pixel (stable in f32 at high \(D\)).
 4. Zero / cap samples outside the fit box.
 
+**Normalized dens seeds:** GPU evaluates at box coords \(\xi=p/\mathrm{half}\in[-1,1]^3\) with
+pre-scaled \(\hat c_{ijk}=c_{ijk}\,\mathrm{half}^{i+j+k}\). Seeds **outside** the fit box are
+set to 0 *before* Chebyshev/Newton — exterior \(\|p\|^N\) (far off-axis at \(t\sim t_\mathrm{mid}\))
+must not enter the DCT/Δ table. Screen indexing is NDC; fiber depth is Chebyshev \(u\in(-1,1)\).
+
+**Far-camera ray points:** dens seeds avoid `p = ro + t·rd` in f32. CPU uploads
+`anchor = ro + tMid·rdCenter` (f64), and the GPU uses
+`p = anchor + tMid·(rd−rdC) + (t−tMid)·rd`.
+
 Equispaced forward-\(\Delta\) / Newton (classic Babbage) is **not** used on the GPU — it loses digits for \(D\gtrsim 18\). CPU fallback still uses f64 middle-out Babbage.
 
 Narrow tiles (\(\mathrm{span}<D\)) use exact dens (not enough nodes for a degree-\(D\) interpolant).
@@ -59,7 +68,7 @@ Steps are controlled by the UI **steps** slider. Early-out on small \(T\).
 | Stage | Cost |
 |-------|------|
 | Fit | once per expression / degree |
-| Bake (Cheb+Clenshaw) | \(\sim O\big((W/\mathrm{tile})\,H\cdot(D{+}1)\cdot N^3 + WH\cdot D\big)\) — not \(WH\cdot N^3\) |
+| Bake (Cheb+Clenshaw) | \(\sim O\big((W/\mathrm{tile})\,H\cdot(D{+}1)\cdot N^3 + WH\cdot D\big)\) — not \(WH\cdot N^3\); **auto** tile shrinks with projected box size when far |
 | Bake (exact, narrow tile) | \(O(WH\cdot n_\alpha\cdot N^3)\) on GPU |
 | March | \(O(\mathrm{steps})\) dens lookups + Beer updates per pixel |
 
@@ -75,9 +84,11 @@ Steps are controlled by the UI **steps** slider. Early-out on small \(T\).
 
 ---
 
-## Research target (not shipped): clip homogenization
+## Research target (not shipped): camera-clip homogenization
 
-Homogeneous pullback to clip and 2D/1D differences on fiber coeffs remains a **target architecture**. The explorer bakes **Cartesian dens samples** in ray-\(t\) with screen-space Chebyshev/Clenshaw.
+Seeds are now **fit-box normalized** (\(\xi=p/\mathrm{half}\)), not camera NDC/clip.
+Homogeneous pullback through \(PV\) (dens as \(G(X,Y,Z,W)/W^{\cdot}\) or NDC rational)
+and 2D/1D differences on fiber coeffs remain a **target architecture**.
 
 ---
 
