@@ -146,6 +146,12 @@
         width: 100%;
         height: 100%;
       }
+      #viewport canvas.clip-gpu {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 1;
+      }
       #hud {
         position: absolute;
         left: 12px;
@@ -153,6 +159,7 @@
         font-size: 11px;
         color: var(--muted);
         pointer-events: none;
+        z-index: 2;
       }
       #err {
         color: #ff7b72;
@@ -262,8 +269,9 @@
         </div>
 
         <p id="profileHint" style="font-size: 11px; color: var(--muted)">
-          LOS modes: shader specialized to FIT_DEG. Clip-grid: per-view bake of α_m(ndc)
-          via row-wise Babbage, then GPU Horner in ray param (see research/poly/notes/clip-space-babbage.md).
+          LOS modes: shader specialized to FIT_DEG. Clip-grid: per-view WebGPU (or CPU)
+          bake of γ(u) fibers on an NDC atlas, then GPU Horner march
+          (see research/poly/notes/clip-space-babbage.md).
         </p>
       </aside>
       <main id="viewport">
