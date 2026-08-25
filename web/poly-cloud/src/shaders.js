@@ -9,24 +9,29 @@ void main() {
 `;
 
 /**
- * World monomials (uploaded once). Per pixel:
- *
- *   Exact LOS restriction f(P0 + Du·u) → univariate γ(u) via nested Horner
- *   composition in u (tensor deg N → 1D deg ≤ 3N). Touches each coeff once
- *   in structured O(N⁴) work — not (3N+1) separate 3D evals (= worse O(N⁴)).
- *
- *   Then raymarch / Path C are O(steps · deg) Horner/Clenshaw on γ — linear in N.
- *
- * Note: dense (N+1)³ tensors cannot be O(N) per ray; Ω(N³) to read coeffs.
- * In the N=3…6 range even Θ(N³) still rises ~1.7–2× per +1 degree.
+ * World monomials. FIT_DEG / FIT_N / FIT_1D / FIT_1D_N are compile-time
+ * defines (set on fit) so loops and arrays scale with degree — no fixed
+ * max-N tax from unrolled deg-8 bodies or a 729-float local coeff buffer.
  */
 export const volumeFragment = /* glsl */ `
 precision highp float;
 precision highp sampler2D;
 
+#ifndef FIT_DEG
+#define FIT_DEG 4
+#endif
+#ifndef FIT_N
+#define FIT_N 5
+#endif
+#ifndef FIT_1D
+#define FIT_1D 12
+#endif
+#ifndef FIT_1D_N
+#define FIT_1D_N 13
+#endif
+
 uniform sampler2D uCoeffTex;
 uniform float uCoeffSize;
-uniform int uDeg;
 uniform float uHalf;
 uniform float uScale;
 uniform int uSteps;
@@ -61,30 +66,28 @@ bool intersectBox(vec3 ro, vec3 rd, float h, out float t0, out float t1) {
   return t1 > max(t0, 0.0);
 }
 
-void clear19(inout float p[19]) {
-  for (int i = 0; i < 19; i++) p[i] = 0.0;
+void clear1d(inout float p[FIT_1D_N]) {
+  for (int i = 0; i < FIT_1D_N; i++) p[i] = 0.0;
 }
 
-float horner(float a[19], int deg, float x) {
+float horner(float a[FIT_1D_N], float x) {
   float s = 0.0;
-  for (int i = 18; i >= 0; i--) {
-    if (i > deg) continue;
+  for (int i = FIT_1D; i >= 0; i--) {
     s = s * x + a[i];
   }
   return s;
 }
 
-/** p(u) ← p(u) · (a + b u) */
-void mulLinear(inout float p[19], float a, float b) {
-  float n[19];
-  clear19(n);
-  for (int i = 0; i <= 18; i++) {
+void mulLinear(inout float p[FIT_1D_N], float a, float b) {
+  float n[FIT_1D_N];
+  clear1d(n);
+  for (int i = 0; i < FIT_1D_N; i++) {
     float v = p[i];
     if (v == 0.0) continue;
     n[i] += v * a;
-    if (i + 1 < 19) n[i + 1] += v * b;
+    if (i + 1 < FIT_1D_N) n[i + 1] += v * b;
   }
-  for (int i = 0; i < 19; i++) p[i] = n[i];
+  for (int i = 0; i < FIT_1D_N; i++) p[i] = n[i];
 }
 
 float chebT(int k, float u) {
@@ -113,8 +116,8 @@ float clenshaw9(float ck[9], int deg, float u) {
   return u * b1 - b2 + ck[0];
 }
 
-float sigmaU(float gamma[19], int deg, float u) {
-  return max(0.0, uScale * horner(gamma, deg, u));
+float sigmaU(float gamma[FIT_1D_N], float u) {
+  return max(0.0, uScale * horner(gamma, u));
 }
 
 void main() {
@@ -130,79 +133,55 @@ void main() {
   float tHw = 0.5 * (tExit - tEnter);
   if (tHw < 1e-8) discard;
 
-  // p = P0 + Du·u,  u ∈ [-1,1] on the segment (stable powers)
   vec3 P0 = ro + rd * tMid;
   vec3 Du = rd * tHw;
 
-  int n = uDeg + 1;
-  int n3 = n * n * n;
-  int max1d = min(3 * uDeg, 18);
-
-  float C[343];
-  for (int i = 0; i < 343; i++) {
-    if (i >= n3) {
-      C[i] = 0.0;
-      continue;
-    }
-    C[i] = coeffAt(i);
-  }
-
-  // Precompute (P0.z + Du.z·u)^k as univariate polys — O(N²)
-  float zPow[133]; // 7 * 19
+  // (P0.z + Du.z·u)^k — only FIT_DEG+1 powers
+  float zPow[FIT_N * FIT_1D_N];
   {
-    float pk[19];
-    clear19(pk);
+    float pk[FIT_1D_N];
+    clear1d(pk);
     pk[0] = 1.0;
-    for (int k = 0; k <= 6; k++) {
-      if (k > uDeg) break;
-      for (int m = 0; m < 19; m++) zPow[k * 19 + m] = pk[m];
-      if (k == uDeg) break;
+    for (int k = 0; k <= FIT_DEG; k++) {
+      for (int m = 0; m < FIT_1D_N; m++) zPow[k * FIT_1D_N + m] = pk[m];
+      if (k == FIT_DEG) break;
       mulLinear(pk, P0.z, Du.z);
     }
   }
 
-  // Nested Horner in x,y with univariate arithmetic in u — exact γ(u)
-  //   γ = (...(s_N · Lx + s_{N-1}) · Lx + … );  s_i from y,z slices
-  float gamma[19];
-  clear19(gamma);
+  // Exact LOS γ(u); loops are compile-time FIT_DEG (no max-N dead work)
+  float gamma[FIT_1D_N];
+  clear1d(gamma);
 
-  for (int i = 6; i >= 0; i--) {
-    if (i > uDeg) continue;
+  for (int i = FIT_DEG; i >= 0; i--) {
+    float si[FIT_1D_N];
+    clear1d(si);
 
-    float si[19];
-    clear19(si);
-
-    for (int j = 6; j >= 0; j--) {
-      if (j > uDeg) continue;
-
-      // row(u) = Σ_k C_ijk (P0z + Duz u)^k
-      float row[19];
-      clear19(row);
-      for (int k = 0; k <= 6; k++) {
-        if (k > uDeg) break;
-        float c = C[i + j * n + k * n * n];
+    for (int j = FIT_DEG; j >= 0; j--) {
+      float row[FIT_1D_N];
+      clear1d(row);
+      for (int k = 0; k <= FIT_DEG; k++) {
+        float c = coeffAt(i + j * FIT_N + k * FIT_N * FIT_N);
         if (abs(c) < 1e-20) continue;
-        for (int m = 0; m <= 18; m++) {
-          row[m] += c * zPow[k * 19 + m];
+        for (int m = 0; m < FIT_1D_N; m++) {
+          row[m] += c * zPow[k * FIT_1D_N + m];
         }
       }
 
-      // si ← si · Ly + row  (Horner in y)
-      if (j < uDeg) {
+      if (j < FIT_DEG) {
         mulLinear(si, P0.y, Du.y);
       }
-      for (int m = 0; m < 19; m++) si[m] += row[m];
+      for (int m = 0; m < FIT_1D_N; m++) si[m] += row[m];
     }
 
-    // gamma ← gamma · Lx + si  (Horner in x)
-    if (i < uDeg) {
+    if (i < FIT_DEG) {
       mulLinear(gamma, P0.x, Du.x);
     }
-    for (int m = 0; m < 19; m++) gamma[m] += si[m];
+    for (int m = 0; m < FIT_1D_N; m++) gamma[m] += si[m];
   }
 
   if (uProfileStage == 1) {
-    float s0 = abs(uScale * horner(gamma, max1d, 0.0));
+    float s0 = abs(uScale * horner(gamma, 0.0));
     gl_FragColor = vec4(uEmitColor * s0, clamp(s0, 0.05, 1.0));
     return;
   }
@@ -226,12 +205,12 @@ void main() {
 
     int nGrid = 32;
     float duG = 2.0 / float(nGrid);
-    float prevS = sigmaU(gamma, max1d, -1.0);
+    float prevS = sigmaU(gamma, -1.0);
     float tau = 0.0;
     for (int s = 1; s <= 64; s++) {
       if (s > nGrid) break;
       float u = -1.0 + duG * float(s);
-      float sg = sigmaU(gamma, max1d, u);
+      float sg = sigmaU(gamma, u);
       tau += 0.5 * (prevS + sg) * duG * tHw;
       prevS = sg;
       for (int j = 0; j <= 8; j++) {
@@ -293,7 +272,7 @@ void main() {
       float T = exp(-tauHat);
       if (T < 0.002) break;
 
-      float sigma = sigmaU(gamma, max1d, u);
+      float sigma = sigmaU(gamma, u);
       float absorb = exp(-sigma * dt);
       float opacity = 1.0 - absorb;
       rgb += T * opacity * (uEmitColor * sigma + uAbsorbColor * 0.15);
@@ -307,7 +286,6 @@ void main() {
     return;
   }
 
-  // ── Raymarch: O(steps · 3N) Horner — linear in degree ───────────────────
   int steps = uSteps;
   if (steps < 8) steps = 8;
   if (steps > 96) steps = 96;
@@ -321,7 +299,7 @@ void main() {
     if (s >= steps) break;
     if (T < 0.002) break;
 
-    float sigma = sigmaU(gamma, max1d, u);
+    float sigma = sigmaU(gamma, u);
     float absorb = exp(-sigma * dt);
     float opacity = 1.0 - absorb;
     rgb += T * opacity * (uEmitColor * sigma + uAbsorbColor * 0.15);

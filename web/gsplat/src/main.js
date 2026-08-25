@@ -232,10 +232,12 @@ function showStats(stats, fps) {
       `tile     ${p.tileMs.toFixed(1)} ms`,
       `clear    ${p.clearMs.toFixed(1)} ms`,
       `raster   ${p.rasterMs.toFixed(1)} ms`,
-      p.compositeMs
-        ? `  ~gather    ${p.gatherMs.toFixed(1)} ms${p.phaseTimed ? " (meas.)" : ""}`
-        : null,
-      p.compositeMs
+      p.fused
+        ? `  fused sliding-window (gather+composite one pass)`
+        : p.compositeMs
+          ? `  ~gather    ${p.gatherMs.toFixed(1)} ms${p.phaseTimed ? " (meas.)" : ""}`
+          : null,
+      !p.fused && p.compositeMs
         ? `  ~composite ${p.compositeMs.toFixed(1)} ms${p.phaseTimed ? " (meas.)" : ""}`
         : null,
       `listTests ${p.listTests.toLocaleString()}`,
@@ -505,8 +507,8 @@ document.getElementById("profile").addEventListener("click", async () => {
         `T_slice calls ${p.tSliceCalls.toLocaleString()}  iters ${p.tSliceIters.toLocaleString()}`,
         `cdfCalls ${p.cdfCalls.toLocaleString()}  appendix ${p.appendixCalls.toLocaleString()}`,
         `iters/px ${(p.pixelsComposited ? p.tSliceIters / p.pixelsComposited : 0).toFixed(1)}  (pairwise overlap)`,
-        `est. gather ${p.gatherMs.toFixed(1)} ms  composite ${p.compositeMs.toFixed(1)} ms${p.phaseTimed ? "  (measured)" : ""}`,
-        `note: Appendix-A for nearest ≤maxΦ overlapping fronts; overflow+far → Beer; CDF=${formatCdfMode(cdfMode)}`,
+        `fused sliding-window near→far (evict→Beer, Φ window ≤maxΦ)`,
+        `note: Appendix-A on sliding Φ window; overflow+evicted → Beer; CDF=${formatCdfMode(cdfMode)}`,
       );
     }
     return lines.join("\n");

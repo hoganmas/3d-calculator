@@ -164,173 +164,39 @@ function projectGaussian(mean, scaleVec, eye, view, viewProj, width, height, foc
 }
 
 /**
- * Approximate-transmittance composite with pairwise overlap gating.
- *
- * For each emitter i, each front j is either:
- *   |μ_j − μ_i| ≤ k (σ_i + σ_j)  →  Appendix-A Φ coupling (local interaction)
- *   otherwise                    →  Beer exp(−w_j) (already fully traversed)
- *
- * Pairwise (not transitive clusters): A↔B and B↔C overlapping does not force
- * A↔C into the Φ product. Separated fronts stay O(1) Beer.
- *
- * maxInteract caps how many overlapping fronts enter the Φ product (nearest
- * first). Overflow overlaps become Beer — accuracy/perf tradeoff knob.
- *
- * hits[0..n) must be μ-ascending (back-to-front). Caller may reverse a
- * depth-sorted gather instead of sorting.
- *
- * @param {object[]} hits pooled hit objects (length ≥ n)
- * @param {number} n hit count
- * @param {object|null} prof
- * @param {number} kSigma overlap threshold (default 2.5)
- * @param {number} maxInteract Φ-set cap; 0 = unlimited
- * @param {function} cdf standard-normal CDF (A&S or logistic)
- * @param {Float64Array} wPrefix reusable prefix buffer (length ≥ n+1)
+ * Appendix-A T(z) for hits[lo..hi) stored near→far (μ descending).
+ * Product uses μ-ascending order (nearest-to-z first among fronts).
  */
-function compositeApprox(
-  hits,
-  n,
-  bg,
-  eps,
-  prof = null,
-  kSigma = 2.5,
-  maxInteract = 0,
-  cdf = normCdfAS,
-  wPrefix = null,
-) {
-  if (!n) {
-    return { r: bg[0], g: bg[1], b: bg[2], T: 1, evals: 0, exited: false };
-  }
-
-  if (n === 1) {
-    const h = hits[0];
-    const alpha = -Math.expm1(-h.w);
-    const Tbg = Math.exp(-h.w);
-    return {
-      r: h.color[0] * alpha + bg[0] * Tbg,
-      g: h.color[1] * alpha + bg[1] * Tbg,
-      b: h.color[2] * alpha + bg[2] * Tbg,
-      T: Tbg,
-      evals: 1,
-      exited: Tbg < eps,
-    };
-  }
-
-  const zf = 0;
-  const prefix = wPrefix && wPrefix.length >= n + 1 ? wPrefix : new Float64Array(n + 1);
-  prefix[0] = 0;
-  for (let i = 0; i < n; i++) {
-    prefix[i + 1] = prefix[i] + hits[i].w;
-    hits[i].ready = false;
-  }
-  const wAll = prefix[n];
-
-  /** Lazy Appendix-A params — only hits that enter a Φ set. */
-  function ensureReady(h) {
-    if (h.ready) return;
-    const p = appendixAParams(h.w, h.sigma, cdf);
-    h.delta = p.delta;
-    h.nu = p.nu;
-    h.invNu = 1 / h.nu;
-    h.cdfZf = cdf((zf - h.mu) / h.sigma);
-    h.ready = true;
-    if (prof) {
-      prof.appendixCalls++;
-      prof.cdfCalls++;
-    }
-  }
-
-  const interact = []; // reused indices into hits (μ-ascending)
-
-  /** Appendix-A T(z) on the current interact[] list only. */
-  function T_interact(z) {
-    const m = interact.length;
-    if (!m) return 1;
-    let tauFar = 0;
-    let logPrefix = 0;
-    let sum = 1;
-    for (let t = 0; t < m; t++) {
-      const h = hits[interact[t]];
-      ensureReady(h);
-      const B = Math.expm1(h.w) * Math.exp(logPrefix);
-      logPrefix += h.w;
-      tauFar += h.w * h.cdfZf;
-      sum += B * cdf((z - h.mu - h.delta) * h.invNu);
+function T_appendixRange(hits, lo, hi, z, zf, cdf, prof) {
+  if (hi <= lo) return 1;
+  let tauFar = 0;
+  let logPrefix = 0;
+  let sum = 1;
+  for (let t = hi - 1; t >= lo; t--) {
+    const h = hits[t];
+    if (!h.ready) {
+      const p = appendixAParams(h.w, h.sigma, cdf);
+      h.delta = p.delta;
+      h.nu = p.nu;
+      h.invNu = 1 / h.nu;
+      h.cdfZf = cdf((zf - h.mu) / h.sigma);
+      h.ready = true;
       if (prof) {
-        prof.tSliceIters++;
+        prof.appendixCalls++;
         prof.cdfCalls++;
       }
     }
-    if (prof) prof.tSliceCalls++;
-    return Math.exp(-tauFar) * sum;
-  }
-
-  let r = 0,
-    gch = 0,
-    b = 0;
-  let exited = false;
-  let lastT = 1;
-  let interactCount = 0;
-  let beerCount = 0;
-  let interactMax = 0;
-  let cappedCount = 0;
-  let frontScans = 0;
-  const cap = maxInteract > 0 ? maxInteract | 0 : 1e9;
-
-  // Front-to-back: largest μ first
-  for (let i = n - 1; i >= 0; i--) {
-    const hi = hits[i];
-    interact.length = 0;
-    let interactW = 0;
-    const frontW = prefix[n] - prefix[i + 1];
-
-    for (let j = i + 1; j < n; j++) {
-      frontScans++;
-      const hj = hits[j];
-      const gap = hj.mu - hi.mu;
-      if (gap <= kSigma * (hi.sigma + hj.sigma)) {
-        interact.push(j);
-        interactW += hj.w;
-        if (interact.length >= cap) {
-          cappedCount += n - 1 - j;
-          break;
-        }
-      }
-    }
-
-    const beerW = frontW - interactW;
-    beerCount += n - 1 - i - interact.length;
-    interactCount += interact.length;
-    if (interact.length > interactMax) interactMax = interact.length;
-
-    const T_local = Math.max(0, Math.min(1.5, T_interact(hi.mu)));
-    const T = Math.exp(-beerW) * T_local;
-    lastT = T;
-    const alpha = -Math.expm1(-hi.w);
-    r += hi.color[0] * alpha * T;
-    gch += hi.color[1] * alpha * T;
-    b += hi.color[2] * alpha * T;
-
-    if (T < eps) {
-      exited = true;
-      break;
+    const B = Math.expm1(h.w) * Math.exp(logPrefix);
+    logPrefix += h.w;
+    tauFar += h.w * h.cdfZf;
+    sum += B * cdf((z - h.mu - h.delta) * h.invNu);
+    if (prof) {
+      prof.tSliceIters++;
+      prof.cdfCalls++;
     }
   }
-
-  const Tbg = exited ? lastT : Math.exp(-wAll);
-  r += bg[0] * Tbg;
-  gch += bg[1] * Tbg;
-  b += bg[2] * Tbg;
-
-  if (prof) {
-    prof.interactPairs = (prof.interactPairs || 0) + interactCount;
-    prof.beerPairs = (prof.beerPairs || 0) + beerCount;
-    prof.cappedPairs = (prof.cappedPairs || 0) + cappedCount;
-    prof.frontScans = (prof.frontScans || 0) + frontScans;
-    if (interactMax > (prof.interactMax || 0)) prof.interactMax = interactMax;
-  }
-
-  return { r, g: gch, b, T: Tbg, evals: n, exited };
+  if (prof) prof.tSliceCalls++;
+  return Math.exp(-tauFar) * sum;
 }
 
 /**
@@ -472,7 +338,7 @@ export function renderFrame(scene, camera, opts = {}) {
   let splatEvals = 0;
   let earlyOutPixels = 0;
   let pixelsFilled = 0;
-  // Reused hit pool — avoid per-hit object allocation (was ~600k allocs/frame).
+  // Sliding-window hit pool (near→far). winLo..nHits = active Φ candidates.
   const hitPool = Array.from({ length: maxPerPixel }, () => ({
     mu: 0,
     sigma: 0,
@@ -484,12 +350,9 @@ export function renderFrame(scene, camera, opts = {}) {
     invNu: 0,
     cdfZf: 0,
   }));
-  const wPrefixBuf = new Float64Array(maxPerPixel + 1);
   const approxProf = detailProf && blendMode === "approx" ? prof : null;
-  const timePhases = detailProf && blendMode === "approx";
-  let gatherMsAcc = 0;
-  let compositeMsAcc = 0;
-  const beerEarlyW = eps > 0 ? -Math.log(eps) : Infinity;
+  const zf = 0;
+  const phiCap = maxInteract > 0 ? maxInteract | 0 : 0; // 0 = unlimited
 
   const t0 = performance.now();
 
@@ -510,10 +373,14 @@ export function renderFrame(scene, camera, opts = {}) {
           let hits = 0;
 
           if (blendMode === "approx") {
-            let tPhase = timePhases ? performance.now() : 0;
+            // Single near→far pass: sliding window of overlapping fronts.
+            // Evict non-overlapping → Beer; Φ-couple up to maxInteract nearest.
             let nHits = 0;
-            let wSum = 0;
-            // Tile list is depth-sorted (near→far). Gather keeps that order.
+            let winLo = 0;
+            let beerW = 0;
+            let windowW = 0;
+            let lastT = 1;
+
             for (let k = 0; k < list.length; k++) {
               if (detailProf) prof.listTests++;
               const s = list[k];
@@ -529,62 +396,87 @@ export function renderFrame(scene, camera, opts = {}) {
               const alpha = Math.min(0.999, s.opacity * gauss);
               if (alpha < 1e-4) continue;
 
+              const curMu = -s.depth;
+              const curSigma = s.sigma;
               const w = -Math.log(1 - alpha);
+
+              // Evict fronts that no longer overlap this emitter → Beer.
+              while (winLo < nHits) {
+                const old = hitPool[winLo];
+                if (approxProf) approxProf.frontScans++;
+                if (old.mu - curMu <= kSigma * (old.sigma + curSigma)) break;
+                beerW += old.w;
+                windowW -= old.w;
+                winLo++;
+                if (approxProf) approxProf.beerPairs++;
+              }
+
+              const winLen = nHits - winLo;
+              const nPhi =
+                phiCap > 0 ? Math.min(phiCap, winLen) : winLen;
+              const phi0 = nHits - nPhi;
+
+              let beerExtra = 0;
+              for (let t = winLo; t < phi0; t++) {
+                beerExtra += hitPool[t].w;
+                if (approxProf) approxProf.cappedPairs++;
+              }
+
+              const T_local = Math.max(
+                0,
+                Math.min(
+                  1.5,
+                  T_appendixRange(
+                    hitPool,
+                    phi0,
+                    nHits,
+                    curMu,
+                    zf,
+                    cdf,
+                    approxProf,
+                  ),
+                ),
+              );
+              const T = Math.exp(-(beerW + beerExtra)) * T_local;
+              lastT = T;
+
+              const a = -Math.expm1(-w);
+              r += s.color[0] * a * T;
+              gch += s.color[1] * a * T;
+              b += s.color[2] * a * T;
+
+              if (approxProf) {
+                approxProf.interactPairs += nPhi;
+                if (nPhi > approxProf.interactMax) approxProf.interactMax = nPhi;
+              }
+
+              // Append into window for later (farther) emitters.
               const h = hitPool[nHits++];
-              h.mu = -s.depth;
-              h.sigma = s.sigma;
+              h.mu = curMu;
+              h.sigma = curSigma;
               h.w = w;
               h.color = s.color;
               h.ready = false;
-              wSum += w;
+              windowW += w;
+              hits++;
+              splatEvals++;
 
-              // Beer early-out (same idea as alpha T*=(1-α)): skip far hits
-              if (nHits >= maxPerPixel || wSum >= beerEarlyW) {
+              if (T < eps || nHits >= maxPerPixel) {
                 exited = true;
                 break;
               }
             }
 
-            // Near→far gather → μ = -depth descending; reverse → μ-ascending.
-            for (let a = 0, b = nHits - 1; a < b; a++, b--) {
-              const tmp = hitPool[a];
-              hitPool[a] = hitPool[b];
-              hitPool[b] = tmp;
-            }
+            const Tbg = exited ? lastT : Math.exp(-(beerW + windowW));
+            r += bg[0] * Tbg;
+            gch += bg[1] * Tbg;
+            b += bg[2] * Tbg;
 
-            if (timePhases) {
-              const mid = performance.now();
-              gatherMsAcc += mid - tPhase;
-              tPhase = mid;
-            }
-
-            const out = compositeApprox(
-              hitPool,
-              nHits,
-              bg,
-              eps,
-              approxProf,
-              kSigma,
-              maxInteract,
-              cdf,
-              wPrefixBuf,
-            );
-
-            if (timePhases) {
-              compositeMsAcc += performance.now() - tPhase;
-            }
-
-            if (out.evals > 0) {
+            if (hits > 0) {
               prof.pixelsComposited++;
-              prof.hitSum += out.evals;
-              if (out.evals > prof.hitMax) prof.hitMax = out.evals;
+              prof.hitSum += hits;
+              if (hits > prof.hitMax) prof.hitMax = hits;
             }
-            r = out.r;
-            gch = out.g;
-            b = out.b;
-            splatEvals += out.evals;
-            hits = out.evals;
-            exited = exited || out.exited;
           } else {
             let T = 1.0;
             for (let k = 0; k < list.length; k++) {
@@ -640,27 +532,11 @@ export function renderFrame(scene, camera, opts = {}) {
   const ms = performance.now() - t0;
   if (true) {
     prof.rasterMs = ms;
-    if (blendMode === "approx" && timePhases) {
-      // Measured (includes timer overhead); normalize to raster ms.
-      const raw = gatherMsAcc + compositeMsAcc;
-      if (raw > 1e-6) {
-        prof.gatherMs = ms * (gatherMsAcc / raw);
-        prof.compositeMs = ms * (compositeMsAcc / raw);
-        prof.phaseTimed = true;
-      } else {
-        prof.gatherMs = ms;
-        prof.compositeMs = 0;
-        prof.phaseTimed = false;
-      }
-    } else if (blendMode === "approx") {
-      prof.gatherMs = ms;
-      prof.compositeMs = 0;
-      prof.phaseTimed = false;
-    } else {
-      prof.gatherMs = ms;
-      prof.compositeMs = 0;
-      prof.phaseTimed = false;
-    }
+    // Fused gather+composite — no separate phase split.
+    prof.gatherMs = 0;
+    prof.compositeMs = blendMode === "approx" ? ms : 0;
+    prof.phaseTimed = false;
+    prof.fused = blendMode === "approx";
   }
 
   const hitMean = prof.pixelsComposited ? prof.hitSum / prof.pixelsComposited : 0;
