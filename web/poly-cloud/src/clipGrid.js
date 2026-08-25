@@ -13,21 +13,11 @@ import { evalMonomial3D } from "./fit.js";
 
 export const MAX_DEG = 16;
 /** Default tile width for middle-out coarse lattice (pixels). */
-export const BABBAGE_TILE = 256;
-
-function clear(arr) {
-  arr.fill(0);
-}
-
-export function horner1d(a, deg, x) {
-  let s = 0;
-  for (let i = deg; i >= 0; i--) s = s * x + (a[i] || 0);
-  return s;
-}
+const BABBAGE_TILE = 256;
 
 /** Chebyshev roots (1st kind) on (-1,1) — avoids Lobatto endpoints where the
  *  world poly explodes outside the fit box and wrecks f32 / barycentric. */
-export function chebRootNodes(nAlpha) {
+function chebRootNodes(nAlpha) {
   const M = Math.max(1, nAlpha | 0);
   const u = new Float64Array(M);
   for (let j = 0; j < M; j++) {
@@ -58,64 +48,6 @@ export function ndcToDirMatrix(camera, sx, sy) {
 export function perspectiveDirScale(camera) {
   const tan = Math.tan((camera.fov * Math.PI) / 180 / 2);
   return { sx: tan * camera.aspect, sy: tan };
-}
-
-function mulLinear(poly, a0, a1, max1d, out) {
-  clear(out);
-  for (let t = 0; t <= max1d; t++) {
-    const v = poly[t];
-    if (v === 0) continue;
-    out[t] += v * a0;
-    if (t + 1 <= max1d) out[t + 1] += v * a1;
-  }
-}
-
-/**
- * Exact LOS-style γ(u) = f(P0 + u·Du) via nested Horner (float64).
- */
-export function composeGammaNested(worldMono, deg, P0, Du, gamma) {
-  const n = deg + 1;
-  const max1d = 3 * deg;
-  const nAlpha = max1d + 1;
-  clear(gamma);
-
-  const zPow = new Array(n);
-  for (let k = 0; k < n; k++) zPow[k] = new Float64Array(nAlpha);
-  const pk = new Float64Array(nAlpha);
-  const tmp = new Float64Array(nAlpha);
-  pk[0] = 1;
-  for (let k = 0; k <= deg; k++) {
-    zPow[k].set(pk);
-    if (k === deg) break;
-    mulLinear(pk, P0[2], Du[2], max1d, tmp);
-    pk.set(tmp);
-  }
-
-  const si = new Float64Array(nAlpha);
-  const row = new Float64Array(nAlpha);
-  for (let i = deg; i >= 0; i--) {
-    clear(si);
-    for (let j = deg; j >= 0; j--) {
-      clear(row);
-      for (let k = 0; k <= deg; k++) {
-        const c = worldMono[i + j * n + k * n * n];
-        if (Math.abs(c) < 1e-20) continue;
-        const zp = zPow[k];
-        for (let m = 0; m < nAlpha; m++) row[m] += c * zp[m];
-      }
-      if (j < deg) {
-        mulLinear(si, P0[1], Du[1], max1d, tmp);
-        si.set(tmp);
-      }
-      for (let m = 0; m < nAlpha; m++) si[m] += row[m];
-    }
-    if (i < deg) {
-      mulLinear(gamma, P0[0], Du[0], max1d, tmp);
-      gamma.set(tmp);
-    }
-    for (let m = 0; m < nAlpha; m++) gamma[m] += si[m];
-  }
-  return max1d;
 }
 
 function intersectRayBox(ro, rd, h) {
@@ -201,7 +133,7 @@ function coarseStep(span, D) {
 /**
  * Bake dens(t_j) sample planes via f64 coarse-step Babbage + Newton subdivision.
  */
-export function fillGammaGrid(worldMono, deg, width, height, x0, dx, y0, dy, ro, half, M, tilePx = BABBAGE_TILE) {
+function fillGammaGrid(worldMono, deg, width, height, x0, dx, y0, dy, ro, half, M, tilePx = BABBAGE_TILE) {
   const max1d = 3 * deg;
   const nAlpha = max1d + 1;
   const D = max1d;

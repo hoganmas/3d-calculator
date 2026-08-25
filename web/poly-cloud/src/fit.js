@@ -1,4 +1,6 @@
-/** Expression parse + 3D Chebyshev fit → world monomials + camera pullback. */
+/** Expression parse + 3D Chebyshev fit → world monomials. */
+
+import { MAX_DEG } from "./clipGrid.js";
 
 const FN = new Set(["sin", "cos", "tan", "exp", "log", "ln", "sqrt", "abs", "max", "min", "hypot"]);
 
@@ -336,7 +338,7 @@ function chebToMonoTable(deg) {
  * Chebyshev tensor c_ijk T_i(x/h)T_j(y/h)T_k(z/h)
  * → monomials m_abc for x^a y^b z^c (same packing).
  */
-export function chebToMonomial3D(chebCoeffs, deg, half) {
+function chebToMonomial3D(chebCoeffs, deg, half) {
   const N = deg;
   const n = N + 1;
   const T = chebToMonoTable(N);
@@ -387,136 +389,6 @@ export function evalMonomial3D(mono, deg, x, y, z) {
   }
   return s;
 }
-
-function binomInt(n, k) {
-  if (k < 0 || k > n) return 0;
-  if (k === 0 || k === n) return 1;
-  if (k > n - k) k = n - k;
-  let r = 1;
-  for (let i = 1; i <= k; i++) r = (r * (n - k + i)) / i;
-  return r;
-}
-
-function intPow(b, e) {
-  let r = 1;
-  for (let i = 0; i < e; i++) r *= b;
-  return r;
-}
-
-/**
- * Change of origin to the camera: f_cam(p) = f_world(p + o).
- * Then rays are p(t)=t d (camera at 0) and α_m = Σ_{i+j+k=m} c_ijk d_x^i d_y^j d_z^k.
- */
-export function translateMonomial3D(mono, deg, ox, oy, oz) {
-  const n = deg + 1;
-  const out = new Float64Array(n * n * n);
-  for (let i = 0; i < n; i++) {
-    for (let j = 0; j < n; j++) {
-      for (let k = 0; k < n; k++) {
-        const c = mono[i + j * n + k * n * n];
-        if (Math.abs(c) < 1e-18) continue;
-        for (let a = 0; a <= i; a++) {
-          const wx = binomInt(i, a) * intPow(ox, i - a);
-          for (let b = 0; b <= j; b++) {
-            const wy = binomInt(j, b) * intPow(oy, j - b);
-            for (let d = 0; d <= k; d++) {
-              const wz = binomInt(k, d) * intPow(oz, k - d);
-              out[a + b * n + d * n * n] += c * wx * wy * wz;
-            }
-          }
-        }
-      }
-    }
-  }
-  return Float32Array.from(out);
-}
-
-/**
- * f_cam(p) = f_world(R p + t), with R 3×3 row-major [r00,r01,r02,r10,...], t vec3.
- * Output is a dense tensor-product of degree outDeg >= deg (use 3*deg).
- * Packing: idx = i + j*(outDeg+1) + k*(outDeg+1)^2 for u^i v^j w^k.
- */
-export function pullbackAffine(monoWorld, deg, R, t, outDeg) {
-  const nIn = deg + 1;
-  const nOut = outDeg + 1;
-  const out = new Float64Array(nOut * nOut * nOut);
-
-  // Dense poly multiply by linear form L = a u + b v + c w + d
-  const mulL = (poly, a, b, c, d) => {
-    const next = new Float64Array(nOut * nOut * nOut);
-    for (let i = 0; i < nOut; i++) {
-      for (let j = 0; j < nOut; j++) {
-        for (let k = 0; k < nOut; k++) {
-          const v = poly[i + j * nOut + k * nOut * nOut];
-          if (v === 0) continue;
-          if (d) next[i + j * nOut + k * nOut * nOut] += v * d;
-          if (a && i + 1 < nOut) next[i + 1 + j * nOut + k * nOut * nOut] += v * a;
-          if (b && j + 1 < nOut) next[i + (j + 1) * nOut + k * nOut * nOut] += v * b;
-          if (c && k + 1 < nOut) next[i + j * nOut + (k + 1) * nOut * nOut] += v * c;
-        }
-      }
-    }
-    return next;
-  };
-
-  const powLinear = (a, b, c, d, power) => {
-    let p = new Float64Array(nOut * nOut * nOut);
-    p[0] = 1;
-    for (let m = 0; m < power; m++) p = mulL(p, a, b, c, d);
-    return p;
-  };
-
-  const mulPoly = (A, B) => {
-    const next = new Float64Array(nOut * nOut * nOut);
-    for (let i1 = 0; i1 < nOut; i1++) {
-      for (let j1 = 0; j1 < nOut; j1++) {
-        for (let k1 = 0; k1 < nOut; k1++) {
-          const va = A[i1 + j1 * nOut + k1 * nOut * nOut];
-          if (va === 0) continue;
-          for (let i2 = 0; i2 < nOut - i1; i2++) {
-            for (let j2 = 0; j2 < nOut - j1; j2++) {
-              for (let k2 = 0; k2 < nOut - k1; k2++) {
-                const vb = B[i2 + j2 * nOut + k2 * nOut * nOut];
-                if (vb === 0) continue;
-                next[i1 + i2 + (j1 + j2) * nOut + (k1 + k2) * nOut * nOut] += va * vb;
-              }
-            }
-          }
-        }
-      }
-    }
-    return next;
-  };
-
-  // Cache powers of Lx, Ly, Lz
-  const Lx = [R[0], R[1], R[2], t[0]];
-  const Ly = [R[3], R[4], R[5], t[1]];
-  const Lz = [R[6], R[7], R[8], t[2]];
-  const powX = [];
-  const powY = [];
-  const powZ = [];
-  for (let p = 0; p < nIn; p++) {
-    powX[p] = powLinear(Lx[0], Lx[1], Lx[2], Lx[3], p);
-    powY[p] = powLinear(Ly[0], Ly[1], Ly[2], Ly[3], p);
-    powZ[p] = powLinear(Lz[0], Lz[1], Lz[2], Lz[3], p);
-  }
-
-  for (let i = 0; i < nIn; i++) {
-    for (let j = 0; j < nIn; j++) {
-      for (let k = 0; k < nIn; k++) {
-        const c = monoWorld[i + j * nIn + k * nIn * nIn];
-        if (Math.abs(c) < 1e-18) continue;
-        let term = mulPoly(powX[i], powY[j]);
-        term = mulPoly(term, powZ[k]);
-        for (let idx = 0; idx < out.length; idx++) out[idx] += c * term[idx];
-      }
-    }
-  }
-
-  return Float32Array.from(out);
-}
-
-import { MAX_DEG } from "./clipGrid.js";
 
 /**
  * Fit f on [-half,half]^3 with tensor Chebyshev, convert to world monomials.

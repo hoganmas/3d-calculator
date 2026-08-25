@@ -18,7 +18,7 @@ npm install
 npm run dev
 ```
 
-Requires **WebGPU** (`navigator.gpu`) for GPU bake + resident-atlas march. Without it, clip-grid falls back to CPU bake + WebGL `DataTexture` march.
+Requires **WebGPU** (`navigator.gpu`) for GPU dens bake + Beer march. Without it, clip-grid falls back to CPU bake + WebGL `DataTexture` march.
 
 ## Cost
 

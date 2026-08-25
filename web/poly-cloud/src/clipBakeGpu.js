@@ -15,11 +15,11 @@ import {
 } from "./clipGrid.js";
 
 /** Absolute caps (pipeline arrays specialize to active fit deg ≤ this). */
-export const MAX_N = MAX_DEG + 1;
-export const MAX_1D_N = 3 * MAX_DEG + 1;
+const MAX_N = MAX_DEG + 1;
+const MAX_1D_N = 3 * MAX_DEG + 1;
 export const MAX_COEFFS = MAX_N * MAX_N * MAX_N;
-/** Default tile width for amortized dens fill (CPU Babbage uses 256 in f64). */
-export const GPU_BABBAGE_TILE = 1024;
+/** Default max tile width for amortized dens fill (auto shrinks when far). */
+const GPU_BABBAGE_TILE = 1024;
 const WG_SIZE = 64;
 
 /**
@@ -32,7 +32,7 @@ const WG_SIZE = 64;
  *   positive: force that tile width (≥ D+1 for Clenshaw path).
  * @param {{ half?: number, tMid?: number, sx?: number, sy?: number, width?: number, height?: number }} [view]
  */
-export function gpuBabbageTile(deg, max1d, tileOverride = null, view = null) {
+function gpuBabbageTile(deg, max1d, tileOverride = null, view = null) {
   const D = Math.max(1, max1d | 0);
 
   if (tileOverride === "exact") {
@@ -61,7 +61,7 @@ export function gpuBabbageTile(deg, max1d, tileOverride = null, view = null) {
 }
 
 /** Per-degree sizes — WGSL locals/workgroup memory match fit deg (no max-N tax). */
-export function degSizes(deg) {
+function degSizes(deg) {
   const d = Math.min(MAX_DEG, Math.max(1, deg | 0));
   const maxN = d + 1;
   const max1d = 3 * d;
@@ -679,9 +679,6 @@ let canvasFormat = "bgra8unorm";
 let initPromise = null;
 let initFailed = false;
 
-/** Last resident bake metadata (matches atlasFront). */
-let resident = null;
-
 /** Pack Bake Params (must match BAKE_WGSL Params; size 112, buffer 128). */
 function packBakeParams(
   width,
@@ -786,10 +783,6 @@ export function isClipBakeGpuReady() {
   return Boolean(device && bakeSeedPipeline && bakeFillPipeline && marchPipeline);
 }
 
-export function hasResidentAtlas() {
-  return Boolean(resident && atlasFront && marchBindGroup);
-}
-
 /** True when WebGPU clip pipelines + canvas are ready for a per-frame bake+march. */
 export function isClipMarchReady() {
   return Boolean(device && bakeSeedPipeline && bakeFillPipeline && marchPipeline && ctx);
@@ -808,17 +801,10 @@ export function getClipGpuProfile() {
   };
 }
 
-export function clipBakeGpuStatus() {
-  if (isClipBakeGpuReady()) return "ready";
-  if (initFailed) return "unavailable";
-  if (initPromise) return "init";
-  return "idle";
-}
-
 /**
  * Create/attach the WebGPU canvas inside the viewport (under HUD, over Three).
  */
-export function attachClipGpuCanvas(viewportEl) {
+function attachClipGpuCanvas(viewportEl) {
   if (canvas) return canvas;
   canvas = document.createElement("canvas");
   canvas.className = "clip-gpu";
@@ -1385,48 +1371,5 @@ export function renderClipFrameGpu({
   if (useStamps) {
     void device.queue.onSubmittedWorkDone().then(() => scheduleStampReadback());
   }
-  resident = state;
-  return true;
-}
-
-/**
- * March-only (legacy). Prefer {@link renderClipFrameGpu} for the live path.
- */
-export function renderClipGridGpu({
-  fbW,
-  fbH,
-  scale,
-  steps,
-  absorb = [0.15, 0.25, 0.45],
-  emit = [0.55, 0.75, 1.0],
-}) {
-  if (!device || !marchPipeline || !ctx || !resident || !atlasFront || !marchBindGroup) {
-    return false;
-  }
-
-  resizeClipGpuCanvas(fbW, fbH);
-  device.queue.writeBuffer(
-    drawParamBuf,
-    0,
-    packDrawParams(resident, fbW, fbH, scale, steps, absorb, emit),
-  );
-
-  const enc = device.createCommandEncoder();
-  const view = ctx.getCurrentTexture().createView();
-  const pass = enc.beginRenderPass({
-    colorAttachments: [
-      {
-        view,
-        clearValue: { r: 0, g: 0, b: 0, a: 0 },
-        loadOp: "clear",
-        storeOp: "store",
-      },
-    ],
-  });
-  pass.setPipeline(marchPipeline);
-  pass.setBindGroup(0, marchBindGroup);
-  pass.draw(3);
-  pass.end();
-  device.queue.submit([enc.finish()]);
   return true;
 }
