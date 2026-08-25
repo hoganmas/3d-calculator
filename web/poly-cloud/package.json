@@ -9,6 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@cortex-js/compute-engine": "^0.119.0",
+    "mathlive": "^0.110.0",
     "three": "^0.170.0"
   },
   "devDependencies": {

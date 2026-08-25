@@ -272,6 +272,112 @@ const boxHelper = new THREE.LineSegments(
 );
 scene.add(boxHelper);
 
+/** World reference frame: unit grids + RGB axes (calculator-style). */
+const worldGrid = new THREE.Group();
+worldGrid.renderOrder = -1;
+scene.add(worldGrid);
+
+function makeAxisLabel(text, color, position) {
+  const size = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, size, size);
+  ctx.font = "600 42px 'IBM Plex Sans', system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = color;
+  ctx.fillText(text, size / 2, size / 2 + 2);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mat = new THREE.SpriteMaterial({
+    map: tex,
+    transparent: true,
+    depthTest: true,
+    depthWrite: false,
+  });
+  const spr = new THREE.Sprite(mat);
+  spr.scale.set(0.35, 0.35, 0.35);
+  spr.position.copy(position);
+  return spr;
+}
+
+function styleGrid(grid, opacity) {
+  const mats = Array.isArray(grid.material) ? grid.material : [grid.material];
+  for (const m of mats) {
+    m.transparent = true;
+    m.opacity = opacity;
+    m.depthWrite = false;
+  }
+}
+
+function rebuildWorldGrid(half) {
+  while (worldGrid.children.length) {
+    const child = worldGrid.children.pop();
+    child.geometry?.dispose?.();
+    if (child.material) {
+      const mats = Array.isArray(child.material) ? child.material : [child.material];
+      for (const m of mats) {
+        m.map?.dispose?.();
+        m.dispose?.();
+      }
+    }
+  }
+
+  const h = Math.max(0.5, half);
+  // Grid a bit past the fit box; aim for ~1 world-unit cells.
+  const extent = Math.ceil(h + 0.5);
+  const size = extent * 2;
+  const divisions = Math.max(2, size);
+  const major = 0x4a5568;
+  const minor = 0x2a3140;
+
+  const gridXZ = new THREE.GridHelper(size, divisions, major, minor);
+  styleGrid(gridXZ, 0.55);
+  worldGrid.add(gridXZ);
+
+  const gridXY = new THREE.GridHelper(size, divisions, major, minor);
+  gridXY.rotation.x = Math.PI / 2;
+  styleGrid(gridXY, 0.35);
+  worldGrid.add(gridXY);
+
+  const gridYZ = new THREE.GridHelper(size, divisions, major, minor);
+  gridYZ.rotation.z = Math.PI / 2;
+  styleGrid(gridYZ, 0.35);
+  worldGrid.add(gridYZ);
+
+  const axisLen = extent + 0.25;
+  const axisPositions = new Float32Array([
+    0, 0, 0, axisLen, 0, 0, // +X
+    0, 0, 0, 0, axisLen, 0, // +Y
+    0, 0, 0, 0, 0, axisLen, // +Z
+  ]);
+  const axisColors = new Float32Array([
+    0.9, 0.35, 0.38, 0.9, 0.35, 0.38,
+    0.35, 0.75, 0.48, 0.35, 0.75, 0.48,
+    0.4, 0.65, 0.95, 0.4, 0.65, 0.95,
+  ]);
+  const axisGeo = new THREE.BufferGeometry();
+  axisGeo.setAttribute("position", new THREE.BufferAttribute(axisPositions, 3));
+  axisGeo.setAttribute("color", new THREE.BufferAttribute(axisColors, 3));
+  const axes = new THREE.LineSegments(
+    axisGeo,
+    new THREE.LineBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+    }),
+  );
+  worldGrid.add(axes);
+
+  const tip = extent + 0.45;
+  worldGrid.add(makeAxisLabel("x", "#e85d66", new THREE.Vector3(tip, 0, 0)));
+  worldGrid.add(makeAxisLabel("y", "#5ecf7a", new THREE.Vector3(0, tip, 0)));
+  worldGrid.add(makeAxisLabel("z", "#6ea8fe", new THREE.Vector3(0, 0, tip)));
+}
+
 function setBoxHalf(h) {
   const s = 2 * h;
   volumeMesh.geometry.dispose();
@@ -280,7 +386,10 @@ function setBoxHalf(h) {
   boxHelper.geometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(s, s, s));
   uniforms.uHalf.value = h;
   clipUniforms.uHalf.value = h;
+  rebuildWorldGrid(h);
 }
+
+rebuildWorldGrid(2);
 
 function fmtRel(v) {
   if (!Number.isFinite(v)) return "∞";
