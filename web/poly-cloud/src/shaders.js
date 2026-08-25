@@ -11,7 +11,7 @@ void main() {
 /**
  * World monomials. FIT_DEG / FIT_N / FIT_1D / FIT_1D_N are compile-time
  * defines (set on fit) so loops and arrays scale with degree — no fixed
- * max-N tax from unrolled deg-8 bodies or a 729-float local coeff buffer.
+ * max-N tax from unrolled deg-8 bodies or a fixed local coeff buffer.
  */
 export const volumeFragment = /* glsl */ `
 precision highp float;
@@ -31,7 +31,8 @@ precision highp sampler2D;
 #endif
 
 uniform sampler2D uCoeffTex;
-uniform float uCoeffSize;
+uniform float uCoeffTexW;
+uniform float uCoeffTexH;
 uniform float uHalf;
 uniform float uScale;
 uniform int uSteps;
@@ -45,8 +46,10 @@ uniform vec3 uEmitColor;
 varying vec3 vWorldPos;
 
 float coeffAt(int idx) {
-  float f = (float(idx) + 0.5) / uCoeffSize;
-  return texture2D(uCoeffTex, vec2(f, 0.5)).r;
+  float w = uCoeffTexW;
+  float x = mod(float(idx), w);
+  float y = floor(float(idx) / w);
+  return texture2D(uCoeffTex, vec2((x + 0.5) / w, (y + 0.5) / uCoeffTexH)).r;
 }
 
 float safeInv(float x) {

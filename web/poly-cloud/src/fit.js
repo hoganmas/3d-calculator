@@ -516,11 +516,13 @@ export function pullbackAffine(monoWorld, deg, R, t, outDeg) {
   return Float32Array.from(out);
 }
 
+import { MAX_DEG } from "./clipGrid.js";
+
 /**
  * Fit f on [-half,half]^3 with tensor Chebyshev, convert to world monomials.
  */
 export function fitChebyshev3D(fn, half, deg) {
-  const N = Math.max(0, Math.min(8, deg | 0)); // cap 8 for shader
+  const N = Math.max(0, Math.min(MAX_DEG, deg | 0));
   const n = N + 1;
   const uNodes = new Array(n);
   const pts = new Array(n);
