@@ -213,7 +213,8 @@ export function mountExprList(opts) {
     if (slider instanceof HTMLInputElement) {
       slider.min = String(p.min);
       slider.max = String(p.max);
-      slider.step = String(p.step);
+      // Continuous thumb while playing — discrete step only for manual scrubbing.
+      slider.step = p.animating && !p.driven ? "any" : String(p.step);
       slider.disabled = !!p.driven;
       slider.title = p.driven ? `value ${fmtNum(p.value)} (driven)` : `${name} = ${fmtNum(p.value)}`;
       if (document.activeElement !== slider) slider.value = String(p.value);

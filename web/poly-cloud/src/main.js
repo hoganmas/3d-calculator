@@ -40,6 +40,7 @@ import {
   noteKeyframeLayer,
   ensureLayerKeyframes,
   sampleLayerKeyframes,
+  peekKeyframeBlend,
 } from "./animKeyframes.js";
 import {
   initClipBakeGpu,
@@ -1315,9 +1316,28 @@ function uploadFit(opts = {}) {
 /** Debounced Chebyshev refit when expr / deg / box size become valid. */
 let fitTimer = 0;
 const FIT_DEBOUNCE_MS = 320;
-/** Min ms between refits while a parameter is animating. */
+/** Min ms between full anim refits (DCT / dens CPU lerp). GPU blends update every frame. */
 const ANIM_FIT_MIN_MS = 50;
 let lastAnimFitAt = 0;
+
+/** Push current param → keyframe blend uniforms at full RAF rate (no volume rewrite). */
+function tickGpuKeyframeBlends() {
+  const cons = lastSceneBake?.constraints;
+  if (!cons?.length || !isClipBakeGpuReady()) return false;
+  /** @type {{ id: string, i0: number, i1: number, t: number }[]} */
+  const blends = [];
+  for (const c of cons) {
+    if (!c?.id || !Array.isArray(c.keyframes) || !c.keyframes.length) continue;
+    const b = peekKeyframeBlend(c.id);
+    if (!b) continue;
+    c.blend = { i0: b.i0, i1: b.i1, t: b.t };
+    blends.push(b);
+  }
+  if (!blends.length) return false;
+  setConstraintKeyframeBlends(blends);
+  clipDirty = true;
+  return true;
+}
 
 function scheduleUploadFit(delay = FIT_DEBOUNCE_MS) {
   if (fitTimer) clearTimeout(fitTimer);
@@ -1501,6 +1521,8 @@ function frame(rafNow) {
         }
       }
       exprListApi?.syncAllParamSliders?.();
+      // GPU iso keyframes: blend every frame so the thumb + field stay continuous.
+      tickGpuKeyframeBlends();
       if (t0 - lastAnimFitAt >= ANIM_FIT_MIN_MS) {
         lastAnimFitAt = t0;
         if (fitTimer) {

@@ -291,3 +291,17 @@ export function beginKeyframePass() {
 export function noteKeyframeLayer() {
   lastKfLayers++;
 }
+
+/**
+ * Current GPU blend segment for a cached layer (no bake / no lerp).
+ * @param {string} layerId
+ * @returns {{ id: string, i0: number, i1: number, t: number } | null}
+ */
+export function peekKeyframeBlend(layerId) {
+  const cache = caches.get(layerId);
+  if (!cache) return null;
+  const st = getParam(cache.paramName);
+  if (!st) return null;
+  const blend = segmentForValue(cache, st.value);
+  return { id: layerId, i0: blend.i0, i1: blend.i1, t: blend.t };
+}
