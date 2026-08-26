@@ -8,10 +8,42 @@ import {
   selectExpr,
   insertExprAfter,
   removeExpr,
+  mergeExprIntoPrevious,
   updateExpr,
   resolveExprRole,
 } from "./expressions.js";
 import { classifyExpr } from "./fit.js";
+
+function readFieldLatex(mf) {
+  return typeof mf.getValue === "function" ? String(mf.getValue("latex") || "") : String(mf.value || "");
+}
+
+/** True when the caret is collapsed at the start of the field. */
+function isCursorAtStart(mf) {
+  const sel = mf.selection;
+  if (sel?.ranges?.length) {
+    const [a, b] = sel.ranges[0];
+    return a === 0 && b === 0;
+  }
+  if (typeof mf.position === "number") return mf.position === 0;
+  if (typeof mf.selectionStart === "number") {
+    return mf.selectionStart === 0 && mf.selectionEnd === 0;
+  }
+  return false;
+}
+
+function focusFieldAt(root, id, offset) {
+  const mf = root.querySelector(`.expr-row[data-id="${id}"] math-field`);
+  if (!mf) return;
+  mf.focus?.();
+  if (typeof mf.position === "number") {
+    mf.position = offset;
+    return;
+  }
+  if (typeof mf.setSelectionRange === "function") {
+    mf.setSelectionRange(offset, offset);
+  }
+}
 
 /**
  * @param {{
@@ -76,13 +108,27 @@ export function mountExprList(opts) {
 
       mf.addEventListener("focus", () => selectExpr(item.id));
       mf.addEventListener("input", () => {
-        const latex =
-          typeof mf.getValue === "function" ? String(mf.getValue("latex") || "") : String(mf.value || "");
+        const latex = readFieldLatex(mf);
         updateExpr(item.id, { latex });
         badge.textContent = roleLabel(item.role, classifySafe(latex).kind);
         onExprChange();
       });
       mf.addEventListener("keydown", (ev) => {
+        if (ev.key === "Backspace" && isCursorAtStart(mf)) {
+          const idx = listExpressions().findIndex((e) => e.id === item.id);
+          if (idx > 0) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            updateExpr(item.id, { latex: readFieldLatex(mf) });
+            const merged = mergeExprIntoPrevious(item.id);
+            if (merged) {
+              onStructuralChange();
+              render();
+              queueMicrotask(() => focusFieldAt(root, merged.id, merged.caretOffset));
+            }
+            return;
+          }
+        }
         if (ev.key === "Enter" && !ev.shiftKey) {
           ev.preventDefault();
           ev.stopPropagation();

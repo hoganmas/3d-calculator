@@ -1,20 +1,9 @@
 /**
- * WebGPU clip-grid: IDCT volumes + two-pass march.
- *
- * Iso: proven shadeMode=1 color path (no frag_depth / discard).
- * Occlusion: rgba16float MRT with min-blend (core-blendable; not r32float).
- * Densities: one Beer ray through packed layers + per-layer colors (storage).
+ * WebGPU volume march: IDCT dens grids + iso manifolds + multi-layer Beer.
  */
-import { ndcToDirMatrix, perspectiveDirScale, MAX_DEG } from "./clipGrid.js";
-import { idctCheb3D } from "./chebIdct.js";
+import { ndcToDirMatrix, perspectiveDirScale } from "./clipGrid.js";
 
-const MAX_N = MAX_DEG + 1;
-export const MAX_COEFFS = MAX_N * MAX_N * MAX_N;
 export const MAX_DENS_LAYERS = 8;
-
-function volumeGridM(deg) {
-  return Math.max(2, (deg | 0) + 1);
-}
 
 /** Classic DrawParams layout (matches 872b141). volBase in the _p1 slot. */
 function makeIsoWgsl() {
@@ -64,12 +53,20 @@ fn densAt(ix: i32, iy: i32, iz: i32) -> f32 {
   return volume[base + u32(x) + u32(y) * draw.gridM + u32(z) * draw.gridM * draw.gridM];
 }
 
+fn densAtBase(base: u32, ix: i32, iy: i32, iz: i32) -> f32 {
+  let M = i32(draw.gridM);
+  let x = clamp(ix, 0, M - 1);
+  let y = clamp(iy, 0, M - 1);
+  let z = clamp(iz, 0, M - 1);
+  return volume[base + u32(x) + u32(y) * draw.gridM + u32(z) * draw.gridM * draw.gridM];
+}
+
 fn chebIndex(xi: f32) -> f32 {
   let x = clamp(xi, -1.0, 1.0);
   return f32(draw.gridM) / 3.141592653589793 * acos(x) - 0.5;
 }
 
-fn sampleVolume(p: vec3f) -> f32 {
+fn sampleFieldBase(base: u32, p: vec3f) -> f32 {
   let half = draw.half;
   let xi = p / half;
   if (abs(xi.x) > 1.0 || abs(xi.y) > 1.0 || abs(xi.z) > 1.0) { return 0.0; }
@@ -78,11 +75,15 @@ fn sampleVolume(p: vec3f) -> f32 {
   let tx = clamp(fx - f32(x0), 0.0, 1.0);
   let ty = clamp(fy - f32(y0), 0.0, 1.0);
   let tz = clamp(fz - f32(z0), 0.0, 1.0);
-  let c00 = mix(densAt(x0, y0, z0), densAt(x0 + 1, y0, z0), tx);
-  let c10 = mix(densAt(x0, y0 + 1, z0), densAt(x0 + 1, y0 + 1, z0), tx);
-  let c01 = mix(densAt(x0, y0, z0 + 1), densAt(x0 + 1, y0, z0 + 1), tx);
-  let c11 = mix(densAt(x0, y0 + 1, z0 + 1), densAt(x0 + 1, y0 + 1, z0 + 1), tx);
+  let c00 = mix(densAtBase(base, x0, y0, z0), densAtBase(base, x0 + 1, y0, z0), tx);
+  let c10 = mix(densAtBase(base, x0, y0 + 1, z0), densAtBase(base, x0 + 1, y0 + 1, z0), tx);
+  let c01 = mix(densAtBase(base, x0, y0, z0 + 1), densAtBase(base, x0 + 1, y0, z0 + 1), tx);
+  let c11 = mix(densAtBase(base, x0, y0 + 1, z0 + 1), densAtBase(base, x0 + 1, y0 + 1, z0 + 1), tx);
   return mix(mix(c00, c10, ty), mix(c01, c11, ty), tz);
+}
+
+fn sampleVolume(p: vec3f) -> f32 {
+  return sampleFieldBase(u32(draw.volBase), p);
 }
 
 fn fieldAt(p: vec3f) -> f32 {
@@ -91,14 +92,16 @@ fn fieldAt(p: vec3f) -> f32 {
   return d - draw.isoLevel;
 }
 
+/** Analytic ∇f from Chebyshev-diff IDCT slabs (∂/∂ξ,∂/∂η,∂/∂ζ), then / half → world. */
 fn fieldGrad(p: vec3f) -> vec3f {
   let half = draw.half;
-  let eps = max(half * 2.0 / f32(draw.gridM), half * 1e-3);
-  return vec3f(
-    sampleVolume(p + vec3f(eps, 0.0, 0.0)) - sampleVolume(p - vec3f(eps, 0.0, 0.0)),
-    sampleVolume(p + vec3f(0.0, eps, 0.0)) - sampleVolume(p - vec3f(0.0, eps, 0.0)),
-    sampleVolume(p + vec3f(0.0, 0.0, eps)) - sampleVolume(p - vec3f(0.0, 0.0, eps)),
-  );
+  let volN = draw.gridM * draw.gridM * draw.gridM;
+  let b0 = u32(draw.volBase);
+  let gxi = sampleFieldBase(b0 + volN, p);
+  let geta = sampleFieldBase(b0 + 2u * volN, p);
+  let gzeta = sampleFieldBase(b0 + 3u * volN, p);
+  let invH = select(0.0, 1.0 / half, abs(half) > 1e-12);
+  return vec3f(gxi, geta, gzeta) * invH;
 }
 
 fn shadeIso(p: vec3f, rd: vec3f) -> vec4f {
@@ -360,7 +363,7 @@ let lastPresentAt = 0;
 let profileMethod = "";
 let profileGridM = 0;
 
-const PIPELINE_EPOCH = 7;
+const PIPELINE_EPOCH = 8;
 let builtEpoch = -1;
 
 /** Classic 256-byte pack; volBase lives in the f32 pad after ro (index 11). */
@@ -432,8 +435,7 @@ function noteGpuPresent(submitWallAt) {
 
 export function getClipGpuProfile() {
   return {
-    seedMs: profileBakeMs,
-    fillMs: 0,
+    idctMs: profileBakeMs,
     marchMs: profileMarchMs,
     marchFbW: profileMarchFbW,
     marchFbH: profileMarchFbH,
@@ -441,8 +443,7 @@ export function getClipGpuProfile() {
     presentIntervalMs: profilePresentIntervalMs,
     lastPresentAt,
     method: profileMethod,
-    tile: profileGridM,
-    nTilesX: 1,
+    gridM: profileGridM,
     timestamps: timestampsSupported,
   };
 }
@@ -525,13 +526,6 @@ function ensureVolumeBuf(floatCount) {
   }
 }
 
-export function uploadChebVolume(cheb, deg, color = [0.55, 0.75, 1]) {
-  if (!device || !cheb) return null;
-  const M = volumeGridM(deg);
-  const { dens } = idctCheb3D(cheb, deg, M);
-  return uploadSceneVolumes({ densLayers: [{ dens, color }], constraints: [], M });
-}
-
 /** Update density colors without re-baking volumes. */
 export function uploadSceneColors(colors) {
   densColors = (colors || []).slice(0, MAX_DENS_LAYERS).map((c) => c || [0.55, 0.75, 1]);
@@ -553,16 +547,24 @@ export function uploadSceneVolumes(scene) {
     return [c[0], c[1], c[2]];
   });
 
-  const totalFloats = (cons.length + dens.length) * volN;
+  // Each constraint packs dens + gx + gy + gz (Chebyshev-diff IDCT slabs).
+  const consStride = 4;
+  const totalFloats = (cons.length * consStride + dens.length) * volN;
   scenePacked = totalFloats > 0 ? new Float32Array(Math.max(volN, totalFloats)) : null;
   let off = 0;
-  sceneConstraints = cons.map((c) => {
-    const base = off;
-    const src = c.dens;
-    if (scenePacked && src) {
+  const putVol = (src) => {
+    if (!scenePacked) return;
+    if (src && src.length) {
       scenePacked.set(src.length >= volN ? src.subarray(0, volN) : src, off);
     }
     off += volN;
+  };
+  sceneConstraints = cons.map((c) => {
+    const base = off;
+    putVol(c.dens);
+    putVol(c.gx);
+    putVol(c.gy);
+    putVol(c.gz);
     return {
       color: c.color || [0.9, 0.45, 0.35],
       isoLevel: Number.isFinite(c.isoLevel) ? c.isoLevel : 0,
@@ -573,9 +575,7 @@ export function uploadSceneVolumes(scene) {
   densPacked = dens.length > 0;
   if (densPacked && scenePacked) {
     for (let i = 0; i < dens.length; i++) {
-      const src = dens[i].dens;
-      scenePacked.set(src.length >= volN ? src.subarray(0, volN) : src, off);
-      off += volN;
+      putVol(dens[i].dens);
     }
   }
 

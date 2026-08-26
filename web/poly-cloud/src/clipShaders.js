@@ -1,4 +1,4 @@
-/** Fullscreen Beer march sampling a Chebyshev-root dens volume (IDCT bake). */
+/** WebGL fallback: fullscreen Beer march on a single summed dens volume (IDCT bake). */
 
 export const clipGridVertex = /* glsl */ `
 void main() {

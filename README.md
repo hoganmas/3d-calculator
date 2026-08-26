@@ -1,29 +1,28 @@
 # 3dgs-approx
 
-Research sandbox for Gaussian-mixture transmittance / radiance approximations and a small realtime web splat viewer with `T < ε` early-out. Polynomial track: **clip-grid** dens bake (GPU Chebyshev + Clenshaw) + Beer raymarch in `web/poly-cloud`.
+Research sandbox for Gaussian-mixture transmittance / radiance approximations, plus a realtime web splat viewer and a polynomial **poly-cloud** calculator.
 
 ## Layout
 
 ```
 research/
   gaussian/          # Appendix-A / blend / cluster / early-out Python
-    notes/           # approx-3dgs.md
-    results/         # JSON dumps from the scripts
+    notes/ results/
   poly/              # Polynomial density / transmittance track
-    notes/           # clip-space-babbage.md (golden), path-c.md (legacy), approx-poly.md
+    notes/           # cheb-idct-volume.md (poly-cloud), path-c.md, …
     curves/ results/
 web/
   gsplat/            # Realtime Kerbl-style software raster (Vite + Worker)
-  poly-cloud/        # Polynomial cloud viewer (clip-grid golden path)
+  poly-cloud/        # Multi-expression Chebyshev → IDCT → iso + Beer
 ```
 
-## Quick start — poly-cloud (clip-grid)
+## Quick start — poly-cloud
 
 ```bash
 cd web/poly-cloud && npm install && npm run dev
 ```
 
-Prefer mode **clip-grid**. Notes: `research/poly/notes/clip-space-babbage.md`. Legacy Path C: `research/poly/notes/path-c.md`.
+Fit → IDCT volumes → manifolds + density Beer. Notes: `research/poly/notes/cheb-idct-volume.md`.
 
 ## Quick start — realtime splat viewer
 

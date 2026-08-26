@@ -132,6 +132,23 @@ export function removeExpr(id) {
 }
 
 /**
+ * Merge row `id` into the one above (concat LaTeX). Keeps the upper row's color/role.
+ * @returns {{ id: string, caretOffset: number } | null}
+ */
+export function mergeExprIntoPrevious(id) {
+  const idx = items.findIndex((e) => e.id === id);
+  if (idx <= 0) return null;
+  const prev = items[idx - 1];
+  const cur = items[idx];
+  const caretOffset = prev.latex.length;
+  prev.latex = prev.latex + cur.latex;
+  items.splice(idx, 1);
+  selectedId = prev.id;
+  emit();
+  return { id: prev.id, caretOffset };
+}
+
+/**
  * @param {string} id
  * @param {Partial<ExprItem>} patch
  */

@@ -26,10 +26,9 @@ import {
   setExpressionsOnChange,
 } from "./expressions.js";
 import { mountExprList } from "./exprListUi.js";
-import { volumeVertex, volumeFragment } from "./shaders.js";
 import { clipGridVertex, clipGridFragment } from "./clipShaders.js";
 import { ndcToDirMatrix, perspectiveDirScale, MAX_DEG } from "./clipGrid.js";
-import { idctCheb3D } from "./chebIdct.js";
+import { idctCheb3D, idctChebGrad3D } from "./chebIdct.js";
 import {
   initClipBakeGpu,
   isClipBakeGpuReady,
@@ -42,7 +41,6 @@ import {
   uploadSceneVolumes,
   uploadSceneColors,
   hasUploadedVolume,
-  MAX_COEFFS,
 } from "./clipBakeGpu.js";
 
 const els = {
@@ -55,18 +53,8 @@ const els = {
   boxSize: document.getElementById("boxSize"),
   marchDownscale: document.getElementById("marchDownscale"),
   marchScaleLabel: document.getElementById("marchScaleLabel"),
-  babbageTile: document.getElementById("babbageTile"),
-  densFill: document.getElementById("densFill"),
-  mode: document.getElementById("mode"),
   reset: document.getElementById("reset"),
   err: document.getElementById("err"),
-  fitErr: document.getElementById("fitErr"),
-  fitMs: document.getElementById("fitMs"),
-  nCoeff: document.getElementById("nCoeff"),
-  cpuMs: document.getElementById("cpuMs"),
-  gpuMs: document.getElementById("gpuMs"),
-  basisMs: document.getElementById("basisMs"),
-  modeLabel: document.getElementById("modeLabel"),
   viewport: document.getElementById("viewport"),
   hud: document.getElementById("hud"),
   metricsDump: document.getElementById("metricsDump"),
@@ -409,15 +397,6 @@ renderer.setPixelRatio(1);
 renderer.setClearColor(0x07080b, 1);
 els.viewport.appendChild(renderer.domElement);
 
-const gl = renderer.getContext();
-const timerExt =
-  gl.getExtension("EXT_disjoint_timer_query_webgl2") ||
-  gl.getExtension("EXT_disjoint_timer_query");
-const useGpuTimer = Boolean(timerExt && gl.createQuery);
-let gpuQuery = null;
-let gpuQueryActive = false;
-let gpuMsSmooth = 0;
-
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(50, 1, 0.05, 100);
 camera.position.set(3.2, 2.4, 4.2);
@@ -429,26 +408,9 @@ controls.screenSpacePanning = true;
 controls.target.set(0, 0, 0);
 renderer.domElement.addEventListener("contextmenu", (e) => e.preventDefault());
 
-const COEFF_TEX_W = 64;
-const COEFF_TEX_H = Math.ceil(MAX_COEFFS / COEFF_TEX_W);
-const coeffData = new Float32Array(COEFF_TEX_W * COEFF_TEX_H);
-const coeffTex = new THREE.DataTexture(
-  coeffData,
-  COEFF_TEX_W,
-  COEFF_TEX_H,
-  THREE.RedFormat,
-  THREE.FloatType,
-);
-coeffTex.minFilter = THREE.NearestFilter;
-coeffTex.magFilter = THREE.NearestFilter;
-coeffTex.wrapS = THREE.ClampToEdgeWrapping;
-coeffTex.wrapT = THREE.ClampToEdgeWrapping;
-coeffTex.needsUpdate = true;
-
-let worldMono = null;
 /** @type {Float32Array | null} */
 let worldCheb = null;
-let fitDeg = 4;
+let fitDeg = 20;
 let clipDirty = true;
 let bakeMsSmooth = 0;
 let lastDensSubmitMs = 0;
@@ -460,38 +422,8 @@ let lastMetricsText = "";
 let copyMetricsResetTimer = 0;
 /** Last CPU Chebyshev→monomial fit breakdown (ms). */
 let lastFitTiming = null;
-
-const uniforms = {
-  uCoeffTex: { value: coeffTex },
-  uCoeffTexW: { value: COEFF_TEX_W },
-  uCoeffTexH: { value: COEFF_TEX_H },
-  uHalf: { value: 2 },
-  uScale: { value: 2.5 },
-  uSteps: { value: 32 },
-  uCameraPos: { value: new THREE.Vector3() },
-  uAbsorbColor: { value: new THREE.Color(0.15, 0.25, 0.45) },
-  uEmitColor: { value: new THREE.Color(0.55, 0.75, 1.0) },
-};
-
-const volumeMat = new THREE.ShaderMaterial({
-  vertexShader: volumeVertex,
-  fragmentShader: volumeFragment,
-  uniforms,
-  defines: {
-    FIT_DEG: 4,
-    FIT_N: 5,
-    FIT_1D: 12,
-    FIT_1D_N: 13,
-  },
-  transparent: true,
-  depthWrite: false,
-  side: THREE.BackSide,
-  blending: THREE.CustomBlending,
-  blendSrc: THREE.OneFactor,
-  blendDst: THREE.OneMinusSrcAlphaFactor,
-  blendSrcAlpha: THREE.OneFactor,
-  blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
-});
+let lastFitRel = NaN;
+let lastNCoeff = 0;
 
 const volPlaceholder = new Float32Array(8);
 const volumeTex = new THREE.DataTexture(volPlaceholder, 2, 4, THREE.RedFormat, THREE.FloatType);
@@ -534,29 +466,6 @@ const clipMat = new THREE.ShaderMaterial({
   blendSrcAlpha: THREE.OneFactor,
   blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
 });
-
-function setShaderDegree(deg) {
-  const d = Math.min(MAX_DEG, Math.max(1, deg | 0));
-  const next = {
-    FIT_DEG: d,
-    FIT_N: d + 1,
-    FIT_1D: 3 * d,
-    FIT_1D_N: 3 * d + 1,
-  };
-  const prev = volumeMat.defines || {};
-  if (
-    prev.FIT_DEG !== next.FIT_DEG ||
-    prev.FIT_N !== next.FIT_N ||
-    prev.FIT_1D !== next.FIT_1D ||
-    prev.FIT_1D_N !== next.FIT_1D_N
-  ) {
-    volumeMat.defines = { ...prev, ...next };
-    volumeMat.needsUpdate = true;
-  }
-}
-
-const volumeMesh = new THREE.Mesh(new THREE.BoxGeometry(4, 4, 4), volumeMat);
-scene.add(volumeMesh);
 
 const clipQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), clipMat);
 clipQuad.frustumCulled = false;
@@ -695,11 +604,8 @@ function rebuildWorldGrid(half) {
 function setBoxSize(size) {
   const s = Math.max(1e-6, size);
   const h = 0.5 * s;
-  volumeMesh.geometry.dispose();
-  volumeMesh.geometry = new THREE.BoxGeometry(s, s, s);
   boxHelper.geometry.dispose();
   boxHelper.geometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(s, s, s));
-  uniforms.uHalf.value = h;
   clipUniforms.uHalf.value = h;
   rebuildWorldGrid(h);
 }
@@ -737,21 +643,6 @@ function syncExprCompileState() {
   }
 }
 
-function isClipMode() {
-  return els.mode.value === "clipgrid";
-}
-
-function modeLabel() {
-  if (els.mode.value === "clipgrid") {
-    return `clip-grid · ${lastExprMeta.label || "scene"}`;
-  }
-  return "raymarch";
-}
-
-function readShadeMode() {
-  return lastExprMeta.shade === "iso" ? 1 : 0;
-}
-
 function readIsoLevel() {
   return Number.isFinite(lastExprMeta.isoLevel) ? lastExprMeta.isoLevel : 0;
 }
@@ -759,14 +650,12 @@ function readIsoLevel() {
 let loopFps = 0;
 let loopFpsFrames = 0;
 let loopFpsLast = performance.now();
-let densFps = 0;
-let densFpsFrames = 0;
 let cpuMsSmooth = 0;
 
-/** FPS shown in HUD — GPU present rate when clip/WebGPU is active, else rAF spacing. */
+/** FPS shown in HUD — GPU present rate when WebGPU is active, else rAF spacing. */
 function hudFpsText() {
   const loop = 1000 / Math.max(1, frameDtSmooth);
-  if (isClipMode() && useGpuClipPath()) {
+  if (useGpuClipPath()) {
     const p = getClipGpuProfile();
     const presentFresh =
       p.presentIntervalMs > 0 && performance.now() - p.lastPresentAt < 1200;
@@ -785,23 +674,19 @@ function hudText() {
   const w = els.viewport.clientWidth;
   const h = Math.max(els.viewport.clientHeight, 1);
   const pr = renderer.getPixelRatio();
-  const gl = useGpuTimer ? `${gpuMsSmooth.toFixed(1)}ms gl` : "gl n/a";
-  let clip = "";
-  if (isClipMode()) {
-    const submit = densSubmittedThisFrame
-      ? `submit ${bakeMsSmooth.toFixed(0)}ms`
-      : `submit miss (last ${lastDensSubmitMs.toFixed(0)}ms)`;
-    const p = getClipGpuProfile();
-    const gpuSplit = p.timestamps
-      ? ` · idct ${p.seedMs.toFixed(2)}/march ${p.marchMs.toFixed(1)}`
+  const submit = densSubmittedThisFrame
+    ? `submit ${bakeMsSmooth.toFixed(0)}ms`
+    : `submit miss (last ${lastDensSubmitMs.toFixed(0)}ms)`;
+  const p = getClipGpuProfile();
+  const gpuSplit = p.timestamps
+    ? ` · idct ${p.idctMs.toFixed(2)}/march ${p.marchMs.toFixed(1)}`
+    : "";
+  const present =
+    p.presentIntervalMs > 0 && performance.now() - p.lastPresentAt < 1200
+      ? ` · present ${p.presentIntervalMs.toFixed(0)}ms`
       : "";
-    const present =
-      p.presentIntervalMs > 0 && performance.now() - p.lastPresentAt < 1200
-        ? ` · present ${p.presentIntervalMs.toFixed(0)}ms`
-        : "";
-    clip = ` · rAF ${frameDtSmooth.toFixed(0)}ms · ${submit}${gpuSplit}${present} · vol ${lastVolumeM}³`;
-  }
-  return `${modeLabel()} · ${hudFpsText()} · ${cpuMsSmooth.toFixed(1)}ms js · ${gl}${clip} · ${Math.round(w * pr)}×${Math.round(h * pr)}`;
+  const clip = ` · rAF ${frameDtSmooth.toFixed(0)}ms · ${submit}${gpuSplit}${present} · vol ${lastVolumeM}³`;
+  return `clip-grid · ${hudFpsText()} · ${cpuMsSmooth.toFixed(1)}ms js${clip} · ${Math.round(w * pr)}×${Math.round(h * pr)}`;
 }
 
 function buildMetricsReport() {
@@ -810,44 +695,37 @@ function buildMetricsReport() {
   const p = getClipGpuProfile();
   const lines = [
     `poly-cloud metrics  ${new Date().toISOString()}`,
-    `mode            ${modeLabel()}`,
     `deg             ${fitDeg}`,
-    `scale           ${uniforms.uScale.value}`,
-    `steps           ${uniforms.uSteps.value}`,
-    `box size       ${2 * uniforms.uHalf.value}`,
-    `march_downscale   ${marchDownscale()}×`,
-    `march_resolution  ${(100 / marchDownscale()).toFixed(1)}%`,
+    `scale           ${clipUniforms.uScale.value}`,
+    `steps           ${clipUniforms.uSteps.value}`,
+    `box_size        ${2 * clipUniforms.uHalf.value}`,
+    `march_downscale ${marchDownscale()}×`,
+    `march_resolution ${(100 / marchDownscale()).toFixed(1)}%`,
     `viewport        ${fbW}×${fbH}`,
     `march_fb_req    ${marchFramebufferSize().mw}×${marchFramebufferSize().mh}`,
     `gpu_march_fb    ${p.marchFbW && p.marchFbH ? `${p.marchFbW}×${p.marchFbH}` : "—"}`,
     `loop_fps        ${Math.round(loopFps)}`,
     `loop_ms         ${frameDtSmooth.toFixed(2)}`,
-    `dens_fps        ${Math.round(densFps)}`,
     `js_frame_ms     ${cpuMsSmooth.toFixed(2)}`,
-    `webgl_ms        ${useGpuTimer ? gpuMsSmooth.toFixed(2) : "n/a"}`,
+    `gpu_path        ${useGpuClipPath() ? "webgpu" : "cpu/webgl"}`,
+    `gpu_method      ${p.method || "—"}`,
+    `expr_kind       ${lastExprMeta.kind}`,
+    `shade           ${lastExprMeta.shade}`,
+    `iso_level       ${readIsoLevel()}`,
+    `grid_m          ${lastVolumeM || p.gridM || "—"}`,
+    `march_submit_ms ${densSubmittedThisFrame ? bakeMsSmooth.toFixed(2) : "—"}`,
+    `march_last_ms   ${lastDensSubmitMs.toFixed(2)}`,
+    `gpu_timestamps  ${p.timestamps ? "yes" : "no"}`,
+    `idct_ms         ${p.idctMs ? p.idctMs.toFixed(3) : "n/a"}`,
+    `gpu_march_ms    ${p.timestamps ? p.marchMs.toFixed(3) : "n/a"}`,
+    `gpu_present_ms  ${p.presentWallMs > 0 ? p.presentWallMs.toFixed(2) : "n/a"}`,
+    `gpu_present_iv  ${p.presentIntervalMs > 0 ? p.presentIntervalMs.toFixed(2) : "n/a"}`,
+    `gpu_present_fps ${
+      p.presentIntervalMs > 0 ? Math.round(1000 / p.presentIntervalMs) : "n/a"
+    }`,
+    `fit_rel_L2      ${Number.isFinite(lastFitRel) ? fmtRel(lastFitRel) : "—"}`,
+    `n_coeffs        ${lastNCoeff || "—"}`,
   ];
-  if (isClipMode()) {
-    lines.push(
-      `dens_path       ${useGpuClipPath() ? "webgpu" : "cpu/webgl"}`,
-      `dens_method     ${p.method || "—"}`,
-      `expr_kind       ${lastExprMeta.kind}`,
-      `shade           ${lastExprMeta.shade}`,
-      `iso_level       ${readIsoLevel()}`,
-      `volume_M        ${lastVolumeM || p.tile || "—"}`,
-      `dens_submit_ms  ${densSubmittedThisFrame ? bakeMsSmooth.toFixed(2) : "—"}`,
-      `dens_last_ms    ${lastDensSubmitMs.toFixed(2)}`,
-      `gpu_timestamps  ${p.timestamps ? "yes" : "no"}`,
-      `gpu_idct_ms     ${p.seedMs ? p.seedMs.toFixed(3) : "n/a"}`,
-      `gpu_march_ms    ${p.timestamps ? p.marchMs.toFixed(3) : "n/a"}`,
-      `gpu_present_ms  ${p.presentWallMs > 0 ? p.presentWallMs.toFixed(2) : "n/a"}`,
-      `gpu_present_iv  ${p.presentIntervalMs > 0 ? p.presentIntervalMs.toFixed(2) : "n/a"}`,
-      `gpu_present_fps ${
-        p.presentIntervalMs > 0 ? Math.round(1000 / p.presentIntervalMs) : "n/a"
-      }`,
-    );
-  }
-  lines.push(`fit_rel_L2      ${els.fitErr?.textContent ?? "—"}`);
-  lines.push(`n_coeffs       ${els.nCoeff?.textContent ?? "—"}`);
   if (lastFitTiming) {
     const t = lastFitTiming;
     lines.push(
@@ -863,7 +741,7 @@ function buildMetricsReport() {
   const pNames = Object.keys(pv);
   if (pNames.length) {
     lines.push(
-      `params         ${pNames.map((n) => `${n}=${fmtParamNum(pv[n])}`).join(" ")}`,
+      `params          ${pNames.map((n) => `${n}=${fmtParamNum(pv[n])}`).join(" ")}`,
     );
   }
   return lines.join("\n");
@@ -925,14 +803,6 @@ function resize() {
   applyDisplaySize(vw, vh, vw, vh, { markClipDirty: true });
 }
 
-function uploadWorldCoeffs() {
-  if (!worldMono) return;
-  coeffData.fill(0);
-  coeffData.set(worldMono);
-  coeffTex.needsUpdate = true;
-  if (els.basisMs && !isClipMode()) els.basisMs.textContent = "world · once";
-}
-
 /** @type {{ densLayers: any[], constraints: any[], M: number, dens: Float32Array | null } | null} */
 let lastSceneBake = null;
 
@@ -946,9 +816,6 @@ function bakeChebVolume() {
   }
   lastVolumeM = M;
   if (dens) applyVolumeTexture(dens, M);
-  if (els.basisMs) {
-    els.basisMs.textContent = `idct · ${densLayers.length} dens · ${constraints.length} iso · ${M}³`;
-  }
   return { dens, M };
 }
 
@@ -985,12 +852,12 @@ function syncClipFiberUniforms() {
 }
 
 function useGpuClipPath() {
-  return isClipMode() && isClipBakeGpuReady() && isClipMarchReady();
+  return isClipBakeGpuReady() && isClipMarchReady();
 }
 
 function syncClipPresentation() {
   const gpu = useGpuClipPath();
-  clipQuad.visible = isClipMode() && !gpu;
+  clipQuad.visible = !gpu;
   setClipGpuCanvasVisible(gpu);
 }
 
@@ -1014,23 +881,15 @@ function drawClipGpuFrame() {
   const submitMs = performance.now() - t0;
   if (ok) {
     densSubmittedThisFrame = true;
-    densFpsFrames++;
     lastDensSubmitMs = submitMs;
-    const p = getClipGpuProfile();
     bakeMsSmooth = bakeMsSmooth * 0.85 + submitMs * 0.15;
     clipDirty = false;
-    if (els.basisMs) {
-      const split = p.timestamps
-        ? ` · march ${p.marchMs.toFixed(1)}ms`
-        : "";
-      els.basisMs.textContent = `idct ${lastVolumeM}³ · march ${p.marchFbW || mw}×${p.marchFbH || mh}${split}`;
-    }
   }
   return ok;
 }
 
 function syncClipCpuVolume() {
-  if (!worldCheb || !isClipMode() || useGpuClipPath()) return;
+  if (!worldCheb || useGpuClipPath()) return;
   if (clipDirty || !clipVolumeTex) bakeChebVolume();
   syncClipFiberUniforms();
   setClipGpuCanvasVisible(false);
@@ -1049,23 +908,6 @@ async function prepareClipGpuForDegree(deg) {
   } catch (e) {
     console.warn("[clip-grid] pipeline specialize failed", e);
     return false;
-  }
-}
-
-function syncModeUniforms() {
-  const clip = isClipMode();
-  volumeMesh.visible = !clip;
-  clipUniforms.uScale.value = uniforms.uScale.value;
-  clipUniforms.uSteps.value = uniforms.uSteps.value;
-  els.modeLabel.textContent = modeLabel();
-  resize();
-  syncClipPresentation();
-  if (clip) {
-    clipDirty = true;
-    if (!useGpuClipPath()) syncClipCpuVolume();
-  } else {
-    setClipGpuCanvasVisible(false);
-    clipQuad.visible = false;
   }
 }
 
@@ -1089,7 +931,6 @@ function uploadFit(opts = {}) {
 
     const densLayers = [];
     const constraints = [];
-    let mono = null;
     let cheb = null;
     let fitRel = NaN;
     let timingAcc = { sampleMs: 0, chebMs: 0, monoMs: 0, l2Ms: 0, totalMs: 0 };
@@ -1101,14 +942,21 @@ function uploadFit(opts = {}) {
       M = idct.M;
       const color = hexToRgb01(L.item.color);
       if (L.role === "constraint") {
-        // Iso field only — never added to density Beer layers.
-        constraints.push({ dens: idct.dens, color, isoLevel: L.compiled.isoLevel ?? 0 });
+        // Iso field + Chebyshev-analytic gradient slabs (∂/∂ξ,∂/∂η,∂/∂ζ).
+        const grad = idctChebGrad3D(fit.cheb, fit.deg, fit.deg + 1);
+        constraints.push({
+          dens: idct.dens,
+          gx: grad.gx,
+          gy: grad.gy,
+          gz: grad.gz,
+          color,
+          isoLevel: L.compiled.isoLevel ?? 0,
+        });
       } else {
         densLayers.push({ dens: idct.dens, color });
       }
       if (!cheb) {
         cheb = fit.cheb;
-        mono = fit.mono;
         fitRel = fit.fitRelL2;
       }
       for (const k of Object.keys(timingAcc)) {
@@ -1128,52 +976,23 @@ function uploadFit(opts = {}) {
     lastSceneBake = { densLayers, constraints, M, dens: densSum };
     const uploadMs = performance.now() - tUpload;
     lastFitTiming = { ...timingAcc, uploadMs };
-    if (els.fitMs) {
-      const t = lastFitTiming;
-      els.fitMs.textContent = `${t.totalMs.toFixed(0)}ms`;
-      els.fitMs.title = [
-        `${layers.length} expr`,
-        `sample ${t.sampleMs.toFixed(1)}ms`,
-        `cheb ${t.chebMs.toFixed(1)}ms`,
-        `mono ${t.monoMs.toFixed(1)}ms`,
-        `upload+fit wall ${t.uploadMs.toFixed(1)}ms`,
-      ].join(" · ");
-      els.fitMs.className =
-        "v " + (t.totalMs > 40 ? "warn" : t.totalMs > 16 ? "" : "ok");
-    }
+    lastNCoeff = (deg + 1) ** 3 * layers.length;
+    if (Number.isFinite(fitRel)) lastFitRel = fitRel;
 
-    worldMono = mono;
     worldCheb = cheb;
     fitDeg = deg;
-    uploadWorldCoeffs();
-    if (isClipMode()) bakeChebVolume();
+    bakeChebVolume();
 
-    setShaderDegree(deg);
-    uniforms.uScale.value = densScale;
-    uniforms.uSteps.value = steps;
     clipUniforms.uScale.value = densScale;
     clipUniforms.uSteps.value = steps;
     setBoxSize(boxSize);
 
-    const n = (deg + 1) ** 3 * layers.length;
-    if (Number.isFinite(fitRel)) {
-      els.fitErr.textContent = fmtRel(fitRel);
-      els.fitErr.className = "v " + (fitRel < 0.08 ? "ok" : "warn");
-    }
-    els.nCoeff.textContent = String(n);
-
-    const clip = isClipMode();
-    volumeMesh.visible = !clip;
-    clipUniforms.uScale.value = densScale;
-    clipUniforms.uSteps.value = steps;
-    els.modeLabel.textContent = modeLabel();
     if (!fromAnim) resize();
     clipDirty = true;
-    if (!fromAnim) settleHiRes = true;
     void prepareClipGpuForDegree(deg).then(() => {
       if (lastSceneBake) bakeChebVolume();
       syncClipPresentation();
-      if (clip && !useGpuClipPath()) {
+      if (!useGpuClipPath()) {
         clipDirty = true;
         syncClipCpuVolume();
       }
@@ -1210,8 +1029,6 @@ function applyRenderHyperparams() {
   const densScale = Number(els.scale.value) || 1;
   const steps = Math.min(96, Math.max(8, Number(els.steps.value) || 32));
   els.steps.value = String(steps);
-  uniforms.uScale.value = densScale;
-  uniforms.uSteps.value = steps;
   clipUniforms.uScale.value = densScale;
   clipUniforms.uSteps.value = steps;
   clipDirty = true;
@@ -1229,66 +1046,42 @@ els.boxSize.addEventListener("input", () => scheduleUploadFit(200));
 els.boxSize.addEventListener("change", () => scheduleUploadFit(0));
 els.scale.addEventListener("input", applyRenderHyperparams);
 els.scale.addEventListener("change", applyRenderHyperparams);
-els.mode.addEventListener("change", syncModeUniforms);
 els.steps.addEventListener("input", applyRenderHyperparams);
 els.steps.addEventListener("change", applyRenderHyperparams);
 function markMarchDirty() {
   syncMarchSlider();
   resetClipGpuProfile();
   clipDirty = true;
-  
 }
 els.marchDownscale?.addEventListener("input", markMarchDirty);
 els.marchDownscale?.addEventListener("change", markMarchDirty);
-els.babbageTile?.addEventListener("change", () => {
-  clipDirty = true;
-  
-});
-els.densFill?.addEventListener("change", () => {
-  clipDirty = true;
-  
-});
 els.reset.addEventListener("click", () => {
   camera.position.set(3.2, 2.4, 4.2);
   controls.target.set(0, 0, 0);
   controls.update();
   clipDirty = true;
 });
-els.copyMetrics?.addEventListener("click", () => {
+els.copyMetrics?.addEventListener("click", (ev) => {
+  ev.preventDefault();
+  ev.stopPropagation();
   void copyMetricsToClipboard();
 });
 
 window.addEventListener("resize", resize);
 resize();
+if (els.hud) els.hud.textContent = "clip-grid · idct volume";
 uploadFit();
 renderParamsUi();
 
-function pollGpuTimer() {
-  if (!useGpuTimer || !gpuQuery || gpuQueryActive) return;
-  const available = gl.getQueryParameter(gpuQuery, gl.QUERY_RESULT_AVAILABLE);
-  const disjoint = gl.getParameter(timerExt.GPU_DISJOINT_EXT);
-  if (!available) return;
-  if (!disjoint) {
-    const ns = gl.getQueryParameter(gpuQuery, gl.QUERY_RESULT);
-    const ms = ns / 1e6;
-    gpuMsSmooth = gpuMsSmooth * 0.8 + ms * 0.2;
-    if (els.gpuMs) els.gpuMs.textContent = `${gpuMsSmooth.toFixed(2)} ms`;
-  }
-  gl.deleteQuery(gpuQuery);
-  gpuQuery = null;
-}
-
 controls.addEventListener("start", () => {
-  if (!isClipMode()) return;
   clipDirty = true;
 });
 
 controls.addEventListener("change", () => {
-  if (isClipMode()) clipDirty = true;
+  clipDirty = true;
 });
 
 controls.addEventListener("end", () => {
-  if (!isClipMode()) return;
   clipDirty = true;
 });
 
@@ -1321,45 +1114,23 @@ function frame(rafNow) {
   if (t0 - loopFpsLast >= 500) {
     const winMs = t0 - loopFpsLast;
     loopFps = (loopFpsFrames * 1000) / winMs;
-    densFps = (densFpsFrames * 1000) / winMs;
     loopFpsFrames = 0;
-    densFpsFrames = 0;
     loopFpsLast = t0;
     if (els.hud) els.hud.textContent = hudText();
-    if (els.cpuMs) {
-      const p = isClipMode() && useGpuClipPath() ? getClipGpuProfile() : null;
-      const present =
-        p?.presentIntervalMs > 0
-          ? ` · ${p.presentIntervalMs.toFixed(1)} ms gpu present`
-          : "";
-      els.cpuMs.textContent = `${cpuMsSmooth.toFixed(2)} ms js · ${frameDtSmooth.toFixed(1)} ms rAF${present}`;
-    }
     refreshMetricsDump();
   }
 
   controls.update();
-  uniforms.uCameraPos.value.copy(camera.position);
+  clipUniforms.uCameraPos.value.copy(camera.position);
 
-  if (isClipMode() && worldCheb && !useGpuClipPath()) {
+  if (worldCheb && !useGpuClipPath()) {
     syncClipCpuVolume();
-  }
-
-  pollGpuTimer();
-  if (useGpuTimer && !gpuQuery) {
-    gpuQuery = gl.createQuery();
-    gl.beginQuery(timerExt.TIME_ELAPSED_EXT, gpuQuery);
-    gpuQueryActive = true;
   }
 
   renderer.render(scene, camera);
 
-  if (isClipMode() && worldCheb && useGpuClipPath()) {
+  if (worldCheb && useGpuClipPath()) {
     drawClipGpuFrame();
-  }
-
-  if (gpuQueryActive && gpuQuery) {
-    gl.endQuery(timerExt.TIME_ELAPSED_EXT);
-    gpuQueryActive = false;
   }
 
   const dt = performance.now() - t0;
@@ -1372,12 +1143,7 @@ void initClipBakeGpu(els.viewport).then(async (ok) => {
   if (ok && worldCheb) await prepareClipGpuForDegree(fitDeg);
   syncClipPresentation();
   clipDirty = true;
-  if (els.basisMs && isClipMode()) {
-    els.basisMs.textContent = ok
-      ? "idct volume · march every frame"
-      : "idct volume · webgl march";
-  }
-  if (isClipMode() && !useGpuClipPath()) {
+  if (!useGpuClipPath()) {
     syncClipCpuVolume();
   }
 });

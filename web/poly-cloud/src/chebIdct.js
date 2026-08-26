@@ -5,7 +5,7 @@
  */
 
 /** Univariate IDCT at M Chebyshev roots: v_m = Σ_{i=0}^{n-1} c_i T_i(ξ_m). */
-export function idctCheb1D(coeff, M) {
+function idctCheb1D(coeff, M) {
   const n = coeff.length;
   const out = new Float64Array(M);
   const invM = Math.PI / M;
@@ -19,6 +19,23 @@ export function idctCheb1D(coeff, M) {
     out[m] = s;
   }
   return out;
+}
+
+/**
+ * Chebyshev → derivative Chebyshev (same length, last mode 0).
+ * If s = Σ_{k=0}^{n-1} c_k T_k, returns d with s' = Σ d_k T_k.
+ */
+export function chebDiff1D(c) {
+  const n = c.length;
+  const d = new Float64Array(n);
+  if (n < 2) return d;
+  d[n - 1] = 0;
+  d[n - 2] = 2 * (n - 1) * (c[n - 1] || 0);
+  for (let k = n - 3; k >= 0; k--) {
+    d[k] = d[k + 2] + 2 * (k + 1) * (c[k + 1] || 0);
+  }
+  d[0] *= 0.5;
+  return d;
 }
 
 /**
@@ -68,8 +85,48 @@ export function idctCheb3D(cheb, deg, gridM) {
   return { dens, M, deg, n };
 }
 
-/** Continuous Chebyshev-root index for ξ ∈ [-1,1]: j = (M/π) acos(ξ) − ½. */
-export function chebRootIndex(xi, M) {
-  const x = Math.min(1, Math.max(-1, xi));
-  return (M / Math.PI) * Math.acos(x) - 0.5;
+/**
+ * ∂f/∂ξ, ∂f/∂η, ∂f/∂ζ on the same Chebyshev-root grid as idctCheb3D.
+ * Differentiates the Chebyshev tensor (exact for the approximant), then IDCT.
+ * World-space gradient is (1/half) · (gx, gy, gz).
+ */
+export function idctChebGrad3D(cheb, deg, gridM) {
+  const n = deg + 1;
+  const M = Math.max(n, gridM | 0 || n);
+  const n3 = n * n * n;
+  const cx = new Float64Array(n3);
+  const cy = new Float64Array(n3);
+  const cz = new Float64Array(n3);
+  const row = new Float64Array(n);
+
+  for (let j = 0; j < n; j++) {
+    for (let k = 0; k < n; k++) {
+      for (let i = 0; i < n; i++) row[i] = cheb[i + j * n + k * n * n] || 0;
+      const d = chebDiff1D(row);
+      for (let i = 0; i < n; i++) cx[i + j * n + k * n * n] = d[i];
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    for (let k = 0; k < n; k++) {
+      for (let j = 0; j < n; j++) row[j] = cheb[i + j * n + k * n * n] || 0;
+      const d = chebDiff1D(row);
+      for (let j = 0; j < n; j++) cy[i + j * n + k * n * n] = d[j];
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      for (let k = 0; k < n; k++) row[k] = cheb[i + j * n + k * n * n] || 0;
+      const d = chebDiff1D(row);
+      for (let k = 0; k < n; k++) cz[i + j * n + k * n * n] = d[k];
+    }
+  }
+
+  return {
+    gx: idctCheb3D(cx, deg, M).dens,
+    gy: idctCheb3D(cy, deg, M).dens,
+    gz: idctCheb3D(cz, deg, M).dens,
+    M,
+    deg,
+    n,
+  };
 }
