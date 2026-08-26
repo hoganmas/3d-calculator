@@ -14,6 +14,7 @@ import {
   updateExpr,
   updateExprSilent,
   getExprWarning,
+  commitAutoParams,
 } from "./expressions.js";
 import { classifyExpr } from "./fit.js";
 import {
@@ -161,6 +162,45 @@ export function mountExprList(opts) {
   const { root, onExprChange, onStructuralChange, onColorChange, onParamChange } = opts;
   const paramNotify = onParamChange || onExprChange;
 
+  /** >0 while list DOM is rebuilt / focus restored — ignore blur commits. */
+  let suppressAutoCommit = 0;
+
+  function beginSuppressAutoCommit() {
+    suppressAutoCommit++;
+  }
+
+  function endSuppressAutoCommit() {
+    queueMicrotask(() => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          suppressAutoCommit = Math.max(0, suppressAutoCommit - 1);
+        });
+      });
+    });
+  }
+
+  function focusedExprIdInList() {
+    const snap = captureFocus();
+    return snap?.id ?? null;
+  }
+
+  /**
+   * Commit ephemeral auto-params only after a real leave (other row or outside list).
+   * Re-render blur+restore must not commit, or prune never sees autoParam.
+   */
+  function scheduleCommitIfLeftExpr(fromExprId) {
+    queueMicrotask(() => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (suppressAutoCommit) return;
+          const focusedId = focusedExprIdInList();
+          if (focusedId === fromExprId) return;
+          commitAutoParams();
+        });
+      });
+    });
+  }
+
   function syncParamSlider(row, name) {
     const p = getParam(name);
     if (!p || !row) return;
@@ -202,7 +242,7 @@ export function mountExprList(opts) {
           ? "Pause animation"
           : "Animate between min and max";
     }
-    if (!p.hosted && mf && document.activeElement !== mf && !p.driven) {
+    if (mf && document.activeElement !== mf && !p.driven) {
       const cur = readFieldLatex(mf);
       if (cur !== p.latex) {
         if (typeof mf.setValue === "function") mf.setValue(p.latex, { silenceNotifications: true });
@@ -210,7 +250,7 @@ export function mountExprList(opts) {
       }
     }
     row.classList.toggle("has-error", !!p.error);
-    if (!p.hosted) mf?.classList.toggle("invalid", !!p.error);
+    mf?.classList.toggle("invalid", !!p.error);
   }
 
   function syncAllParamSliders() {
@@ -229,24 +269,15 @@ export function mountExprList(opts) {
    * @param {any} item
    * @param {string} paramName
    * @param {HTMLElement | null} mf
-   * @param {{ hosted: boolean }} opts
    */
-  function appendParamControls(mid, row, item, paramName, mf, opts) {
-    const hosted = !!opts.hosted;
+  function appendParamControls(mid, row, item, paramName, mf) {
     const p = getParam(paramName);
     const min = p?.min ?? item.sliderMin;
     const max = p?.max ?? item.sliderMax;
 
     const block = document.createElement("div");
-    block.className = "expr-param-block" + (hosted ? " is-hosted" : "");
+    block.className = "expr-param-block";
     block.dataset.paramBlock = paramName;
-
-    if (hosted) {
-      const lab = document.createElement("span");
-      lab.className = "expr-param-name";
-      lab.textContent = paramName;
-      block.appendChild(lab);
-    }
 
     const rail = document.createElement("div");
     rail.className = "expr-param-rail";
@@ -290,7 +321,7 @@ export function mountExprList(opts) {
         rewriteLatex: true,
       });
       if (next) {
-        if (!hosted && mf) {
+        if (mf) {
           updateExprSilent(item.id, { latex: next.latex, sliderAnimating: false });
           if (document.activeElement !== mf) {
             if (typeof mf.setValue === "function") mf.setValue(next.latex, { silenceNotifications: true });
@@ -381,21 +412,16 @@ export function mountExprList(opts) {
     requestAnimationFrame(() => requestAnimationFrame(apply));
   }
 
-  /** Params needed under a row: explicit `a=…` (owner only) and/or hosted free symbols. */
+  /** Params needed under a row: owning `a=…` declaration only. */
   function neededParamsForItem(item) {
-    /** @type {{ name: string, hosted: boolean }[]} */
+    /** @type {{ name: string }[]} */
     const out = [];
     const classified = String(item.latex || "").trim() ? classifyKind(item.latex) : null;
     if (classified?.kind === "parameter" && classified.paramName) {
       const p = getParam(classified.paramName);
-      // Skip duplicates — only the owning declaration gets slider chrome.
-      if (p && !p.hosted && p.exprId === item.id) {
-        out.push({ name: classified.paramName, hosted: false });
+      if (p && p.exprId === item.id) {
+        out.push({ name: classified.paramName });
       }
-    }
-    for (const n of listParamNames()) {
-      const p = getParam(n);
-      if (p?.hosted && p.exprId === item.id) out.push({ name: n, hosted: true });
     }
     return out;
   }
@@ -424,21 +450,20 @@ export function mountExprList(opts) {
         const name = block.getAttribute("data-param-block");
         if (name && !neededSet.has(name)) block.remove();
       });
-      for (const { name, hosted } of needed) {
+      for (const { name } of needed) {
         if (!mid.querySelector(`[data-param-block="${CSS.escape(name)}"]`)) {
-          appendParamControls(mid, row, item, name, mf, { hosted });
+          appendParamControls(mid, row, item, name, mf);
         }
       }
 
-      const explicit = needed.find((n) => !n.hosted);
-      const isParamDef = !!explicit;
+      const isParamDef = needed.length > 0;
       const warn = getExprWarning(item.id);
-      row.classList.toggle("is-param", needed.length > 0 || !!warn);
+      row.classList.toggle("is-param", isParamDef || !!warn);
       row.classList.toggle("is-param-def", isParamDef || !!warn);
       row.classList.toggle("is-hidden", !item.enabled);
       row.classList.toggle("selected", item.id === getSelectedId());
       row.classList.toggle("has-error", !!warn);
-      if (explicit) row.dataset.param = explicit.name;
+      if (isParamDef) row.dataset.param = needed[0].name;
       else delete row.dataset.param;
 
       const swatch = row.querySelector(".expr-color");
@@ -458,12 +483,14 @@ export function mountExprList(opts) {
   }
 
   function render() {
-    const focusSnap = captureFocus();
-    const items = listExpressions();
-    const selected = getSelectedId();
-    root.replaceChildren();
+    beginSuppressAutoCommit();
+    try {
+      const focusSnap = captureFocus();
+      const items = listExpressions();
+      const selected = getSelectedId();
+      root.replaceChildren();
 
-    for (const item of items) {
+      for (const item of items) {
       const classified = String(item.latex || "").trim() ? classifyKind(item.latex) : null;
       const warn = getExprWarning(item.id);
       const isParamKind = classified?.kind === "parameter";
@@ -472,19 +499,15 @@ export function mountExprList(opts) {
         !!paramName &&
         (() => {
           const p = getParam(paramName);
-          return !!(p && !p.hosted && p.exprId === item.id);
+          return !!(p && p.exprId === item.id);
         })();
-      const hostedNames = listParamNames().filter((n) => {
-        const p = getParam(n);
-        return !!(p && p.hosted && p.exprId === item.id);
-      });
 
       const row = document.createElement("div");
       row.className =
         "expr-row" +
         (item.id === selected ? " selected" : "") +
         (item.enabled ? "" : " is-hidden") +
-        (ownsParam || hostedNames.length || warn ? " is-param" : "") +
+        (ownsParam || warn ? " is-param" : "") +
         (ownsParam || warn ? " is-param-def" : "") +
         (warn ? " has-error" : "");
       row.dataset.id = item.id;
@@ -521,12 +544,17 @@ export function mountExprList(opts) {
         });
         const classified = classifyKind(readFieldLatex(mf));
         if (classified?.kind === "parameter" && classified.paramName) {
+          // Clicking the variable line counts as leaving the field expression.
+          if (!suppressAutoCommit) commitAutoParams();
           const next = stopParamAnimation(classified.paramName);
           if (next) {
             updateExprSilent(item.id, { sliderAnimating: false });
             syncParamSlider(row, classified.paramName);
           }
         }
+      });
+      mf.addEventListener("blur", () => {
+        scheduleCommitIfLeftExpr(item.id);
       });
       mf.addEventListener("input", () => {
         updateExpr(item.id, { latex: readFieldLatex(mf) });
@@ -588,10 +616,7 @@ export function mountExprList(opts) {
       }
 
       if (ownsParam && paramName) {
-        appendParamControls(mid, row, item, paramName, mf, { hosted: false });
-      }
-      for (const name of hostedNames) {
-        appendParamControls(mid, row, item, name, mf, { hosted: true });
+        appendParamControls(mid, row, item, paramName, mf);
       }
 
       const vis = document.createElement("button");
@@ -635,9 +660,12 @@ export function mountExprList(opts) {
       // Always the same 4 children so CSS grid never crushes mid during kind flips.
       row.append(swatch, mid, vis, del);
       root.appendChild(row);
-    }
+      }
 
-    restoreFocus(focusSnap);
+      restoreFocus(focusSnap);
+    } finally {
+      endSuppressAutoCommit();
+    }
   }
 
   return { render, syncAllParamSliders, syncParamChrome };

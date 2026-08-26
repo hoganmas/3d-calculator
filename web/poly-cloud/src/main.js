@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import "mathlive";
 import "mathlive/static.css";
-import { compileExpr, classifyExpr, fitChebyshev3D, PRESETS, formatParamLatexValue } from "./fit.js";
+import { compileExpr, classifyExpr, fitChebyshev3D, PRESETS, formatParamLatexValue, compileParamLatex } from "./fit.js";
 import {
   syncParamsFromDefinitions,
   applyParamSeed,
@@ -24,6 +24,9 @@ import {
   setExpressionsOnChange,
   replaceExprWarnings,
   getExprWarning,
+  insertExprAt,
+  removeExprSilent,
+  commitAutoParams,
 } from "./expressions.js";
 import { mountExprList } from "./exprListUi.js";
 import { clipGridVertex, clipGridFragment } from "./clipShaders.js";
@@ -82,7 +85,7 @@ function applyPreset(key) {
   const p = PRESETS[key] ?? PRESETS.blob;
   els.preset.value = key;
   pendingParamSeed = p.params ?? {};
-  // Density / constraint only — free params host their slider on this row.
+  // Density / constraint only — free params get auto-created `a=…` rows on compile.
   setExpressions([{ latex: p.latex }]);
   exprListApi?.render();
 }
@@ -101,9 +104,76 @@ function fmtParamNum(v) {
 }
 
 /**
+ * Insert missing `name=value` expression rows at the bottom (sorted) without UI notify.
+ * @param {string[]} names
+ */
+function ensureParamExprRows(names) {
+  const missing = [...new Set(names)].filter(Boolean).sort();
+  if (!missing.length) return false;
+  for (const name of missing) {
+    const seed = pendingParamSeed[name] ?? {};
+    const value = Number.isFinite(seed.value) ? seed.value : 1;
+    insertExprAt(listExpressions().length, {
+      latex: `${name}=${formatParamLatexValue(value)}`,
+      sliderMin: seed.min,
+      sliderMax: seed.max,
+      sliderSpeed: seed.speed,
+      sliderAnimating: !!(seed.animate ?? seed.animating),
+      sliderPhase: seed.phase,
+      autoParam: true,
+    });
+  }
+  return true;
+}
+
+/** Names referenced by field free-symbols or parameter RHS deps. */
+function collectParamReferences() {
+  /** @type {Set<string>} */
+  const refs = new Set();
+  for (const item of listExpressions()) {
+    if (!item.enabled || !String(item.latex || "").trim()) continue;
+    try {
+      const classified = classifyExpr(item.latex);
+      if (classified.kind === "parameter") {
+        const compiled = compileParamLatex(item.latex, classified.paramName);
+        for (const p of compiled.freeParams) refs.add(p);
+      } else {
+        const compiled = compileExpr(item.latex);
+        for (const p of compiled.freeParams) refs.add(p);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return refs;
+}
+
+/**
+ * Drop ephemeral auto-param rows that are no longer referenced (typing undo).
+ * Committed rows (after blur) are kept.
+ */
+function pruneUnusedAutoParams() {
+  const refs = collectParamReferences();
+  let removed = false;
+  for (const item of listExpressions()) {
+    if (!item.autoParam) continue;
+    let name = null;
+    try {
+      const classified = classifyExpr(item.latex);
+      if (classified.kind === "parameter") name = classified.paramName;
+    } catch {
+      continue;
+    }
+    if (!name || refs.has(name)) continue;
+    if (removeExprSilent(item.id)) removed = true;
+  }
+  return removed;
+}
+
+/**
  * Compile all expressions: parameter rows feed shared values; field rows become layers.
- * Free symbols without a dedicated `a=…` row host a slider on the field that uses them.
- * @param {{ rebuildUi?: boolean }} [opts]
+ * Free symbols without a dedicated `a=…` row get an auto-created parameter line.
+ * @param {{ rebuildUi?: boolean, _afterEnsure?: boolean }} [opts]
  */
 function compileAllExprs(opts = {}) {
   const rebuildUi = opts.rebuildUi !== false;
@@ -114,8 +184,6 @@ function compileAllExprs(opts = {}) {
   /** @type {{ item: any, compiled: any, fn: Function, role: string }[]} */
   const layers = [];
   const freeSet = new Set();
-  /** @type {Map<string, { id: string, item: any }>} */
-  const freeHost = new Map();
   const definedParams = new Set();
   /** @type {[string, string][]} */
   const warnings = [];
@@ -140,11 +208,8 @@ function compileAllExprs(opts = {}) {
       continue;
     }
     const compiled = compileExpr(item.latex);
-    for (const p of compiled.freeParams) {
-      freeSet.add(p);
-      if (!freeHost.has(p)) freeHost.set(p, { id: item.id, item });
-    }
-    // Spatially constant (0th-order) fields: keep param hosts, do not graph.
+    for (const p of compiled.freeParams) freeSet.add(p);
+    // Spatially constant (0th-order) fields: do not graph.
     if (!compiled.usesSpace || compiled.shade === "none") continue;
     const role = resolveExprRole(item.role, compiled.kind);
     layers.push({
@@ -170,52 +235,27 @@ function compileAllExprs(opts = {}) {
     phase: item.sliderPhase,
   }));
 
-  for (const name of [...freeSet].sort()) {
-    if (definedParams.has(name)) continue;
-    const host = freeHost.get(name);
-    const seed = pendingParamSeed[name] ?? {};
-    const value = Number.isFinite(seed.value) ? seed.value : 1;
-    const hostItem = host?.item;
-    defs.push({
-      name,
-      latex: `${name}=${formatParamLatexValue(value)}`,
-      exprId: host?.id ?? "",
-      hosted: true,
-      min: seed.min ?? hostItem?.sliderMin,
-      max: seed.max ?? hostItem?.sliderMax,
-      speed: seed.speed ?? hostItem?.sliderSpeed,
-      animating: !!(seed.animate ?? seed.animating ?? hostItem?.sliderAnimating),
-      value,
-    });
-  }
-
   syncParamsFromDefinitions(defs, pendingParamSeed);
 
-  // Param-equation deps (a=b+1) without their own row → host on the equation row.
-  let depNames = recompileAllParams();
+  // Param-equation deps (a=b+1) without their own row.
+  const depNames = recompileAllParams();
   const known = new Set(defs.map((d) => d.name));
-  const extra = [...new Set(depNames)].filter((n) => !known.has(n));
-  if (extra.length) {
-    for (const name of extra) {
-      let host = paramRows.find((r) => String(r.item.latex).includes(name)) ?? paramRows[0];
-      if (!host) continue;
-      defs.push({
-        name,
-        latex: `${name}=${formatParamLatexValue(1)}`,
-        exprId: host.item.id,
-        hosted: true,
-      });
-      known.add(name);
-    }
-    syncParamsFromDefinitions(defs, pendingParamSeed);
-    recompileAllParams();
+  const needRows = [
+    ...[...freeSet].filter((n) => !definedParams.has(n)),
+    ...[...new Set(depNames)].filter((n) => !known.has(n) && !definedParams.has(n)),
+  ];
+
+  const pruned = !opts._afterEnsure && pruneUnusedAutoParams();
+  if ((pruned || needRows.length) && !opts._afterEnsure) {
+    if (needRows.length) ensureParamExprRows(needRows);
+    return compileAllExprs({ ...opts, _afterEnsure: true });
   }
 
   if (Object.keys(pendingParamSeed).length) {
     applyParamSeed(pendingParamSeed);
     for (const { item, name } of paramRows) {
       const p = getParam(name);
-      if (!p || p.hosted) continue;
+      if (!p) continue;
       updateExprSilent(item.id, {
         latex: p.latex,
         sliderMin: p.min,
@@ -233,7 +273,7 @@ function compileAllExprs(opts = {}) {
   for (const L of layers) L.fn = L.compiled.bind(params);
 
   if (rebuildUi) {
-    // In-place slider chrome keeps the math-field (and caret) alive while typing.
+    // Row inserts or kind flips: prefer full render when chrome can't sync in place.
     if (!exprListApi?.syncParamChrome?.()) {
       exprListApi?.render();
     }
@@ -1403,14 +1443,9 @@ function frame(rafNow) {
       if (animChanged) {
         for (const name of listParamNames()) {
           const p = getParam(name);
-          if (p?.exprId && !p.driven && !p.hosted) {
+          if (p?.exprId && !p.driven) {
             updateExprSilent(p.exprId, {
               latex: p.latex,
-              sliderAnimating: p.animating,
-              sliderPhase: p.phase,
-            });
-          } else if (p?.exprId && p.hosted && p.animating) {
-            updateExprSilent(p.exprId, {
               sliderAnimating: p.animating,
               sliderPhase: p.phase,
             });

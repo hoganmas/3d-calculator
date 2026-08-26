@@ -29,6 +29,7 @@ export const EXPR_COLORS = [
  *   sliderSpeed: number,
  *   sliderAnimating: boolean,
  *   sliderPhase: number,
+ *   autoParam: boolean,
  * }} ExprItem
  */
 
@@ -107,6 +108,7 @@ export function createExprItem(init = {}) {
           : 0.35,
     sliderAnimating: !!(init.sliderAnimating ?? init.animate),
     sliderPhase: Number.isFinite(init.sliderPhase) ? init.sliderPhase : Math.random(),
+    autoParam: !!init.autoParam,
   };
 }
 
@@ -146,6 +148,22 @@ export function setExpressions(list) {
 }
 
 /**
+ * Insert a row at `index` without selecting it or notifying listeners.
+ * Used when auto-creating parameter declarations during compile.
+ * @param {number} index
+ * @param {Partial<ExprItem>} [init]
+ */
+export function insertExprAt(index, init = {}) {
+  const at = Math.max(0, Math.min(items.length, index | 0));
+  const row = createExprItem({
+    ...init,
+    color: init.color ?? colorForIndex(at),
+  });
+  items.splice(at, 0, row);
+  return row;
+}
+
+/**
  * Insert a new expression after `afterId` (or at end). Selects the new row.
  * @param {string | null} [afterId]
  * @param {Partial<ExprItem>} [init]
@@ -177,6 +195,29 @@ export function removeExpr(id) {
     selectedId = row.id;
   }
   emit();
+}
+
+/** Remove without notifying listeners (compile-time auto-param prune). */
+export function removeExprSilent(id) {
+  const idx = items.findIndex((e) => e.id === id);
+  if (idx < 0) return false;
+  items.splice(idx, 1);
+  if (selectedId === id) {
+    selectedId = items[Math.min(idx, items.length - 1)]?.id ?? null;
+  }
+  if (items.length === 0) {
+    const row = createExprItem({ latex: "" });
+    items.push(row);
+    selectedId = row.id;
+  }
+  return true;
+}
+
+/** Mark auto-created param rows as permanent (user left the editing expression). */
+export function commitAutoParams() {
+  for (const item of items) {
+    if (item.autoParam) item.autoParam = false;
+  }
 }
 
 /**
