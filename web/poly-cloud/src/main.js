@@ -30,7 +30,7 @@ import {
 } from "./expressions.js";
 import { mountExprList } from "./exprListUi.js";
 import { clipGridVertex, clipGridFragment } from "./clipShaders.js";
-import { ndcToDirMatrix, perspectiveDirScale, MAX_DEG } from "./clipGrid.js";
+import { ndcToDirMatrix, perspectiveDirScale, offsetDirMatrix, MAX_DEG } from "./clipGrid.js";
 import { idctCheb3D, idctChebGrad3D } from "./chebIdct.js";
 import {
   beginKeyframePass,
@@ -845,6 +845,43 @@ function viewportSize() {
   return { vw, vh };
 }
 
+/** CSS px covered by the floating sidebar (0 on narrow layouts). */
+function compositionCoveredWidth(vw) {
+  if (typeof window !== "undefined" && window.matchMedia("(max-width: 800px)").matches) {
+    return 0;
+  }
+  const cs = getComputedStyle(document.documentElement);
+  const inset = parseFloat(cs.getPropertyValue("--panel-inset"));
+  const pw = parseFloat(cs.getPropertyValue("--panel-w"));
+  const covered = (Number.isFinite(inset) ? inset : 12) + (Number.isFinite(pw) ? pw : 360);
+  return Math.min(Math.max(0, covered), Math.max(0, vw - 160));
+}
+
+/** NDC x of the free-region center (0 when the panel does not inset composition). */
+function compositionNdcOffsetX(vw) {
+  const covered = compositionCoveredWidth(vw);
+  if (covered <= 1 || vw <= covered + 40) return 0;
+  return covered / vw;
+}
+
+function applyCameraComposition(vw, vh) {
+  // Keep projection in sync with offsetDirMatrix used by volume rays:
+  // rays aim forward at NDC x = +offset (free-region center to the right of the panel),
+  // so world points on the view axis must project to that same NDC x.
+  if (typeof camera.clearViewOffset === "function") camera.clearViewOffset();
+  camera.aspect = vw / Math.max(vh, 1);
+  camera.updateProjectionMatrix();
+  const o = compositionNdcOffsetX(vw);
+  if (Math.abs(o) > 1e-12) {
+    const e = camera.projectionMatrix.elements;
+    // Left-multiply by translate(x' = x + o*w): column c, row 0 += o * row 3.
+    for (let c = 0; c < 4; c++) {
+      e[c * 4 + 0] += o * e[c * 4 + 3];
+    }
+    camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
+  }
+}
+
 /** Clip-grid Beer march internal resolution (CSS-upscaled to the viewport). */
 function marchResolutionScale() {
   return 1 / marchDownscale();
@@ -860,8 +897,7 @@ function marchFramebufferSize() {
 }
 
 function applyDisplaySize(rw, rh, vw, vh, { markClipDirty = true } = {}) {
-  camera.aspect = vw / Math.max(vh, 1);
-  camera.updateProjectionMatrix();
+  applyCameraComposition(vw, vh);
   renderer.setSize(rw, rh, false);
   const canvas = renderer.domElement;
   canvas.style.width = "100%";
@@ -921,8 +957,9 @@ function syncClipFiberUniforms() {
   // CPU/WebGL path draws into the full Three.js canvas — NDC must use that
   // buffer size, not the march-downscale size (that is GPU-canvas only).
   camera.updateMatrixWorld(true);
+  const { vw } = viewportSize();
   const { sx, sy } = perspectiveDirScale(camera);
-  const M = ndcToDirMatrix(camera, sx, sy);
+  const M = offsetDirMatrix(ndcToDirMatrix(camera, sx, sy), compositionNdcOffsetX(vw));
   clipUniforms.uFbW.value = Math.max(1, renderer.domElement.width);
   clipUniforms.uFbH.value = Math.max(1, renderer.domElement.height);
   clipUniforms.uDirM.value.set(M[0], M[1], M[2], M[3], M[4], M[5], M[6], M[7], M[8]);
@@ -959,6 +996,7 @@ function drawClipGpuFrame() {
   if (!useGpuClipPath()) return false;
 
   camera.updateMatrixWorld(true);
+  const { vw } = viewportSize();
   const t0 = performance.now();
   const ok = renderClipFrameGpu({
     camera,
@@ -967,6 +1005,7 @@ function drawClipGpuFrame() {
     fbH: mh,
     scale: clipUniforms.uScale.value,
     steps: clipUniforms.uSteps.value | 0,
+    ndcOffsetX: compositionNdcOffsetX(vw),
   });
   const submitMs = performance.now() - t0;
   if (ok) {
@@ -1418,8 +1457,13 @@ resize();
   const PANEL_MAX = 720;
   const STORAGE_KEY = "poly-cloud-panel-w";
 
+  function panelInset() {
+    const raw = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--panel-inset"));
+    return Number.isFinite(raw) ? raw : 12;
+  }
+
   function clampW(w) {
-    const max = Math.min(PANEL_MAX, Math.max(PANEL_MIN, window.innerWidth - 200));
+    const max = Math.min(PANEL_MAX, Math.max(PANEL_MIN, window.innerWidth - 2 * panelInset() - 160));
     return Math.round(Math.min(max, Math.max(PANEL_MIN, w)));
   }
 
@@ -1445,7 +1489,7 @@ resize();
   function onMove(ev) {
     if (!dragging) return;
     const x = ev.touches ? ev.touches[0].clientX : ev.clientX;
-    applyW(x);
+    applyW(x - panelInset());
     resize();
   }
 

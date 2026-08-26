@@ -1,7 +1,7 @@
 /**
  * WebGPU volume march: IDCT dens grids + iso manifolds + multi-layer Beer.
  */
-import { ndcToDirMatrix, perspectiveDirScale } from "./clipGrid.js";
+import { ndcToDirMatrix, perspectiveDirScale, offsetDirMatrix } from "./clipGrid.js";
 
 export const MAX_DENS_LAYERS = 8;
 
@@ -1470,7 +1470,7 @@ function darken(c, t) {
   return [c[0] * t, c[1] * t, c[2] * t];
 }
 
-export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps }) {
+export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps, ndcOffsetX = 0 }) {
   if (
     !isClipBakeGpuReady() || !ctx || !volumeBuf || !colorBuf ||
     !fxaaParamBuf || !ssaoParamBuf || !fxaaSampler || !gridParamBuf
@@ -1481,7 +1481,7 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps }) {
 
   const o = camera.position;
   const { sx, sy } = perspectiveDirScale(camera);
-  const Mat = ndcToDirMatrix(camera, sx, sy);
+  const Mat = offsetDirMatrix(ndcToDirMatrix(camera, sx, sy), ndcOffsetX);
   const ro = [o.x, o.y, o.z];
   const h = half ?? 2;
   const Mgrid = sceneM;

@@ -15,7 +15,14 @@
         color-scheme: dark;
         --bg: #0e1014;
         --panel: #161a22;
-        --stroke: #2a3140;
+        --panel-inset: 12px;
+        --panel-radius: 16px;
+        --glass-bg: rgba(14, 17, 24, 0.48);
+        --glass-bg-strong: rgba(18, 22, 30, 0.62);
+        --glass-stroke: rgba(255, 255, 255, 0.12);
+        --glass-highlight: rgba(255, 255, 255, 0.07);
+        --glass-blur: 22px;
+        --stroke: rgba(255, 255, 255, 0.12);
         --text: #e8eaed;
         --muted: #9aa3b2;
         --accent: #6ea8fe;
@@ -34,35 +41,62 @@
         background: var(--bg);
         color: var(--text);
       }
+      #app {
+        position: relative;
+        height: 100%;
+        overflow: hidden;
+      }
+      #viewport {
+        position: absolute;
+        inset: 0;
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+        background: #07080b;
+      }
       #panel {
-        background: var(--panel);
+        position: absolute;
+        z-index: 5;
+        top: var(--panel-inset);
+        left: var(--panel-inset);
+        bottom: var(--panel-inset);
+        width: var(--panel-w);
+        max-width: calc(100vw - 2 * var(--panel-inset));
         padding: 12px 12px 16px;
         overflow: auto;
         display: flex;
         flex-direction: column;
         gap: 10px;
         min-width: 0;
-      }
-      #app {
-        display: grid;
-        grid-template-columns: var(--panel-w) 5px 1fr;
-        height: 100%;
+        border-radius: var(--panel-radius);
+        background: var(--glass-bg);
+        backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
+        border: 1px solid var(--glass-stroke);
+        box-shadow:
+          0 16px 48px rgba(0, 0, 0, 0.38),
+          inset 0 1px 0 var(--glass-highlight);
       }
       #panelResize {
+        position: absolute;
+        z-index: 6;
+        top: var(--panel-inset);
+        bottom: var(--panel-inset);
+        left: calc(var(--panel-inset) + var(--panel-w) - 2px);
+        width: 6px;
         cursor: col-resize;
-        background: var(--stroke);
-        position: relative;
-        z-index: 3;
+        background: transparent;
+        border-radius: 3px;
         touch-action: none;
       }
       #panelResize::after {
         content: "";
         position: absolute;
-        inset: 0 -3px;
+        inset: 0 -4px;
       }
       #panelResize:hover,
       #panelResize.dragging {
-        background: var(--accent);
+        background: rgba(110, 168, 254, 0.45);
       }
       body.panel-resizing {
         cursor: col-resize;
@@ -87,11 +121,16 @@
         align-items: stretch;
         min-height: 52px;
         padding: 0;
-        border-radius: 6px;
-        border: 1px solid var(--stroke);
-        background: transparent;
+        border-radius: 8px;
+        border: 1px solid var(--glass-stroke);
+        background: rgba(255, 255, 255, 0.04);
         overflow: hidden;
         position: relative;
+      }
+      .expr-row.selected {
+        border-color: rgba(110, 168, 254, 0.55);
+        box-shadow: 0 0 0 1px rgba(110, 168, 254, 0.2);
+        background: rgba(110, 168, 254, 0.08);
       }
       .expr-row.is-dragging {
         opacity: 0.35;
@@ -105,7 +144,9 @@
         opacity: 0.72;
         pointer-events: none;
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-        background: var(--panel, #12141a);
+        background: var(--glass-bg-strong);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
         will-change: transform;
       }
       .expr-row.drag-over-before::before,
@@ -153,10 +194,6 @@
       .expr-list.is-reordering .expr-drag,
       .expr-drag:active {
         cursor: grabbing;
-      }
-      .expr-row.selected {
-        border-color: rgba(110, 168, 254, 0.55);
-        box-shadow: 0 0 0 1px rgba(110, 168, 254, 0.2);
       }
       .expr-row.is-hidden {
         opacity: 0.45;
@@ -623,19 +660,25 @@
         gap: 8px;
       }
       .settings-dialog {
-        border: 1px solid var(--stroke);
-        border-radius: 12px;
+        border: 1px solid var(--glass-stroke);
+        border-radius: 16px;
         padding: 0;
-        background: var(--panel);
+        background: var(--glass-bg-strong);
+        backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
         color: var(--text);
         max-width: min(440px, calc(100vw - 28px));
         width: 100%;
         max-height: min(88vh, 720px);
         overflow: hidden;
-        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+        box-shadow:
+          0 18px 48px rgba(0, 0, 0, 0.45),
+          inset 0 1px 0 var(--glass-highlight);
       }
       .settings-dialog::backdrop {
-        background: rgba(6, 8, 12, 0.62);
+        background: rgba(6, 8, 12, 0.45);
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
       }
       .settings-sheet {
         display: flex;
@@ -704,14 +747,6 @@
         grid-template-columns: 1fr 1fr 1fr;
         gap: 8px;
       }
-      #viewport {
-        position: relative;
-        min-width: 0;
-        min-height: 0;
-        height: 100%;
-        overflow: hidden;
-        background: #07080b;
-      }
       #viewport canvas {
         position: absolute;
         inset: 0;
@@ -725,12 +760,18 @@
       }
       #hud {
         position: absolute;
-        left: 12px;
+        left: calc(var(--panel-inset) + var(--panel-w) + 16px);
         bottom: 12px;
         font-size: 11px;
         color: var(--muted);
         pointer-events: none;
         z-index: 2;
+        padding: 6px 10px;
+        border-radius: 8px;
+        background: var(--glass-bg);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid var(--glass-stroke);
       }
       #err {
         color: #ff7b72;
@@ -787,18 +828,19 @@
         left: var(--tick);
       }
       @media (max-width: 800px) {
-        #app {
-          grid-template-columns: 1fr;
-          grid-template-rows: auto 1fr;
-        }
         #panel {
-          border-right: none;
-          border-bottom: 1px solid var(--stroke);
+          top: 8px;
+          left: 8px;
+          right: 8px;
+          bottom: auto;
+          width: auto;
           max-height: 42vh;
-          width: 100%;
         }
         #panelResize {
           display: none;
+        }
+        #hud {
+          left: 12px;
         }
       }
     </style>
