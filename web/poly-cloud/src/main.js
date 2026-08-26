@@ -85,11 +85,6 @@ function applyPreset(key) {
   const p = PRESETS[key] ?? PRESETS.blob;
   els.preset.value = key;
   setExprLatex(p.latex);
-  els.deg.value = String(p.deg);
-  els.scale.value = String(p.scale);
-  els.half.value = String(p.half);
-  els.steps.value = "32";
-  if (els.marchDownscale) els.marchDownscale.value = "2";
   pendingParamSeed = p.params ?? {};
 }
 
