@@ -1,7 +1,231 @@
 /** Density expression (MathLive/LaTeX via Compute Engine) + 3D Chebyshev fit → world monomials. */
 
-import { compile } from "@cortex-js/compute-engine";
+import { compile, ComputeEngine } from "@cortex-js/compute-engine";
 import { MAX_DEG } from "./clipGrid.js";
+
+const ce = new ComputeEngine();
+
+/**
+ * Spatial vars (not sliders). Cartesian + spherical + cylindrical:
+ *   r, θ, φ  — physics spherical (θ from +z, φ = atan2(y,x))
+ *   ρ        — cylindrical radius √(x²+y²)
+ * LaTeX `\theta`/`\phi`/`\rho` bind as `theta`/`phi`/`rho`.
+ */
+const RESERVED_SYMBOLS = new Set([
+  "x",
+  "y",
+  "z",
+  "r",
+  "theta",
+  "phi",
+  "rho",
+]);
+
+function coerceNumber(v) {
+  if (typeof v === "number") return v;
+  if (v && typeof v.valueOf === "function") return Number(v.valueOf());
+  return Number(v);
+}
+
+/** World (x,y,z) → spherical / cylindrical auxiliaries for the expr scope. */
+export function polarFromCartesian(x, y, z) {
+  const rho = Math.hypot(x, y);
+  const r = Math.hypot(rho, z);
+  const phi = Math.atan2(y, x);
+  const theta = r > 1e-15 ? Math.acos(Math.min(1, Math.max(-1, z / r))) : 0;
+  return { r, theta, phi, rho };
+}
+
+/**
+ * MathJSON operator heads — not user function names.
+ * (Incomplete on purpose; unknown heads with args are treated as calls.)
+ */
+const MATH_OPERATORS = new Set([
+  "Add",
+  "Subtract",
+  "Multiply",
+  "Divide",
+  "Power",
+  "Negate",
+  "Root",
+  "Sqrt",
+  "Abs",
+  "Exp",
+  "Ln",
+  "Log",
+  "Sin",
+  "Cos",
+  "Tan",
+  "ArcSin",
+  "ArcCos",
+  "ArcTan",
+  "Sinh",
+  "Cosh",
+  "Tanh",
+  "Max",
+  "Min",
+  "Delimiter",
+  "List",
+  "Tuple",
+  "Equal",
+  "Assign",
+  "Colon",
+  "Function",
+  "Block",
+  "Error",
+]);
+
+/**
+ * LaTeX left of `=` looks like `f(...)` / `f\left(...\right)`.
+ * Catches CE's `f(r)` → Multiply(f,r) misparse for single-arg defs.
+ */
+function latexLooksLikeFunctionDef(src) {
+  const eq = String(src).search(/=/);
+  if (eq < 0) return false;
+  const left = String(src).slice(0, eq).trim();
+  return /^[A-Za-z][A-Za-z0-9]*\s*(\\left\s*)?\(/.test(left);
+}
+
+function isUserFunctionCall(json) {
+  if (!Array.isArray(json) || typeof json[0] !== "string") return false;
+  const head = json[0];
+  if (MATH_OPERATORS.has(head)) return false;
+  if (!/^[A-Za-z][A-Za-z0-9]*$/.test(head)) return false;
+  // f(x), f(x,y,z), …
+  return json.length >= 2;
+}
+
+/**
+ * Classify input and rewrite to a numeric field for fitting.
+ *
+ * - constraint `A = B`     → field A−B, isosurface at 0
+ * - definition `f(…) = E`  → field E, volume (Beer)
+ * - bare expression `E`    → field E, volume (Beer)
+ *
+ * @returns {{
+ *   kind: "constraint" | "definition" | "bare",
+ *   shade: "iso" | "volume",
+ *   isoLevel: number,
+ *   compileLatex: string,
+ *   label: string,
+ * }}
+ */
+export function classifyExpr(raw) {
+  const src = String(raw ?? "").trim();
+  if (!src) throw new Error("Empty expression");
+
+  let box;
+  try {
+    box = ce.parse(src);
+  } catch {
+    return {
+      kind: "bare",
+      shade: "volume",
+      isoLevel: 0,
+      compileLatex: src,
+      label: "expression",
+    };
+  }
+
+  const j = box?.json;
+  const head = Array.isArray(j) ? j[0] : null;
+
+  if (head === "Equal" || head === "Assign") {
+    const lhs = j[1];
+    const rhs = j[2];
+    const asDef =
+      latexLooksLikeFunctionDef(src) || isUserFunctionCall(lhs);
+
+    if (asDef) {
+      const rhsBox = ce.box(rhs);
+      const compileLatex = rhsBox.latex || src.split("=").slice(1).join("=").trim();
+      if (!compileLatex) throw new Error("Empty right-hand side");
+      return {
+        kind: "definition",
+        shade: "volume",
+        isoLevel: 0,
+        compileLatex,
+        label: "definition → volume",
+      };
+    }
+
+    const diff = ce.box(["Subtract", lhs, rhs]);
+    const compileLatex = diff.latex;
+    if (!compileLatex) throw new Error("Could not form constraint residual");
+    return {
+      kind: "constraint",
+      shade: "iso",
+      isoLevel: 0,
+      compileLatex,
+      label: "constraint → isosurface",
+    };
+  }
+
+  return {
+    kind: "bare",
+    shade: "volume",
+    isoLevel: 0,
+    compileLatex: src,
+    label: "expression → volume",
+  };
+}
+
+/**
+ * Compile a density / constraint expression.
+ *
+ * @returns {{
+ *   freeParams: string[],
+ *   kind: "constraint" | "definition" | "bare",
+ *   shade: "iso" | "volume",
+ *   isoLevel: number,
+ *   classifyLabel: string,
+ *   bind: (params?: Record<string, number>) => (x: number, y: number, z: number) => number,
+ * }}
+ */
+export function compileExpr(raw) {
+  const classified = classifyExpr(raw);
+  const src = classified.compileLatex;
+
+  const result = compile(src);
+  if (!result?.success || typeof result.run !== "function") {
+    const why = result?.unsupported?.length
+      ? `unsupported: ${result.unsupported.join(", ")}`
+      : "could not compile";
+    throw new Error(`Expression ${why}`);
+  }
+
+  const { run, freeSymbols = [] } = result;
+  const freeParams = [];
+  for (const s of freeSymbols) {
+    const id = String(s);
+    if (RESERVED_SYMBOLS.has(id)) continue;
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(id)) {
+      throw new Error(`Invalid parameter “${id}” (use letters / digits)`);
+    }
+    freeParams.push(id);
+  }
+  freeParams.sort();
+
+  return {
+    freeParams,
+    kind: classified.kind,
+    shade: classified.shade,
+    isoLevel: classified.isoLevel,
+    classifyLabel: classified.label,
+    /** Bind current parameter values → f(x,y,z); injects r,θ,φ,ρ. */
+    bind(params = {}) {
+      return (x, y, z) => {
+        const { r, theta, phi, rho } = polarFromCartesian(x, y, z);
+        const scope = { x, y, z, r, theta, phi, rho };
+        for (const name of freeParams) {
+          const v = params[name];
+          scope[name] = Number.isFinite(v) ? v : 1;
+        }
+        return coerceNumber(run(scope));
+      };
+    },
+  };
+}
 
 /** Preset densities as LaTeX (shown in the MathLive field). */
 export const PRESETS = {
@@ -43,88 +267,15 @@ export const PRESETS = {
     latex: String.raw`\exp(-4((x-d)^{2}+y^{2}+z^{2}))+\exp(-4((x+d)^{2}+y^{2}+z^{2}))`,
     params: { d: { value: 0.7, min: 0.15, max: 1.2, animate: true } },
   },
+  sphere: {
+    label: "Sphere (constraint)",
+    latex: String.raw`x^{2}+y^{2}+z^{2}=1`,
+  },
+  torusSigned: {
+    label: "Torus (constraint)",
+    latex: String.raw`(\rho-0.9)^{2}+z^{2}=0.12`,
+  },
 };
-
-/**
- * Spatial vars (not sliders). Cartesian + spherical + cylindrical:
- *   r, θ, φ  — physics spherical (θ from +z, φ = atan2(y,x))
- *   ρ        — cylindrical radius √(x²+y²)
- * LaTeX `\theta`/`\phi`/`\rho` bind as `theta`/`phi`/`rho`.
- */
-const RESERVED_SYMBOLS = new Set([
-  "x",
-  "y",
-  "z",
-  "r",
-  "theta",
-  "phi",
-  "rho",
-]);
-
-function coerceNumber(v) {
-  if (typeof v === "number") return v;
-  if (v && typeof v.valueOf === "function") return Number(v.valueOf());
-  return Number(v);
-}
-
-/** World (x,y,z) → spherical / cylindrical auxiliaries for the expr scope. */
-export function polarFromCartesian(x, y, z) {
-  const rho = Math.hypot(x, y);
-  const r = Math.hypot(rho, z);
-  const phi = Math.atan2(y, x);
-  // θ ∈ [0, π]; undefined at origin → 0
-  const theta = r > 1e-15 ? Math.acos(Math.min(1, Math.max(-1, z / r))) : 0;
-  return { r, theta, phi, rho };
-}
-
-/**
- * Compile a density expression.
- *
- * @returns {{
- *   freeParams: string[],
- *   bind: (params?: Record<string, number>) => (x: number, y: number, z: number) => number,
- * }}
- */
-export function compileExpr(raw) {
-  const src = String(raw ?? "").trim();
-  if (!src) throw new Error("Empty expression");
-
-  const result = compile(src);
-  if (!result?.success || typeof result.run !== "function") {
-    const why = result?.unsupported?.length
-      ? `unsupported: ${result.unsupported.join(", ")}`
-      : "could not compile";
-    throw new Error(`Expression ${why}`);
-  }
-
-  const { run, freeSymbols = [] } = result;
-  const freeParams = [];
-  for (const s of freeSymbols) {
-    const id = String(s);
-    if (RESERVED_SYMBOLS.has(id)) continue;
-    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(id)) {
-      throw new Error(`Invalid parameter “${id}” (use letters / digits)`);
-    }
-    freeParams.push(id);
-  }
-  freeParams.sort();
-
-  return {
-    freeParams,
-    /** Bind current parameter values → f(x,y,z); injects r,θ,φ,ρ. */
-    bind(params = {}) {
-      return (x, y, z) => {
-        const { r, theta, phi, rho } = polarFromCartesian(x, y, z);
-        const scope = { x, y, z, r, theta, phi, rho };
-        for (const name of freeParams) {
-          const v = params[name];
-          scope[name] = Number.isFinite(v) ? v : 1;
-        }
-        return coerceNumber(run(scope));
-      };
-    },
-  };
-}
 
 function fromUnit(u, a, b) {
   return 0.5 * (a + b) + 0.5 * (b - a) * u;

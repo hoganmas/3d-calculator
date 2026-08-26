@@ -28,6 +28,7 @@ npm run dev
 
 - Drag to orbit · scroll to zoom · right-drag to pan
 - **mode** — prefer **clip-grid**; LOS raymarch is a secondary reference
+- **Expression kind** — bare expr or `f(…)=E` → Beer volume; constraint `A=B` → isosurface of `A−B=0` (auto)
 - **Parameters** — free symbols besides spatial `x,y,z` / `r,θ,φ,ρ` (e.g. `a` in `\exp(-r^2/a^2)`) get sliders; ▶ animates between min/max (cosine), **Hz** is cycles/sec. Changing a param refits the Chebyshev approximant.
 - **Dens tile** — auto shrinks with projected box size; `exact` skips interpolation
 - **steps** / **march downscale** — Beer samples and internal march resolution

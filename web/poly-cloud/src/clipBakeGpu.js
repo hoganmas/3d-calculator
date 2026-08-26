@@ -24,8 +24,8 @@ struct DrawParams {
   steps: u32,
   half: f32,
   scale: f32,
-  _pad0: f32,
-  _pad1: f32,
+  isoLevel: f32,
+  shadeMode: u32,
   ro: vec3f,
   _p1: f32,
   m0: vec4f,
@@ -100,38 +100,45 @@ fn sampleVolume(p: vec3f) -> f32 {
   return mix(c0, c1, tz);
 }
 
-@fragment
-fn fsMain(in: VSOut) -> @location(0) vec4f {
-  let fbW = f32(draw.fbW);
-  let fbH = f32(draw.fbH);
-  let ndcX = -1.0 + 2.0 * in.pos.x / fbW;
-  let ndcY = 1.0 - 2.0 * in.pos.y / fbH;
+fn fieldAt(p: vec3f) -> f32 {
+  var d = sampleVolume(p);
+  if (d != d) { d = 0.0; }
+  return d - draw.isoLevel;
+}
 
-  let xy1 = vec3f(ndcX, ndcY, 1.0);
-  let rd = vec3f(
-    dot(draw.m0.xyz, xy1),
-    dot(draw.m1.xyz, xy1),
-    dot(draw.m2.xyz, xy1),
-  );
-  let ro = draw.ro;
+/** Central-difference ∇f on the dens grid (Chebyshev-index space). */
+fn fieldGrad(p: vec3f) -> vec3f {
   let half = draw.half;
-
-  let invRd = vec3f(
-    select(1e15, 1.0 / rd.x, abs(rd.x) >= 1e-15),
-    select(1e15, 1.0 / rd.y, abs(rd.y) >= 1e-15),
-    select(1e15, 1.0 / rd.z, abs(rd.z) >= 1e-15),
+  let eps = max(half * 2.0 / f32(draw.gridM), half * 1e-3);
+  let ex = vec3f(eps, 0.0, 0.0);
+  let ey = vec3f(0.0, eps, 0.0);
+  let ez = vec3f(0.0, 0.0, eps);
+  return vec3f(
+    sampleVolume(p + ex) - sampleVolume(p - ex),
+    sampleVolume(p + ey) - sampleVolume(p - ey),
+    sampleVolume(p + ez) - sampleVolume(p - ez),
   );
-  let tA = (-vec3f(half) - ro) * invRd;
-  let tB = (vec3f(half) - ro) * invRd;
-  let tmin = min(tA, tB);
-  let tmax = max(tA, tB);
-  var tEnter = max(max(tmin.x, tmin.y), tmin.z);
-  let tExit = min(min(tmax.x, tmax.y), tmax.z);
-  tEnter = max(tEnter, 0.0);
-  if (!(tExit > tEnter + 1e-6)) {
-    return vec4f(0.0);
-  }
+}
 
+fn shadeIso(p: vec3f, rd: vec3f) -> vec4f {
+  var g = fieldGrad(p);
+  let gl = length(g);
+  var n = select(vec3f(0.0, 1.0, 0.0), g / gl, gl > 1e-8);
+  // Face the camera.
+  if (dot(n, -rd) < 0.0) { n = -n; }
+
+  let L = normalize(vec3f(0.35, 0.85, 0.45));
+  let H = normalize(L - normalize(rd));
+  let ndotl = max(dot(n, L), 0.0);
+  let spec = pow(max(dot(n, H), 0.0), 32.0);
+  let ambient = 0.18;
+  let lambert = ambient + (1.0 - ambient) * ndotl;
+  let base = mix(draw.absorb.xyz, draw.emit.xyz, 0.65);
+  let rgb = base * lambert + vec3f(spec) * 0.35;
+  return vec4f(rgb, 1.0);
+}
+
+fn marchBeer(ro: vec3f, rd: vec3f, tEnter: f32, tExit: f32) -> vec4f {
   var steps = draw.steps;
   if (steps < 8u) { steps = 8u; }
   if (steps > 96u) { steps = 96u; }
@@ -165,6 +172,83 @@ fn fsMain(in: VSOut) -> @location(0) vec4f {
   let a = 1.0 - T;
   if (a < 0.001) { return vec4f(0.0); }
   return vec4f(rgb * a, a);
+}
+
+fn marchIso(ro: vec3f, rd: vec3f, tEnter: f32, tExit: f32) -> vec4f {
+  var steps = draw.steps;
+  if (steps < 16u) { steps = 16u; }
+  if (steps > 192u) { steps = 192u; }
+  // Allow denser sampling for thin sheets (steps UI still caps at 96 in JS;
+  // use at least 2× beer default density via dt).
+  let dt = (tExit - tEnter) / f32(steps);
+  var s0 = tEnter;
+  var f0 = fieldAt(ro + rd * s0);
+
+  for (var i: u32 = 0u; i < 192u; i++) {
+    if (i >= steps) { break; }
+    let s1 = min(s0 + dt, tExit);
+    let f1 = fieldAt(ro + rd * s1);
+    // Sign change (ignore exact zeros that are numerical noise at start).
+    if (f0 * f1 < 0.0) {
+      var lo = s0;
+      var hi = s1;
+      var flo = f0;
+      for (var b: u32 = 0u; b < 12u; b++) {
+        let mid = 0.5 * (lo + hi);
+        let fm = fieldAt(ro + rd * mid);
+        if (flo * fm <= 0.0) {
+          hi = mid;
+        } else {
+          lo = mid;
+          flo = fm;
+        }
+      }
+      let hit = 0.5 * (lo + hi);
+      return shadeIso(ro + rd * hit, rd);
+    }
+    s0 = s1;
+    f0 = f1;
+    if (s0 >= tExit - 1e-6) { break; }
+  }
+  return vec4f(0.0);
+}
+
+@fragment
+fn fsMain(in: VSOut) -> @location(0) vec4f {
+  let fbW = f32(draw.fbW);
+  let fbH = f32(draw.fbH);
+  let ndcX = -1.0 + 2.0 * in.pos.x / fbW;
+  let ndcY = 1.0 - 2.0 * in.pos.y / fbH;
+
+  let xy1 = vec3f(ndcX, ndcY, 1.0);
+  let rd = vec3f(
+    dot(draw.m0.xyz, xy1),
+    dot(draw.m1.xyz, xy1),
+    dot(draw.m2.xyz, xy1),
+  );
+  let ro = draw.ro;
+  let half = draw.half;
+
+  let invRd = vec3f(
+    select(1e15, 1.0 / rd.x, abs(rd.x) >= 1e-15),
+    select(1e15, 1.0 / rd.y, abs(rd.y) >= 1e-15),
+    select(1e15, 1.0 / rd.z, abs(rd.z) >= 1e-15),
+  );
+  let tA = (-vec3f(half) - ro) * invRd;
+  let tB = (vec3f(half) - ro) * invRd;
+  let tmin = min(tA, tB);
+  let tmax = max(tA, tB);
+  var tEnter = max(max(tmin.x, tmin.y), tmin.z);
+  let tExit = min(min(tmax.x, tmax.y), tmax.z);
+  tEnter = max(tEnter, 0.0);
+  if (!(tExit > tEnter + 1e-6)) {
+    return vec4f(0.0);
+  }
+
+  if (draw.shadeMode == 1u) {
+    return marchIso(ro, rd, tEnter, tExit);
+  }
+  return marchBeer(ro, rd, tEnter, tExit);
 }
 `;
 }
@@ -211,34 +295,36 @@ let lastPresentAt = 0;
 let profileMethod = "";
 let profileGridM = 0;
 
-function packDrawParams(fbW, fbH, gridM, steps, half, scale, ro, M, absorb, emit) {
+function packDrawParams(fbW, fbH, gridM, steps, half, scale, isoLevel, shadeMode, ro, M, absorb, emit) {
   const buf = new ArrayBuffer(256);
-  const u32 = new Uint32Array(buf, 0, 4);
+  const u32 = new Uint32Array(buf);
   u32[0] = fbW;
   u32[1] = fbH;
   u32[2] = gridM;
   u32[3] = steps;
-  const f32 = new Float32Array(buf, 16);
-  f32[0] = half;
-  f32[1] = scale;
-  f32[4] = ro[0];
-  f32[5] = ro[1];
-  f32[6] = ro[2];
-  f32[8] = M[0];
-  f32[9] = M[1];
-  f32[10] = M[2];
-  f32[12] = M[3];
-  f32[13] = M[4];
-  f32[14] = M[5];
-  f32[16] = M[6];
-  f32[17] = M[7];
-  f32[18] = M[8];
-  f32[20] = absorb[0];
-  f32[21] = absorb[1];
-  f32[22] = absorb[2];
-  f32[24] = emit[0];
-  f32[25] = emit[1];
-  f32[26] = emit[2];
+  const f32 = new Float32Array(buf);
+  f32[4] = half;
+  f32[5] = scale;
+  f32[6] = isoLevel;
+  u32[7] = shadeMode | 0;
+  f32[8] = ro[0];
+  f32[9] = ro[1];
+  f32[10] = ro[2];
+  f32[12] = M[0];
+  f32[13] = M[1];
+  f32[14] = M[2];
+  f32[16] = M[3];
+  f32[17] = M[4];
+  f32[18] = M[5];
+  f32[20] = M[6];
+  f32[21] = M[7];
+  f32[22] = M[8];
+  f32[24] = absorb[0];
+  f32[25] = absorb[1];
+  f32[26] = absorb[2];
+  f32[28] = emit[0];
+  f32[29] = emit[1];
+  f32[30] = emit[2];
   return buf;
 }
 
@@ -514,6 +600,8 @@ export function renderClipFrameGpu({
   steps,
   absorb = [0.15, 0.25, 0.45],
   emit = [0.55, 0.75, 1.0],
+  shadeMode = 0,
+  isoLevel = 0,
 }) {
   if (!device || !marchPipeline || !ctx || !volumeBuf || volumeM < 2) return false;
 
@@ -522,6 +610,7 @@ export function renderClipFrameGpu({
   const M = ndcToDirMatrix(camera, sx, sy);
   const ro = [o.x, o.y, o.z];
   const h = half ?? 2;
+  const mode = shadeMode === 1 || shadeMode === "iso" ? 1 : 0;
 
   if (!marchBindGroup) bindMarch();
   if (!marchBindGroup) return false;
@@ -531,13 +620,26 @@ export function renderClipFrameGpu({
   const marchH = canvas?.height ?? fbH;
   profileMarchFbW = marchW;
   profileMarchFbH = marchH;
-  profileMethod = "gpu-idct-volume";
+  profileMethod = mode === 1 ? "gpu-idct-iso" : "gpu-idct-volume";
   profileGridM = volumeM;
 
   device.queue.writeBuffer(
     drawParamBuf,
     0,
-    packDrawParams(marchW, marchH, volumeM, steps, h, scale, ro, M, absorb, emit),
+    packDrawParams(
+      marchW,
+      marchH,
+      volumeM,
+      steps,
+      h,
+      scale,
+      Number(isoLevel) || 0,
+      mode,
+      ro,
+      M,
+      absorb,
+      emit,
+    ),
   );
 
   const enc = device.createCommandEncoder();

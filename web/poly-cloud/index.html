@@ -376,7 +376,7 @@
         </label>
 
         <label>
-          f(x,y,z / r,θ,φ,ρ,…) density
+          density / constraint
           <math-field
             id="expr"
             math-virtual-keyboard-policy="sandboxed"
@@ -384,9 +384,9 @@
             smart-superscript
           ></math-field>
         </label>
-        <p style="font-size: 11px; color: var(--muted); margin-top: -6px">
-          Spatial: <code>x,y,z</code> or spherical <code>r,\theta,\phi</code> (θ from +z) / cylindrical <code>\rho</code>.
-          Extra letters (a, k, d, …) become sliders — drag or hit ▶ to animate.
+        <p id="exprKind" style="font-size: 11px; color: var(--muted); margin-top: -6px">
+          Bare expr or <code>f(…)=…</code> → volume · <code>A=B</code> constraint → isosurface.
+          Spatial: <code>x,y,z</code> / <code>r,\theta,\phi,\rho</code>; extra letters → sliders.
         </p>
 
         <div id="paramsBlock" class="params-block" hidden>
@@ -449,7 +449,7 @@
         <label>
           mode
           <select id="mode">
-            <option value="clipgrid">clip-grid (Cheb dens + Beer)</option>
+            <option value="clipgrid">clip-grid (Cheb dens)</option>
             <option value="raymarch">raymarch (LOS γ)</option>
           </select>
         </label>

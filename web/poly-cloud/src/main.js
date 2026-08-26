@@ -45,6 +45,7 @@ const els = {
   babbageTile: document.getElementById("babbageTile"),
   densFill: document.getElementById("densFill"),
   mode: document.getElementById("mode"),
+  exprKind: document.getElementById("exprKind"),
   reset: document.getElementById("reset"),
   err: document.getElementById("err"),
   fitErr: document.getElementById("fitErr"),
@@ -229,11 +230,25 @@ function syncAllParamRows() {
 /**
  * Compile expr, sync param list, return bound f(x,y,z).
  * @param {{ rebuildUi?: boolean }} [opts]
- * @returns {{ freeParams: string[], fn: (x:number,y:number,z:number)=>number }}
+ * @returns {{ freeParams: string[], fn: (x:number,y:number,z:number)=>number, shade: string, kind: string, isoLevel: number }}
  */
 function compileBoundExpr(opts = {}) {
   const rebuildUi = opts.rebuildUi !== false;
   const compiled = compileExpr(getExprLatex());
+  lastExprMeta = {
+    kind: compiled.kind,
+    shade: compiled.shade,
+    isoLevel: compiled.isoLevel,
+    label: compiled.classifyLabel,
+  };
+  if (els.exprKind) {
+    els.exprKind.textContent =
+      compiled.kind === "constraint"
+        ? "Constraint A=B → isosurface (zero set of A−B)."
+        : compiled.kind === "definition"
+          ? "Definition f(…)=E → volume from E."
+          : "Expression → volume (Beer). Spatial x,y,z / r,θ,φ,ρ; extra letters → sliders.";
+  }
   const before = listParamNames().join("\0");
   syncParamsFromSymbols(compiled.freeParams, pendingParamSeed);
   let seeded = false;
@@ -249,8 +264,19 @@ function compileBoundExpr(opts = {}) {
   return {
     freeParams: compiled.freeParams,
     fn: compiled.bind(getParamValues()),
+    shade: compiled.shade,
+    kind: compiled.kind,
+    isoLevel: compiled.isoLevel,
   };
 }
+
+/** Last successful classify/compile of the expression field. */
+let lastExprMeta = {
+  kind: "bare",
+  shade: "volume",
+  isoLevel: 0,
+  label: "expression → volume",
+};
 
 const MARCH_DOWNSCALE_MIN = 1;
 const MARCH_DOWNSCALE_MAX = 16;
@@ -646,8 +672,19 @@ function isClipMode() {
 }
 
 function modeLabel() {
-  if (els.mode.value === "clipgrid") return "clip-grid";
+  if (els.mode.value === "clipgrid") {
+    const shade = lastExprMeta.shade === "iso" ? "iso" : "Beer";
+    return `clip-grid · ${shade}`;
+  }
   return "raymarch";
+}
+
+function readShadeMode() {
+  return lastExprMeta.shade === "iso" ? 1 : 0;
+}
+
+function readIsoLevel() {
+  return Number.isFinite(lastExprMeta.isoLevel) ? lastExprMeta.isoLevel : 0;
 }
 
 let loopFps = 0;
@@ -724,6 +761,9 @@ function buildMetricsReport() {
     lines.push(
       `dens_path       ${useGpuClipPath() ? "webgpu" : "cpu/webgl"}`,
       `dens_method     ${p.method || "—"}`,
+      `expr_kind       ${lastExprMeta.kind}`,
+      `shade           ${lastExprMeta.shade}`,
+      `iso_level       ${readIsoLevel()}`,
       `volume_M        ${lastVolumeM || p.tile || "—"}`,
       `dens_submit_ms  ${densSubmittedThisFrame ? bakeMsSmooth.toFixed(2) : "—"}`,
       `dens_last_ms    ${lastDensSubmitMs.toFixed(2)}`,
@@ -911,6 +951,8 @@ function drawClipGpuFrame() {
     steps: clipUniforms.uSteps.value | 0,
     absorb: [absorb.r, absorb.g, absorb.b],
     emit: [emit.r, emit.g, emit.b],
+    shadeMode: readShadeMode(),
+    isoLevel: readIsoLevel(),
   });
   const submitMs = performance.now() - t0;
   if (ok) {
