@@ -107,6 +107,35 @@ export function anyParamNeedsTick() {
 }
 
 /**
+ * Params that may have changed this animation tick, plus anything that
+ * transitively depends on them via `a = f(b,…)`.
+ * @returns {Set<string>}
+ */
+export function collectAnimDirtyParams() {
+  /** @type {Set<string>} */
+  const dirty = new Set();
+  for (const [name, p] of params) {
+    if (p.animating && !p.driven) dirty.add(name);
+    if (p.usesTime) dirty.add(name);
+  }
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const [name, p] of params) {
+      if (dirty.has(name) || !p.driven) continue;
+      for (const dep of p.freeParams) {
+        if (dirty.has(dep)) {
+          dirty.add(name);
+          grew = true;
+          break;
+        }
+      }
+    }
+  }
+  return dirty;
+}
+
+/**
  * Replace param map from expression-list parameter rows.
  * @param {{
  *   name: string,

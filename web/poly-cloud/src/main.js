@@ -13,6 +13,7 @@ import {
   evalParamEquations,
   tickParamAnimation,
   anyParamNeedsTick,
+  collectAnimDirtyParams,
 } from "./params.js";
 import {
   listExpressions,
@@ -706,6 +707,9 @@ function buildMetricsReport() {
       `fit_l2_ms       ${t.l2Ms.toFixed(2)}`,
       `fit_upload_ms   ${t.uploadMs.toFixed(2)}`,
     );
+    if (Number.isFinite(t.fittedCount)) {
+      lines.push(`fit_layers      ${t.fittedCount}`);
+    }
   }
   const pv = getParamValues();
   const pNames = Object.keys(pv);
@@ -952,25 +956,87 @@ function uploadFit(opts = {}) {
     let fitRel = NaN;
     let timingAcc = { sampleMs: 0, chebMs: 0, monoMs: 0, l2Ms: 0, totalMs: 0 };
     let M = deg + 1;
+    let fittedCount = 0;
+
+    // Anim ticks: only refit layers that depend on dirty params; reuse the rest.
+    const dirty = fromAnim ? collectAnimDirtyParams() : null;
+    /** @type {Map<string, any>} */
+    const prevById = new Map();
+    const canReuseCache =
+      fromAnim &&
+      dirty &&
+      lastSceneBake &&
+      lastSceneBake.deg === deg &&
+      Math.abs((lastSceneBake.half ?? NaN) - half) < 1e-12;
+    if (canReuseCache) {
+      for (const d of lastSceneBake.densLayers) {
+        if (d.id) prevById.set(d.id, { kind: "density", ...d });
+      }
+      for (const c of lastSceneBake.constraints) {
+        if (c.id) prevById.set(c.id, { kind: "constraint", ...c });
+      }
+    }
 
     for (const L of layers) {
-      const fit = fitChebyshev3D(L.fn, half, deg, { skipL2: fromAnim || layers.length > 1 });
+      const color = hexToRgb01(L.item.color);
+      const depends =
+        !dirty ||
+        L.compiled.freeParams.some((p) => dirty.has(p));
+      const prev = canReuseCache && !depends ? prevById.get(L.item.id) : null;
+      const reuseDens =
+        prev &&
+        prev.kind === (L.role === "constraint" ? "constraint" : "density") &&
+        prev.dens instanceof Float32Array;
+
+      if (reuseDens) {
+        M = Math.round(Math.cbrt(prev.dens.length)) || M;
+        if (L.role === "constraint") {
+          constraints.push({
+            id: L.item.id,
+            dens: prev.dens,
+            gx: prev.gx,
+            gy: prev.gy,
+            gz: prev.gz,
+            color,
+            isoLevel: L.compiled.isoLevel ?? prev.isoLevel ?? 0,
+          });
+        } else {
+          densLayers.push({ id: L.item.id, dens: prev.dens, color });
+        }
+        if (!cheb && prev.cheb) {
+          cheb = prev.cheb;
+          fitRel = prev.fitRel ?? fitRel;
+        }
+        continue;
+      }
+
+      const fit = fitChebyshev3D(L.fn, half, deg, {
+        skipL2: fromAnim || layers.length > 1,
+      });
+      fittedCount++;
       const idct = idctCheb3D(fit.cheb, fit.deg, fit.deg + 1);
       M = idct.M;
-      const color = hexToRgb01(L.item.color);
       if (L.role === "constraint") {
-        // Iso field + Chebyshev-analytic gradient slabs (∂/∂ξ,∂/∂η,∂/∂ζ).
         const grad = idctChebGrad3D(fit.cheb, fit.deg, fit.deg + 1);
         constraints.push({
+          id: L.item.id,
           dens: idct.dens,
           gx: grad.gx,
           gy: grad.gy,
           gz: grad.gz,
           color,
           isoLevel: L.compiled.isoLevel ?? 0,
+          cheb: fit.cheb,
+          fitRel: fit.fitRelL2,
         });
       } else {
-        densLayers.push({ dens: idct.dens, color });
+        densLayers.push({
+          id: L.item.id,
+          dens: idct.dens,
+          color,
+          cheb: fit.cheb,
+          fitRel: fit.fitRelL2,
+        });
       }
       if (!cheb) {
         cheb = fit.cheb;
@@ -990,15 +1056,27 @@ function uploadFit(opts = {}) {
       }
     }
 
-    lastSceneBake = { densLayers, constraints, M, dens: densSum };
+    lastSceneBake = {
+      densLayers,
+      constraints,
+      M,
+      dens: densSum,
+      deg,
+      half,
+      fittedCount,
+    };
     const uploadMs = performance.now() - tUpload;
-    lastFitTiming = { ...timingAcc, uploadMs };
+    lastFitTiming = { ...timingAcc, uploadMs, fittedCount };
     lastNCoeff = (deg + 1) ** 3 * layers.length;
     if (Number.isFinite(fitRel)) lastFitRel = fitRel;
 
-    worldCheb = cheb;
+    if (cheb) worldCheb = cheb;
+    else if (!fromAnim) worldCheb = null;
     fitDeg = deg;
-    bakeChebVolume();
+    // Skip volume re-upload when every layer was reused (param anim didn't touch them).
+    if (fittedCount > 0 || !fromAnim) {
+      bakeChebVolume();
+    }
 
     clipUniforms.uScale.value = densScale;
     clipUniforms.uSteps.value = steps;
@@ -1006,14 +1084,18 @@ function uploadFit(opts = {}) {
 
     if (!fromAnim) resize();
     clipDirty = true;
-    void prepareClipGpuForDegree(deg).then(() => {
-      if (lastSceneBake) bakeChebVolume();
+    if (fittedCount > 0 || !fromAnim) {
+      void prepareClipGpuForDegree(deg).then(() => {
+        if (lastSceneBake) bakeChebVolume();
+        syncClipPresentation();
+        if (!useGpuClipPath()) {
+          clipDirty = true;
+          syncClipCpuVolume();
+        }
+      });
+    } else {
       syncClipPresentation();
-      if (!useGpuClipPath()) {
-        clipDirty = true;
-        syncClipCpuVolume();
-      }
-    });
+    }
   } catch (e) {
     try {
       compileAllExprs();

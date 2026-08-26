@@ -34,6 +34,7 @@ struct VSOut { @builtin(position) pos: vec4f, }
 struct FSOut {
   @location(0) color: vec4f,
   @location(1) occl: vec4f,
+  @location(2) normal: vec4f,
   @builtin(frag_depth) depth: f32,
 }
 
@@ -105,11 +106,7 @@ fn fieldGrad(p: vec3f) -> vec3f {
   return vec3f(gxi, geta, gzeta) * invH;
 }
 
-fn shadeIso(p: vec3f, rd: vec3f) -> vec4f {
-  var g = fieldGrad(p);
-  let gl = length(g);
-  var n = select(vec3f(0.0, 1.0, 0.0), g / gl, gl > 1e-8);
-  if (dot(n, -rd) < 0.0) { n = -n; }
+fn shadeIso(p: vec3f, rd: vec3f, n: vec3f) -> vec4f {
   let L = normalize(vec3f(0.35, 0.85, 0.45));
   let ndotl = max(dot(n, L), 0.0);
   let ambient = 0.42;
@@ -119,10 +116,19 @@ fn shadeIso(p: vec3f, rd: vec3f) -> vec4f {
   return vec4f(rgb, 1.0);
 }
 
+fn isoNormal(p: vec3f, rd: vec3f) -> vec3f {
+  var g = fieldGrad(p);
+  let gl = length(g);
+  var n = select(vec3f(0.0, 1.0, 0.0), g / gl, gl > 1e-8);
+  if (dot(n, -rd) < 0.0) { n = -n; }
+  return n;
+}
+
 fn marchIso(ro: vec3f, rd: vec3f, tEnter: f32, tExit: f32) -> FSOut {
   var out: FSOut;
   out.color = vec4f(0.0);
   out.occl = vec4f(1.0, 0.0, 0.0, 1.0);
+  out.normal = vec4f(0.0);
   out.depth = 1.0;
 
   var steps = draw.steps;
@@ -146,8 +152,11 @@ fn marchIso(ro: vec3f, rd: vec3f, tEnter: f32, tExit: f32) -> FSOut {
       }
       let hit = 0.5 * (lo + hi);
       let d = clamp(hit / far, 0.0, 0.999);
-      out.color = shadeIso(ro + rd * hit, rd);
+      let p = ro + rd * hit;
+      let n = isoNormal(p, rd);
+      out.color = shadeIso(p, rd, n);
       out.occl = vec4f(d, 0.0, 0.0, 1.0);
+      out.normal = vec4f(n * 0.5 + 0.5, 1.0);
       out.depth = d;
       return out;
     }
@@ -159,6 +168,12 @@ fn marchIso(ro: vec3f, rd: vec3f, tEnter: f32, tExit: f32) -> FSOut {
 
 @fragment
 fn fsMain(in: VSOut) -> FSOut {
+  var out: FSOut;
+  out.color = vec4f(0.0);
+  out.occl = vec4f(1.0, 0.0, 0.0, 1.0);
+  out.normal = vec4f(0.0);
+  out.depth = 1.0;
+
   let fbW = f32(draw.fbW); let fbH = f32(draw.fbH);
   let ndcX = -1.0 + 2.0 * in.pos.x / fbW;
   let ndcY = 1.0 - 2.0 * in.pos.y / fbH;
@@ -175,10 +190,16 @@ fn fsMain(in: VSOut) -> FSOut {
   let tmin = min(tA, tB); let tmax = max(tA, tB);
   var tEnter = max(max(max(tmin.x, tmin.y), tmin.z), 0.0);
   let tExit = min(min(tmax.x, tmax.y), tmax.z);
-  if (!(tExit > tEnter + 1e-6)) { discard; }
+  if (!(tExit > tEnter + 1e-6)) {
+    discard;
+    return out;
+  }
   let hit = marchIso(ro, rd, tEnter, tExit);
   // Miss: discard so we don't overwrite a closer prior iso's color/depth.
-  if (hit.color.a < 0.5) { discard; }
+  if (hit.color.a < 0.5) {
+    discard;
+    return out;
+  }
   return hit;
 }
 `;
@@ -488,6 +509,145 @@ fn fsMain(in: VSOut) -> @location(0) vec4f {
 `;
 }
 
+/**
+ * Screen-space AO for isosurfaces only.
+ * Reads iso depth (occl.r = t/far) + world normal; darkens premul scene color.
+ * Skips pixels with no iso (normal.a < 0.5 / occl >= 0.999).
+ */
+function makeSsaoWgsl() {
+  return /* wgsl */ `
+struct SsaoParams {
+  fbW: u32,
+  fbH: u32,
+  _pad0: u32,
+  _pad1: u32,
+  half: f32,
+  radius: f32,
+  strength: f32,
+  bias: f32,
+  ro: vec3f,
+  _p1: f32,
+  m0: vec4f,
+  m1: vec4f,
+  m2: vec4f,
+}
+
+@group(0) @binding(0) var<uniform> p: SsaoParams;
+@group(0) @binding(1) var sceneTex: texture_2d<f32>;
+@group(0) @binding(2) var occlTex: texture_2d<f32>;
+@group(0) @binding(3) var normalTex: texture_2d<f32>;
+
+struct VSOut { @builtin(position) pos: vec4f, }
+
+@vertex
+fn vsMain(@builtin(vertex_index) vi: u32) -> VSOut {
+  var pts = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
+  var o: VSOut;
+  o.pos = vec4f(pts[vi], 0.0, 1.0);
+  return o;
+}
+
+fn rayDir(ndcX: f32, ndcY: f32) -> vec3f {
+  let xy1 = vec3f(ndcX, ndcY, 1.0);
+  return vec3f(dot(p.m0.xyz, xy1), dot(p.m1.xyz, xy1), dot(p.m2.xyz, xy1));
+}
+
+fn boxFar(ro: vec3f, rd: vec3f) -> f32 {
+  let half = p.half;
+  let invRd = vec3f(
+    select(1e15, 1.0 / rd.x, abs(rd.x) >= 1e-15),
+    select(1e15, 1.0 / rd.y, abs(rd.y) >= 1e-15),
+    select(1e15, 1.0 / rd.z, abs(rd.z) >= 1e-15),
+  );
+  let tA = (-vec3f(half) - ro) * invRd;
+  let tB = (vec3f(half) - ro) * invRd;
+  let tmax = max(tA, tB);
+  let tExit = min(min(tmax.x, tmax.y), tmax.z);
+  return max(tExit, half * 4.0);
+}
+
+fn hash2(pxy: vec2f) -> f32 {
+  return fract(sin(dot(pxy, vec2f(12.9898, 78.233))) * 43758.5453);
+}
+
+@fragment
+fn fsMain(in: VSOut) -> @location(0) vec4f {
+  let fbW = f32(p.fbW);
+  let fbH = f32(p.fbH);
+  let px = u32(clamp(floor(in.pos.x), 0.0, fbW - 1.0));
+  let py = u32(clamp(floor(in.pos.y), 0.0, fbH - 1.0));
+  let uv = vec2u(px, py);
+
+  let color = textureLoad(sceneTex, uv, 0);
+  let depthN = textureLoad(occlTex, uv, 0).r;
+  let nEnc = textureLoad(normalTex, uv, 0);
+  if (depthN >= 0.999 || nEnc.a < 0.5) {
+    return color;
+  }
+
+  let ndcX = -1.0 + 2.0 * (f32(px) + 0.5) / fbW;
+  let ndcY = 1.0 - 2.0 * (f32(py) + 0.5) / fbH;
+  let rd = rayDir(ndcX, ndcY);
+  let ro = p.ro;
+  let far = boxFar(ro, rd);
+  let t0 = depthN * far;
+  let pos0 = ro + rd * t0;
+  let n = normalize(nEnc.xyz * 2.0 - 1.0);
+
+  // Screen-space radius shrinks with distance (approx).
+  let radPx = clamp(p.radius * 0.5 * min(fbW, fbH) / max(t0, 0.2), 2.0, 28.0);
+  let rot = hash2(vec2f(f32(px), f32(py))) * 6.2831853;
+  let cR = cos(rot);
+  let sR = sin(rot);
+
+  var occ = 0.0;
+  var wSum = 0.0;
+  for (var i: u32 = 0u; i < 16u; i++) {
+    let fi = f32(i);
+    let ang = fi * 2.3999632 + rot; // golden angle
+    let r = sqrt((fi + 0.5) / 16.0) * radPx;
+    let off = vec2f(cos(ang) * r, sin(ang) * r);
+    // rotate slightly with noise
+    let ox = off.x * cR - off.y * sR;
+    let oy = off.x * sR + off.y * cR;
+
+    let sx = i32(px) + i32(round(ox));
+    let sy = i32(py) + i32(round(oy));
+    if (sx < 0 || sy < 0 || sx >= i32(p.fbW) || sy >= i32(p.fbH)) { continue; }
+    let suv = vec2u(u32(sx), u32(sy));
+    let dS = textureLoad(occlTex, suv, 0).r;
+    if (dS >= 0.999) { continue; }
+
+    let sndcX = -1.0 + 2.0 * (f32(sx) + 0.5) / fbW;
+    let sndcY = 1.0 - 2.0 * (f32(sy) + 0.5) / fbH;
+    let srd = rayDir(sndcX, sndcY);
+    let sFar = boxFar(ro, srd);
+    let tS = dS * sFar;
+    let posS = ro + srd * tS;
+    let v = posS - pos0;
+    let dist = length(v);
+    if (dist < 1e-5) { continue; }
+    let vn = v / dist;
+    // Hemisphere contribution + range falloff (Alchemy-ish).
+    let nd = max(dot(n, vn) - p.bias, 0.0);
+    let fall = 1.0 - smoothstep(0.0, p.radius, dist);
+    let w = fall;
+    occ += nd * fall;
+    wSum += w;
+  }
+
+  var ao = 1.0;
+  if (wSum > 1e-4) {
+    ao = clamp(1.0 - (occ / wSum), 0.0, 1.0);
+    // Mild contrast so creases read without crushing flats.
+    ao = pow(ao, 1.25);
+  }
+  let factor = mix(1.0, ao, p.strength);
+  return vec4f(color.rgb * factor, color.a);
+}
+`;
+}
+
 /** @type {GPUDevice | null} */
 let device = null;
 /** @type {GPUCanvasContext | null} */
@@ -499,6 +659,7 @@ let canvasFormat = "bgra8unorm";
 let isoPipeline = null;
 let beerPipeline = null;
 let fxaaPipeline = null;
+let ssaoPipeline = null;
 let gridPipeline = null;
 let gridParamBuf = null;
 let gridVertexBuf = null;
@@ -509,6 +670,7 @@ let gridHalf = NaN;
 let drawParamBuf = null;
 let drawParamBufBeer = null;
 let fxaaParamBuf = null;
+let ssaoParamBuf = null;
 let volumeBuf = null;
 let volumeCapacity = 0;
 let colorBuf = null;
@@ -520,10 +682,18 @@ let occlH = 0;
 let depthTex = null;
 let depthW = 0;
 let depthH = 0;
+/** World normals from iso hits (rgb = n*0.5+0.5, a = 1 if valid). */
+let normalTex = null;
+let normalW = 0;
+let normalH = 0;
 /** Intermediate color (iso+beer) before FXAA → swapchain. */
 let sceneColorTex = null;
 let sceneColorW = 0;
 let sceneColorH = 0;
+/** Ping-pong target for SSAO apply (iso darkening). */
+let sceneColorAoTex = null;
+let sceneColorAoW = 0;
+let sceneColorAoH = 0;
 let fxaaSampler = null;
 
 /** @type {{ color: number[], isoLevel: number, base: number }[]} */
@@ -556,7 +726,7 @@ let lastPresentAt = 0;
 let profileMethod = "";
 let profileGridM = 0;
 
-const PIPELINE_EPOCH = 14;
+const PIPELINE_EPOCH = 15;
 let builtEpoch = -1;
 
 /** Classic 256-byte pack; volBase lives in the f32 pad after ro (index 11). */
@@ -592,6 +762,20 @@ function packDrawParamsBeer(fbW, fbH, gridM, steps, half, scale, densBaseOff, la
   f32[20] = M[6]; f32[21] = M[7]; f32[22] = M[8];
   f32[24] = 0.15; f32[25] = 0.25; f32[26] = 0.45;
   f32[28] = 0.55; f32[29] = 0.75; f32[30] = 1.0;
+  return buf;
+}
+
+/** SSAO uniforms — 128 bytes. */
+function packSsaoParams(fbW, fbH, half, radius, strength, bias, ro, M) {
+  const buf = new ArrayBuffer(128);
+  const u32 = new Uint32Array(buf);
+  const f32 = new Float32Array(buf);
+  u32[0] = fbW | 0; u32[1] = fbH | 0;
+  f32[4] = half; f32[5] = radius; f32[6] = strength; f32[7] = bias;
+  f32[8] = ro[0]; f32[9] = ro[1]; f32[10] = ro[2];
+  f32[12] = M[0]; f32[13] = M[1]; f32[14] = M[2];
+  f32[16] = M[3]; f32[17] = M[4]; f32[18] = M[5];
+  f32[20] = M[6]; f32[21] = M[7]; f32[22] = M[8];
   return buf;
 }
 
@@ -724,7 +908,9 @@ function packGridParams(viewProj, ro, half, M, fbW, fbH) {
 }
 
 export function isClipBakeGpuReady() {
-  return Boolean(device && isoPipeline && beerPipeline && fxaaPipeline && gridPipeline);
+  return Boolean(
+    device && isoPipeline && beerPipeline && fxaaPipeline && ssaoPipeline && gridPipeline,
+  );
 }
 export function isClipMarchReady() {
   return Boolean(
@@ -801,6 +987,18 @@ function ensureDepthTex(w, h) {
   depthH = h;
 }
 
+function ensureNormalTex(w, h) {
+  if (normalTex && normalW === w && normalH === h) return;
+  if (normalTex) { try { normalTex.destroy(); } catch (_) {} }
+  normalTex = device.createTexture({
+    size: [w, h],
+    format: "rgba8unorm",
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+  });
+  normalW = w;
+  normalH = h;
+}
+
 function ensureSceneColorTex(w, h) {
   if (sceneColorTex && sceneColorW === w && sceneColorH === h) return;
   if (sceneColorTex) { try { sceneColorTex.destroy(); } catch (_) {} }
@@ -811,6 +1009,18 @@ function ensureSceneColorTex(w, h) {
   });
   sceneColorW = w;
   sceneColorH = h;
+}
+
+function ensureSceneColorAoTex(w, h) {
+  if (sceneColorAoTex && sceneColorAoW === w && sceneColorAoH === h) return;
+  if (sceneColorAoTex) { try { sceneColorAoTex.destroy(); } catch (_) {} }
+  sceneColorAoTex = device.createTexture({
+    size: [w, h],
+    format: canvasFormat,
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+  });
+  sceneColorAoW = w;
+  sceneColorAoH = h;
 }
 
 export function resizeClipGpuCanvas(pixelW, pixelH) {
@@ -840,7 +1050,9 @@ export function resizeClipGpuCanvas(pixelW, pixelH) {
   }
   ensureOcclTex(w, h);
   ensureDepthTex(w, h);
+  ensureNormalTex(w, h);
   ensureSceneColorTex(w, h);
+  ensureSceneColorAoTex(w, h);
   return { w: canvas.width, h: canvas.height };
 }
 
@@ -964,7 +1176,7 @@ export async function initClipBakeGpu(viewportEl) {
       device = await adapter.requestDevice({ requiredFeatures });
       device.lost.then(() => {
         device = null;
-        isoPipeline = beerPipeline = fxaaPipeline = gridPipeline = null;
+        isoPipeline = beerPipeline = fxaaPipeline = ssaoPipeline = gridPipeline = null;
         initFailed = true;
       });
       if (timestampsSupported) {
@@ -988,6 +1200,10 @@ export async function initClipBakeGpu(viewportEl) {
       });
       fxaaParamBuf = device.createBuffer({
         size: 16,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      });
+      ssaoParamBuf = device.createBuffer({
+        size: 128,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
       gridParamBuf = device.createBuffer({
@@ -1014,7 +1230,7 @@ export async function initClipBakeGpu(viewportEl) {
       console.warn("[clipBakeGpu] init failed", e);
       initFailed = true;
       device = null;
-      isoPipeline = beerPipeline = fxaaPipeline = gridPipeline = null;
+      isoPipeline = beerPipeline = fxaaPipeline = ssaoPipeline = gridPipeline = null;
       return false;
     }
   })();
@@ -1033,7 +1249,7 @@ async function compileChecked(label, code) {
 export async function ensurePipelinesForDegree(_deg) {
   if (!device) return false;
   if (
-    isoPipeline && beerPipeline && fxaaPipeline && gridPipeline &&
+    isoPipeline && beerPipeline && fxaaPipeline && ssaoPipeline && gridPipeline &&
     builtEpoch === PIPELINE_EPOCH
   ) {
     return true;
@@ -1044,6 +1260,7 @@ export async function ensurePipelinesForDegree(_deg) {
   const beerMod = await compileChecked("beer", makeBeerMultiWgsl());
   const gridMod = await compileChecked("grid", makeGridWgsl());
   const fxaaMod = await compileChecked("fxaa", makeFxaaWgsl());
+  const ssaoMod = await compileChecked("ssao", makeSsaoWgsl());
 
   const blendPremul = {
     color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
@@ -1064,6 +1281,7 @@ export async function ensurePipelinesForDegree(_deg) {
       targets: [
         { format: canvasFormat, blend: blendPremul },
         { format: "rgba16float", blend: blendMin },
+        { format: "rgba8unorm" },
       ],
     },
     primitive: { topology: "triangle-list" },
@@ -1126,6 +1344,22 @@ export async function ensurePipelinesForDegree(_deg) {
   }
 
   device.pushErrorScope("validation");
+  const nextSsao = device.createRenderPipeline({
+    layout: "auto",
+    vertex: { module: ssaoMod, entryPoint: "vsMain" },
+    fragment: {
+      module: ssaoMod,
+      entryPoint: "fsMain",
+      targets: [{ format: canvasFormat }],
+    },
+    primitive: { topology: "triangle-list" },
+  });
+  {
+    const err = await device.popErrorScope();
+    if (err) throw new Error(`ssao: ${err.message}`);
+  }
+
+  device.pushErrorScope("validation");
   const nextFxaa = device.createRenderPipeline({
     layout: "auto",
     vertex: { module: fxaaMod, entryPoint: "vsMain" },
@@ -1144,6 +1378,7 @@ export async function ensurePipelinesForDegree(_deg) {
   isoPipeline = nextIso;
   beerPipeline = nextBeer;
   gridPipeline = nextGrid;
+  ssaoPipeline = nextSsao;
   fxaaPipeline = nextFxaa;
   builtEpoch = PIPELINE_EPOCH;
   if (Number.isFinite(gridHalf)) {
@@ -1174,7 +1409,7 @@ function darken(c, t) {
 export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps }) {
   if (
     !isClipBakeGpuReady() || !ctx || !volumeBuf || !colorBuf ||
-    !fxaaParamBuf || !fxaaSampler || !gridParamBuf
+    !fxaaParamBuf || !ssaoParamBuf || !fxaaSampler || !gridParamBuf
   ) {
     return false;
   }
@@ -1190,23 +1425,26 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps }) {
   const { w: marchW, h: marchH } = resizeClipGpuCanvas(fbW, fbH);
   if (!occlTex) ensureOcclTex(marchW, marchH);
   if (!depthTex) ensureDepthTex(marchW, marchH);
+  if (!normalTex) ensureNormalTex(marchW, marchH);
   if (!sceneColorTex) ensureSceneColorTex(marchW, marchH);
+  if (!sceneColorAoTex) ensureSceneColorAoTex(marchW, marchH);
   syncClipGpuWorldGrid(h);
 
   profileMarchFbW = marchW;
   profileMarchFbH = marchH;
-  profileMethod = "gpu-iso+beer+grid+fxaa";
+  profileMethod = "gpu-iso+ssao+beer+grid+fxaa";
   profileGridM = Mgrid;
 
   if (scenePacked) device.queue.writeBuffer(volumeBuf, 0, scenePacked);
   writeLayerColors(densColors);
 
-  const sceneView = sceneColorTex.createView();
+  let sceneView = sceneColorTex.createView();
   const swapView = ctx.getCurrentTexture().createView();
   const occlView = occlTex.createView();
   const depthView = depthTex.createView();
+  const normalView = normalTex.createView();
 
-  // Clear scene color + occl (far = 1) + depth (far = 1)
+  // Clear scene color + occl (far = 1) + normals + depth (far = 1)
   {
     const enc = device.createCommandEncoder();
     const pass = enc.beginRenderPass({
@@ -1220,6 +1458,12 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps }) {
         {
           view: occlView,
           clearValue: { r: 1, g: 0, b: 0, a: 1 },
+          loadOp: "clear",
+          storeOp: "store",
+        },
+        {
+          view: normalView,
+          clearValue: { r: 0, g: 0, b: 0, a: 0 },
           loadOp: "clear",
           storeOp: "store",
         },
@@ -1256,6 +1500,7 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps }) {
       colorAttachments: [
         { view: sceneView, loadOp: "load", storeOp: "store" },
         { view: occlView, loadOp: "load", storeOp: "store" },
+        { view: normalView, loadOp: "load", storeOp: "store" },
       ],
       depthStencilAttachment: {
         view: depthView,
@@ -1268,6 +1513,46 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps }) {
     pass.draw(3);
     pass.end();
     device.queue.submit([enc.finish()]);
+  }
+
+  // Iso-only SSAO → ping-pong color (skip if no manifolds this frame).
+  if (sceneConstraints.length > 0) {
+    const aoView = sceneColorAoTex.createView();
+    device.queue.writeBuffer(
+      ssaoParamBuf,
+      0,
+      packSsaoParams(
+        marchW, marchH, h,
+        /* radius */ Math.max(0.2, h * 0.18),
+        /* strength */ 0.85,
+        /* bias */ 0.03,
+        ro, Mat,
+      ),
+    );
+    const bg = device.createBindGroup({
+      layout: ssaoPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: ssaoParamBuf } },
+        { binding: 1, resource: sceneView },
+        { binding: 2, resource: occlView },
+        { binding: 3, resource: normalView },
+      ],
+    });
+    const enc = device.createCommandEncoder();
+    const pass = enc.beginRenderPass({
+      colorAttachments: [{
+        view: aoView,
+        clearValue: { r: 0, g: 0, b: 0, a: 0 },
+        loadOp: "clear",
+        storeOp: "store",
+      }],
+    });
+    pass.setPipeline(ssaoPipeline);
+    pass.setBindGroup(0, bg);
+    pass.draw(3);
+    pass.end();
+    device.queue.submit([enc.finish()]);
+    sceneView = aoView;
   }
 
   // World grid / axes / box — depth-test against iso depth in-place (no copy).
