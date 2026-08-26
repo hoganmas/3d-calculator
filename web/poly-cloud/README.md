@@ -17,7 +17,7 @@ Requires a WebGPU-capable browser for the full multi-layer / manifold path. With
 
 ## Controls
 
-- **Expressions** — Enter adds a row; badge cycles auto / density / manifold; color swatch per row. `A=B` → manifold; bare / `f=…` → density.
+- **Expressions** — Enter splits / adds a row; color swatch per row. `A=B` → manifold; bare / `f=…` → density.
 - **Parameters** — free symbols shared across expressions (animate with ▶).
 - **poly deg / scale / steps / box size** — fit order, dens opacity, march samples, domain edge length.
 - **march downscale** — internal march resolution (1×–16×); CSS upscales the result.

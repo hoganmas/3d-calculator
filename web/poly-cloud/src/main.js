@@ -18,7 +18,6 @@ import {
 import {
   listExpressions,
   setExpressions,
-  insertExprAfter,
   getSelectedId,
   updateExpr,
   hexToRgb01,
@@ -46,7 +45,6 @@ import {
 const els = {
   preset: document.getElementById("preset"),
   exprList: document.getElementById("exprList"),
-  addExpr: document.getElementById("addExpr"),
   deg: document.getElementById("deg"),
   scale: document.getElementById("scale"),
   steps: document.getElementById("steps"),
@@ -76,7 +74,7 @@ function applyPreset(key) {
   pendingParamSeed = p.params ?? {};
   const id = getSelectedId();
   if (id) updateExpr(id, { latex: p.latex });
-  else setExpressions([{ latex: p.latex, color: "#2d70b3" }]);
+  else setExpressions([{ latex: p.latex }]);
   exprListApi?.render();
 }
 
@@ -327,7 +325,7 @@ function marchDownscale() {
 
 applyPreset("blob");
 if (!listExpressions().length) {
-  setExpressions([{ latex: PRESETS.blob.latex, color: "#2d70b3" }]);
+  setExpressions([{ latex: PRESETS.blob.latex }]);
 }
 initMarchSliderUi();
 syncMarchSlider();
@@ -379,11 +377,6 @@ exprListApi = mountExprList({
   },
 });
 exprListApi.render();
-els.addExpr?.addEventListener("click", () => {
-  insertExprAfter(getSelectedId(), { latex: "" });
-  exprListApi?.render();
-  scheduleUploadFit(0);
-});
 setExpressionsOnChange(() => {
   /* list mutations already call render from UI helpers */
 });

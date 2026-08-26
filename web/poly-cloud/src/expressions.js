@@ -48,6 +48,14 @@ function colorForIndex(i) {
   return EXPR_COLORS[i % EXPR_COLORS.length];
 }
 
+/** Next palette color after the last expression (or index 0 if empty). */
+export function nextExprColor() {
+  if (!items.length) return colorForIndex(0);
+  const last = items[items.length - 1].color?.toLowerCase?.() ?? "";
+  const idx = EXPR_COLORS.findIndex((c) => c.toLowerCase() === last);
+  return colorForIndex(idx >= 0 ? idx + 1 : items.length);
+}
+
 /**
  * @param {Partial<ExprItem>} [init]
  * @returns {ExprItem}
@@ -57,7 +65,7 @@ export function createExprItem(init = {}) {
   return {
     id,
     latex: init.latex ?? "",
-    color: init.color ?? colorForIndex(items.length),
+    color: init.color ?? nextExprColor(),
     role: init.role ?? "auto",
     enabled: init.enabled !== false,
   };
@@ -104,12 +112,13 @@ export function setExpressions(list) {
  * @param {Partial<ExprItem>} [init]
  */
 export function insertExprAfter(afterId = selectedId, init = {}) {
-  const row = createExprItem(init);
   const idx = afterId ? items.findIndex((e) => e.id === afterId) : items.length - 1;
   const at = idx >= 0 ? idx + 1 : items.length;
+  const row = createExprItem({
+    ...init,
+    color: init.color ?? colorForIndex(at),
+  });
   items.splice(at, 0, row);
-  // Re-tint if color not explicit
-  if (!init.color) row.color = colorForIndex(at);
   selectedId = row.id;
   emit();
   return row;
@@ -149,6 +158,24 @@ export function mergeExprIntoPrevious(id) {
 }
 
 /**
+ * Split row `id` at a latex boundary into left (same row) + right (new row below).
+ * @returns {{ id: string, caretOffset: number } | null}
+ */
+export function splitExprAt(id, leftLatex, rightLatex) {
+  const idx = items.findIndex((e) => e.id === id);
+  if (idx < 0) return null;
+  items[idx].latex = leftLatex ?? "";
+  const row = createExprItem({
+    latex: rightLatex ?? "",
+    color: colorForIndex(idx + 1),
+  });
+  items.splice(idx + 1, 0, row);
+  selectedId = row.id;
+  emit();
+  return { id: row.id, caretOffset: 0 };
+}
+
+/**
  * @param {string} id
  * @param {Partial<ExprItem>} patch
  */
@@ -171,12 +198,11 @@ export function hexToRgb01(hex) {
 }
 
 /**
- * Resolve effective role from auto-classify + override.
- * @param {ExprRole} role
+ * Effective role from expression kind (`A=B` → manifold, else density).
+ * @param {ExprRole} _role  unused (kept for call-site compatibility)
  * @param {"constraint" | "definition" | "bare"} kind
  * @returns {"density" | "constraint"}
  */
-export function resolveExprRole(role, kind) {
-  if (role === "density" || role === "constraint") return role;
+export function resolveExprRole(_role, kind) {
   return kind === "constraint" ? "constraint" : "density";
 }

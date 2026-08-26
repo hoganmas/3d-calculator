@@ -312,6 +312,104 @@ fn fsMain(in: VSOut) -> @location(0) vec4f {
 `;
 }
 
+/**
+ * Compact FXAA 3.11-style post (luma edge detect + blend).
+ * Input is premultiplied overlay; we un-premultiply for luma, then re-premultiply.
+ */
+function makeFxaaWgsl() {
+  return /* wgsl */ `
+struct FxaaParams {
+  invRes: vec2f,
+  _pad0: f32,
+  _pad1: f32,
+}
+
+@group(0) @binding(0) var<uniform> u: FxaaParams;
+@group(0) @binding(1) var srcTex: texture_2d<f32>;
+@group(0) @binding(2) var srcSamp: sampler;
+
+struct VSOut {
+  @builtin(position) pos: vec4f,
+  @location(0) uv: vec2f,
+}
+
+@vertex
+fn vsMain(@builtin(vertex_index) vi: u32) -> VSOut {
+  var p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
+  var o: VSOut;
+  o.pos = vec4f(p[vi], 0.0, 1.0);
+  // WebGPU: texel (0,0) is top-left; clip +Y is up — flip V so the overlay matches Three.
+  o.uv = vec2f(p[vi].x * 0.5 + 0.5, -p[vi].y * 0.5 + 0.5);
+  return o;
+}
+
+fn luma(rgb: vec3f) -> f32 {
+  return dot(rgb, vec3f(0.299, 0.587, 0.114));
+}
+
+fn samplePremul(uv: vec2f) -> vec4f {
+  return textureSampleLevel(srcTex, srcSamp, uv, 0.0);
+}
+
+fn unpremul(c: vec4f) -> vec3f {
+  return c.xyz / max(c.a, 1e-4);
+}
+
+@fragment
+fn fsMain(in: VSOut) -> @location(0) vec4f {
+  let rcp = u.invRes;
+  let uv = in.uv;
+
+  let rgbM = samplePremul(uv);
+  // Skip empty pixels — keep overlay holes crisp for Three underneath.
+  if (rgbM.a < 0.001) { return vec4f(0.0); }
+
+  let rgbNW = samplePremul(uv + vec2f(-rcp.x, -rcp.y));
+  let rgbNE = samplePremul(uv + vec2f( rcp.x, -rcp.y));
+  let rgbSW = samplePremul(uv + vec2f(-rcp.x,  rcp.y));
+  let rgbSE = samplePremul(uv + vec2f( rcp.x,  rcp.y));
+
+  // Edge detect on straight alpha + luma (silhouettes are mostly alpha edges).
+  let lM = luma(unpremul(rgbM)) * rgbM.a + rgbM.a;
+  let lNW = luma(unpremul(rgbNW)) * rgbNW.a + rgbNW.a;
+  let lNE = luma(unpremul(rgbNE)) * rgbNE.a + rgbNE.a;
+  let lSW = luma(unpremul(rgbSW)) * rgbSW.a + rgbSW.a;
+  let lSE = luma(unpremul(rgbSE)) * rgbSE.a + rgbSE.a;
+
+  let lMin = min(lM, min(min(lNW, lNE), min(lSW, lSE)));
+  let lMax = max(lM, max(max(lNW, lNE), max(lSW, lSE)));
+  let range = lMax - lMin;
+  // No edge → passthrough.
+  if (range < max(0.0312, lMax * 0.125)) {
+    return rgbM;
+  }
+
+  var dir = vec2f(
+    -((lNW + lNE) - (lSW + lSE)),
+    ((lNW + lSW) - (lNE + lSE)),
+  );
+  let dirReduce = max((lNW + lNE + lSW + lSE) * 0.03125, 0.0078125);
+  let rcpDir = 1.0 / (min(abs(dir.x), abs(dir.y)) + dirReduce);
+  dir = clamp(dir * rcpDir, vec2f(-8.0), vec2f(8.0)) * rcp;
+
+  let rgbA = 0.5 * (
+    samplePremul(uv + dir * (1.0 / 3.0 - 0.5)) +
+    samplePremul(uv + dir * (2.0 / 3.0 - 0.5))
+  );
+  let rgbB = rgbA * 0.5 + 0.25 * (
+    samplePremul(uv + dir * -0.5) +
+    samplePremul(uv + dir * 0.5)
+  );
+
+  let lB = luma(unpremul(rgbB)) * rgbB.a + rgbB.a;
+  if (lB < lMin || lB > lMax) {
+    return rgbA;
+  }
+  return rgbB;
+}
+`;
+}
+
 /** @type {GPUDevice | null} */
 let device = null;
 /** @type {GPUCanvasContext | null} */
@@ -322,9 +420,11 @@ let canvasFormat = "bgra8unorm";
 
 let isoPipeline = null;
 let beerPipeline = null;
+let fxaaPipeline = null;
 
 let drawParamBuf = null;
 let drawParamBufBeer = null;
+let fxaaParamBuf = null;
 let volumeBuf = null;
 let volumeCapacity = 0;
 let colorBuf = null;
@@ -332,6 +432,11 @@ let colorBuf = null;
 let occlTex = null;
 let occlW = 0;
 let occlH = 0;
+/** Intermediate color (iso+beer) before FXAA → swapchain. */
+let sceneColorTex = null;
+let sceneColorW = 0;
+let sceneColorH = 0;
+let fxaaSampler = null;
 
 /** @type {{ color: number[], isoLevel: number, base: number }[]} */
 let sceneConstraints = [];
@@ -363,7 +468,7 @@ let lastPresentAt = 0;
 let profileMethod = "";
 let profileGridM = 0;
 
-const PIPELINE_EPOCH = 8;
+const PIPELINE_EPOCH = 11;
 let builtEpoch = -1;
 
 /** Classic 256-byte pack; volBase lives in the f32 pad after ro (index 11). */
@@ -416,7 +521,7 @@ function writeLayerColors(colors) {
 }
 
 export function isClipBakeGpuReady() {
-  return Boolean(device && isoPipeline && beerPipeline);
+  return Boolean(device && isoPipeline && beerPipeline && fxaaPipeline);
 }
 export function isClipMarchReady() {
   return Boolean(
@@ -481,6 +586,18 @@ function ensureOcclTex(w, h) {
   occlH = h;
 }
 
+function ensureSceneColorTex(w, h) {
+  if (sceneColorTex && sceneColorW === w && sceneColorH === h) return;
+  if (sceneColorTex) { try { sceneColorTex.destroy(); } catch (_) {} }
+  sceneColorTex = device.createTexture({
+    size: [w, h],
+    format: canvasFormat,
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+  });
+  sceneColorW = w;
+  sceneColorH = h;
+}
+
 export function resizeClipGpuCanvas(pixelW, pixelH) {
   if (!canvas || !device) return { w: pixelW | 0, h: pixelH | 0 };
   if (!ctx) {
@@ -507,6 +624,7 @@ export function resizeClipGpuCanvas(pixelW, pixelH) {
     canvas._clipConfigured = true;
   }
   ensureOcclTex(w, h);
+  ensureSceneColorTex(w, h);
   return { w: canvas.width, h: canvas.height };
 }
 
@@ -608,7 +726,7 @@ export async function initClipBakeGpu(viewportEl) {
       device = await adapter.requestDevice({ requiredFeatures });
       device.lost.then(() => {
         device = null;
-        isoPipeline = beerPipeline = null;
+        isoPipeline = beerPipeline = fxaaPipeline = null;
         initFailed = true;
       });
       if (timestampsSupported) {
@@ -630,6 +748,16 @@ export async function initClipBakeGpu(viewportEl) {
         size: 256,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
+      fxaaParamBuf = device.createBuffer({
+        size: 16,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      });
+      fxaaSampler = device.createSampler({
+        magFilter: "linear",
+        minFilter: "linear",
+        addressModeU: "clamp-to-edge",
+        addressModeV: "clamp-to-edge",
+      });
       colorBuf = device.createBuffer({
         size: MAX_DENS_LAYERS * 16,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
@@ -644,7 +772,7 @@ export async function initClipBakeGpu(viewportEl) {
       console.warn("[clipBakeGpu] init failed", e);
       initFailed = true;
       device = null;
-      isoPipeline = beerPipeline = null;
+      isoPipeline = beerPipeline = fxaaPipeline = null;
       return false;
     }
   })();
@@ -662,11 +790,14 @@ async function compileChecked(label, code) {
 
 export async function ensurePipelinesForDegree(_deg) {
   if (!device) return false;
-  if (isoPipeline && beerPipeline && builtEpoch === PIPELINE_EPOCH) return true;
+  if (isoPipeline && beerPipeline && fxaaPipeline && builtEpoch === PIPELINE_EPOCH) {
+    return true;
+  }
 
   canvasFormat = navigator.gpu.getPreferredCanvasFormat();
   const isoMod = await compileChecked("iso", makeIsoWgsl());
   const beerMod = await compileChecked("beer", makeBeerMultiWgsl());
+  const fxaaMod = await compileChecked("fxaa", makeFxaaWgsl());
 
   const blendPremul = {
     color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
@@ -712,8 +843,25 @@ export async function ensurePipelinesForDegree(_deg) {
     if (err) throw new Error(`beer: ${err.message}`);
   }
 
+  device.pushErrorScope("validation");
+  const nextFxaa = device.createRenderPipeline({
+    layout: "auto",
+    vertex: { module: fxaaMod, entryPoint: "vsMain" },
+    fragment: {
+      module: fxaaMod,
+      entryPoint: "fsMain",
+      targets: [{ format: canvasFormat }],
+    },
+    primitive: { topology: "triangle-list" },
+  });
+  {
+    const err = await device.popErrorScope();
+    if (err) throw new Error(`fxaa: ${err.message}`);
+  }
+
   isoPipeline = nextIso;
   beerPipeline = nextBeer;
+  fxaaPipeline = nextFxaa;
   builtEpoch = PIPELINE_EPOCH;
   return true;
 }
@@ -736,7 +884,9 @@ function darken(c, t) {
 }
 
 export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps }) {
-  if (!isClipBakeGpuReady() || !ctx || !volumeBuf || !colorBuf) return false;
+  if (!isClipBakeGpuReady() || !ctx || !volumeBuf || !colorBuf || !fxaaParamBuf || !fxaaSampler) {
+    return false;
+  }
   if (densLayerCount < 1 && sceneConstraints.length < 1) return false;
 
   const o = camera.position;
@@ -748,25 +898,27 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps }) {
 
   const { w: marchW, h: marchH } = resizeClipGpuCanvas(fbW, fbH);
   if (!occlTex) ensureOcclTex(marchW, marchH);
+  if (!sceneColorTex) ensureSceneColorTex(marchW, marchH);
 
   profileMarchFbW = marchW;
   profileMarchFbH = marchH;
-  profileMethod = "gpu-iso-mrt+beer";
+  profileMethod = "gpu-iso+beer+fxaa";
   profileGridM = Mgrid;
 
   if (scenePacked) device.queue.writeBuffer(volumeBuf, 0, scenePacked);
   writeLayerColors(densColors);
 
-  const colorView = ctx.getCurrentTexture().createView();
+  const sceneView = sceneColorTex.createView();
+  const swapView = ctx.getCurrentTexture().createView();
   const occlView = occlTex.createView();
 
-  // Clear color + occl (far = 1)
+  // Clear scene color + occl (far = 1)
   {
     const enc = device.createCommandEncoder();
     const pass = enc.beginRenderPass({
       colorAttachments: [
         {
-          view: colorView,
+          view: sceneView,
           clearValue: { r: 0, g: 0, b: 0, a: 0 },
           loadOp: "clear",
           storeOp: "store",
@@ -802,7 +954,7 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps }) {
     const enc = device.createCommandEncoder();
     const pass = enc.beginRenderPass({
       colorAttachments: [
-        { view: colorView, loadOp: "load", storeOp: "store" },
+        { view: sceneView, loadOp: "load", storeOp: "store" },
         { view: occlView, loadOp: "load", storeOp: "store" },
       ],
     });
@@ -830,9 +982,39 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps }) {
     });
     const enc = device.createCommandEncoder();
     const pass = enc.beginRenderPass({
-      colorAttachments: [{ view: colorView, loadOp: "load", storeOp: "store" }],
+      colorAttachments: [{ view: sceneView, loadOp: "load", storeOp: "store" }],
     });
     pass.setPipeline(beerPipeline);
+    pass.setBindGroup(0, bg);
+    pass.draw(3);
+    pass.end();
+    device.queue.submit([enc.finish()]);
+  }
+
+  // FXAA → swapchain
+  {
+    const inv = new Float32Array([1 / marchW, 1 / marchH, 0, 0]);
+    device.queue.writeBuffer(fxaaParamBuf, 0, inv);
+    const bg = device.createBindGroup({
+      layout: fxaaPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: fxaaParamBuf } },
+        { binding: 1, resource: sceneView },
+        { binding: 2, resource: fxaaSampler },
+      ],
+    });
+    const enc = device.createCommandEncoder();
+    const pass = enc.beginRenderPass({
+      colorAttachments: [
+        {
+          view: swapView,
+          clearValue: { r: 0, g: 0, b: 0, a: 0 },
+          loadOp: "clear",
+          storeOp: "store",
+        },
+      ],
+    });
+    pass.setPipeline(fxaaPipeline);
     pass.setBindGroup(0, bg);
     pass.draw(3);
     pass.end();
