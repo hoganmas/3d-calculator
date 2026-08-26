@@ -39,7 +39,7 @@ const els = {
   deg: document.getElementById("deg"),
   scale: document.getElementById("scale"),
   steps: document.getElementById("steps"),
-  half: document.getElementById("half"),
+  boxSize: document.getElementById("boxSize"),
   marchDownscale: document.getElementById("marchDownscale"),
   marchScaleLabel: document.getElementById("marchScaleLabel"),
   babbageTile: document.getElementById("babbageTile"),
@@ -593,8 +593,10 @@ function rebuildWorldGrid(half) {
   worldGrid.add(makeAxisLabel("z", "#6ea8fe", new THREE.Vector3(0, 0, tip)));
 }
 
-function setBoxHalf(h) {
-  const s = 2 * h;
+/** Fit / march use half-extent h; UI “box size” is full edge length S = 2h. */
+function setBoxSize(size) {
+  const s = Math.max(1e-6, size);
+  const h = 0.5 * s;
   volumeMesh.geometry.dispose();
   volumeMesh.geometry = new THREE.BoxGeometry(s, s, s);
   boxHelper.geometry.dispose();
@@ -706,7 +708,7 @@ function buildMetricsReport() {
     `deg             ${fitDeg}`,
     `scale           ${uniforms.uScale.value}`,
     `steps           ${uniforms.uSteps.value}`,
-    `half            ${uniforms.uHalf.value}`,
+    `box size       ${2 * uniforms.uHalf.value}`,
     `march_downscale   ${marchDownscale()}×`,
     `march_resolution  ${(100 / marchDownscale()).toFixed(1)}%`,
     `viewport        ${fbW}×${fbH}`,
@@ -971,13 +973,14 @@ function uploadFit(opts = {}) {
   const fromAnim = !!opts.fromAnim;
   setErr("");
   try {
-    const half = Number(els.half.value);
+    const boxSize = Number(els.boxSize.value);
     const deg = Number(els.deg.value);
     const densScale = Number(els.scale.value);
     const steps = Math.min(96, Math.max(8, Number(els.steps.value) || 32));
     els.steps.value = String(steps);
-    if (!(half > 0)) throw new Error("half-size must be > 0");
+    if (!(boxSize > 0)) throw new Error("box size must be > 0");
     if (deg < 1 || deg > MAX_DEG) throw new Error(`poly deg must be 1…${MAX_DEG}`);
+    const half = 0.5 * boxSize;
 
     const tUpload = performance.now();
     const { fn } = compileBoundExpr({ rebuildUi: false });
@@ -1020,7 +1023,7 @@ function uploadFit(opts = {}) {
     uniforms.uSteps.value = steps;
     clipUniforms.uScale.value = densScale;
     clipUniforms.uSteps.value = steps;
-    setBoxHalf(half);
+    setBoxSize(boxSize);
 
     const n = (fit.deg + 1) ** 3;
     if (Number.isFinite(fit.fitRelL2)) {
@@ -1057,7 +1060,7 @@ function uploadFit(opts = {}) {
   }
 }
 
-/** Debounced Chebyshev refit when expr / deg / half become valid. */
+/** Debounced Chebyshev refit when expr / deg / box size become valid. */
 let fitTimer = 0;
 const FIT_DEBOUNCE_MS = 320;
 /** Min ms between refits while a parameter is animating. */
@@ -1097,8 +1100,8 @@ els.expr.addEventListener("input", () => {
 });
 els.deg.addEventListener("input", () => scheduleUploadFit(200));
 els.deg.addEventListener("change", () => scheduleUploadFit(0));
-els.half.addEventListener("input", () => scheduleUploadFit(200));
-els.half.addEventListener("change", () => scheduleUploadFit(0));
+els.boxSize.addEventListener("input", () => scheduleUploadFit(200));
+els.boxSize.addEventListener("change", () => scheduleUploadFit(0));
 els.scale.addEventListener("input", applyRenderHyperparams);
 els.scale.addEventListener("change", applyRenderHyperparams);
 els.mode.addEventListener("change", syncModeUniforms);
