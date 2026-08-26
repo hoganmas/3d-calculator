@@ -470,8 +470,13 @@ export function mountExprList(opts) {
 
       const swatch = row.querySelector(".expr-color");
       if (swatch instanceof HTMLInputElement) {
-        swatch.disabled = isParamDef || !!warn;
-        swatch.title = isParamDef || warn ? "Parameters are not drawn" : "Color";
+        const disabled = isParamDef || !!warn;
+        swatch.disabled = disabled;
+        swatch.title = disabled ? "Parameters are not drawn" : "Color";
+        const hex = String(item.color || "#2d70b3");
+        if (document.activeElement !== swatch) {
+          swatch.value = hex.startsWith("#") ? hex : "#2d70b3";
+        }
       }
       if (mf instanceof HTMLElement) {
         mf.classList.toggle("invalid", !!warn);
@@ -707,6 +712,7 @@ export function mountExprList(opts) {
         if (onColorChange) onColorChange();
         else onExprChange();
       });
+      swatch.addEventListener("click", (ev) => ev.stopPropagation());
 
       const mid = document.createElement("div");
       mid.className = "expr-mid";
