@@ -30,6 +30,14 @@ import { clipGridVertex, clipGridFragment } from "./clipShaders.js";
 import { ndcToDirMatrix, perspectiveDirScale, MAX_DEG } from "./clipGrid.js";
 import { idctCheb3D, idctChebGrad3D } from "./chebIdct.js";
 import {
+  beginKeyframePass,
+  clearKeyframeCaches,
+  getKeyframeMetrics,
+  keyframeAnimParam,
+  noteKeyframeLayer,
+  sampleLayerKeyframes,
+} from "./animKeyframes.js";
+import {
   initClipBakeGpu,
   isClipBakeGpuReady,
   isClipMarchReady,
@@ -739,6 +747,18 @@ function buildMetricsReport() {
     if (Number.isFinite(t.fittedCount)) {
       lines.push(`fit_layers      ${t.fittedCount}`);
     }
+    if (Number.isFinite(t.keyframedCount)) {
+      lines.push(`kf_layers       ${t.keyframedCount}`);
+    }
+    if (Number.isFinite(t.kfBakeMs) && t.kfBakeMs > 0) {
+      lines.push(`kf_bake_ms      ${t.kfBakeMs.toFixed(2)}`);
+    }
+    if (Number.isFinite(t.kfLerpMs) && t.keyframedCount > 0) {
+      lines.push(`kf_lerp_ms      ${t.kfLerpMs.toFixed(2)}`);
+    }
+    if (Number.isFinite(t.kfK) && t.keyframedCount > 0) {
+      lines.push(`kf_K            ${t.kfK}`);
+    }
   }
   const pv = getParamValues();
   const pNames = Object.keys(pv);
@@ -956,6 +976,7 @@ function uploadFit(opts = {}) {
 
     // No visible / non-empty expressions → clear volume, draw nothing.
     if (!layers.length) {
+      clearKeyframeCaches();
       lastSceneBake = { densLayers: [], constraints: [], M: Math.max(2, deg + 1), dens: null };
       lastFitTiming = null;
       lastNCoeff = 0;
@@ -986,9 +1007,14 @@ function uploadFit(opts = {}) {
     let timingAcc = { sampleMs: 0, chebMs: 0, monoMs: 0, l2Ms: 0, totalMs: 0 };
     let M = deg + 1;
     let fittedCount = 0;
+    let keyframedCount = 0;
 
     // Anim ticks: only refit layers that depend on dirty params; reuse the rest.
+    // Dirty layers with exactly one animating slider param use dens keyframe lerp.
     const dirty = fromAnim ? collectAnimDirtyParams() : null;
+    if (fromAnim) beginKeyframePass();
+    else clearKeyframeCaches();
+
     /** @type {Map<string, any>} */
     const prevById = new Map();
     const canReuseCache =
@@ -1005,6 +1031,8 @@ function uploadFit(opts = {}) {
         if (c.id) prevById.set(c.id, { kind: "constraint", ...c });
       }
     }
+
+    const baseParams = getParamValues();
 
     for (const L of layers) {
       const color = hexToRgb01(L.item.color);
@@ -1035,6 +1063,55 @@ function uploadFit(opts = {}) {
         if (!cheb && prev.cheb) {
           cheb = prev.cheb;
           fitRel = prev.fitRel ?? fitRel;
+        }
+        continue;
+      }
+
+      // Keyframe path: one dirty cosine-animated slider → lerp dens (no DCT).
+      const kfParam =
+        fromAnim && depends
+          ? keyframeAnimParam(L.compiled.freeParams, dirty)
+          : null;
+      if (kfParam) {
+        const sample = sampleLayerKeyframes({
+          layerId: L.item.id,
+          latex: L.item.latex,
+          role: L.role === "constraint" ? "constraint" : "density",
+          isoLevel: L.compiled.isoLevel ?? 0,
+          paramName: kfParam,
+          compiled: L.compiled,
+          baseParams,
+          half,
+          deg,
+        });
+        noteKeyframeLayer();
+        keyframedCount++;
+        M = sample.M || M;
+        // Copy out of cache scratch — async bakeChebVolume must not see a later lerp.
+        if (L.role === "constraint") {
+          constraints.push({
+            id: L.item.id,
+            dens: sample.dens.slice(),
+            gx: sample.gx.slice(),
+            gy: sample.gy.slice(),
+            gz: sample.gz.slice(),
+            color,
+            isoLevel: L.compiled.isoLevel ?? 0,
+            cheb: sample.cheb,
+            fitRel: sample.fitRel,
+          });
+        } else {
+          densLayers.push({
+            id: L.item.id,
+            dens: sample.dens.slice(),
+            color,
+            cheb: sample.cheb,
+            fitRel: sample.fitRel,
+          });
+        }
+        if (!cheb && sample.cheb) {
+          cheb = sample.cheb;
+          fitRel = sample.fitRel ?? fitRel;
         }
         continue;
       }
@@ -1093,17 +1170,28 @@ function uploadFit(opts = {}) {
       deg,
       half,
       fittedCount,
+      keyframedCount,
     };
     const uploadMs = performance.now() - tUpload;
-    lastFitTiming = { ...timingAcc, uploadMs, fittedCount };
+    const kf = getKeyframeMetrics();
+    lastFitTiming = {
+      ...timingAcc,
+      uploadMs,
+      fittedCount,
+      keyframedCount,
+      kfBakeMs: kf.bakeMs,
+      kfLerpMs: kf.lerpMs,
+      kfK: kf.K,
+    };
     lastNCoeff = (deg + 1) ** 3 * layers.length;
     if (Number.isFinite(fitRel)) lastFitRel = fitRel;
 
     if (cheb) worldCheb = cheb;
     else if (!fromAnim) worldCheb = null;
     fitDeg = deg;
-    // Skip volume re-upload when every layer was reused (param anim didn't touch them).
-    if (fittedCount > 0 || !fromAnim) {
+    // Keyframed layers still need GPU upload (lerped dens changed).
+    const needUpload = fittedCount > 0 || keyframedCount > 0 || !fromAnim;
+    if (needUpload) {
       bakeChebVolume();
     }
 
@@ -1113,7 +1201,7 @@ function uploadFit(opts = {}) {
 
     if (!fromAnim) resize();
     clipDirty = true;
-    if (fittedCount > 0 || !fromAnim) {
+    if (needUpload) {
       void prepareClipGpuForDegree(deg).then(() => {
         if (lastSceneBake) bakeChebVolume();
         syncClipPresentation();
