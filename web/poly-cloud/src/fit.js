@@ -9,6 +9,7 @@ const ce = new ComputeEngine();
  * Spatial vars (not sliders). Cartesian + spherical + cylindrical:
  *   r, θ, φ  — physics spherical (θ from +z, φ = atan2(y,x))
  *   ρ        — cylindrical radius √(x²+y²)
+ * Also: t — wall-clock time (seconds) for parameter equations.
  * LaTeX `\theta`/`\phi`/`\rho` bind as `theta`/`phi`/`rho`.
  */
 const RESERVED_SYMBOLS = new Set([
@@ -19,7 +20,21 @@ const RESERVED_SYMBOLS = new Set([
   "theta",
   "phi",
   "rho",
+  "t",
 ]);
+
+/** World / polar coords — required for a field to be graphed (fit + march). */
+const SPATIAL_SYMBOLS = new Set(["x", "y", "z", "r", "theta", "phi", "rho"]);
+
+/** Wall-clock time symbol available in parameter RHS equations. */
+export const TIME_SYMBOL = "t";
+
+/** @param {unknown} json MathJSON node */
+function symbolId(json) {
+  if (typeof json === "string" && /^[A-Za-z][A-Za-z0-9_]*$/.test(json)) return json;
+  if (Array.isArray(json) && json[0] === "Symbol" && typeof json[1] === "string") return json[1];
+  return null;
+}
 
 function coerceNumber(v) {
   if (typeof v === "number") return v;
@@ -98,16 +113,18 @@ function isUserFunctionCall(json) {
 /**
  * Classify input and rewrite to a numeric field for fitting.
  *
+ * - parameter `a = E`      → named slider / time eqn (LHS free symbol)
  * - constraint `A = B`     → field A−B, isosurface at 0
  * - definition `f(…) = E`  → field E, volume (Beer)
  * - bare expression `E`    → field E, volume (Beer)
  *
  * @returns {{
- *   kind: "constraint" | "definition" | "bare",
- *   shade: "iso" | "volume",
+ *   kind: "parameter" | "constraint" | "definition" | "bare",
+ *   shade: "iso" | "volume" | "none",
  *   isoLevel: number,
  *   compileLatex: string,
  *   label: string,
+ *   paramName?: string,
  * }}
  */
 export function classifyExpr(raw) {
@@ -127,10 +144,11 @@ export function classifyExpr(raw) {
     };
   }
 
-  const j = box?.json;
-  const head = Array.isArray(j) ? j[0] : null;
+  const j = box?.json ?? (typeof box?.toJSON === "function" ? box.toJSON() : null);
+  const headRaw = Array.isArray(j) ? j[0] : box?.operator;
+  const head = typeof headRaw === "string" ? headRaw.toLowerCase() : null;
 
-  if (head === "Equal" || head === "Assign") {
+  if (head === "equal" || head === "assign") {
     const lhs = j[1];
     const rhs = j[2];
     const asDef =
@@ -146,6 +164,26 @@ export function classifyExpr(raw) {
         isoLevel: 0,
         compileLatex,
         label: "definition → volume",
+      };
+    }
+
+    // Bare free symbol on LHS → named parameter (not a manifold constraint).
+    const lhsName = symbolId(lhs);
+    if (
+      lhsName &&
+      !RESERVED_SYMBOLS.has(lhsName) &&
+      /^[A-Za-z][A-Za-z0-9_]*$/.test(lhsName)
+    ) {
+      const rhsBox = ce.box(rhs);
+      const compileLatex = rhsBox.latex || src.split("=").slice(1).join("=").trim();
+      if (!compileLatex) throw new Error("Empty parameter right-hand side");
+      return {
+        kind: "parameter",
+        shade: "none",
+        isoLevel: 0,
+        compileLatex,
+        label: `parameter ${lhsName}`,
+        paramName: lhsName,
       };
     }
 
@@ -171,12 +209,125 @@ export function classifyExpr(raw) {
 }
 
 /**
+ * Compile a named parameter definition `a = <expr>` (or bare RHS for `expectedName`).
+ * Free symbols besides reserved/`expectedName` are other parameters; `t` is time.
+ *
+ * @param {string} raw
+ * @param {string} expectedName
+ * @returns {{
+ *   name: string,
+ *   rhsLatex: string,
+ *   usesTime: boolean,
+ *   freeParams: string[],
+ *   isConstant: boolean,
+ *   constantValue: number | null,
+ *   eval: (scope?: Record<string, number>) => number,
+ * }}
+ */
+export function compileParamLatex(raw, expectedName) {
+  const src = String(raw ?? "").trim();
+  if (!src) throw new Error("Empty parameter");
+
+  let name = expectedName;
+  let rhsLatex = src;
+
+  let box;
+  try {
+    box = ce.parse(src);
+  } catch {
+    box = null;
+  }
+
+  const j = box?.json ?? (typeof box?.toJSON === "function" ? box.toJSON() : null);
+  const headRaw = Array.isArray(j) ? j[0] : box?.operator;
+  const head = typeof headRaw === "string" ? headRaw.toLowerCase() : null;
+  if (head === "equal" || head === "assign") {
+    const rhsBox = ce.box(j[2]);
+    rhsLatex = rhsBox?.latex || src.split("=").slice(1).join("=").trim();
+  } else if (expectedName) {
+    // Bare number / expr → treat as RHS for expectedName.
+    rhsLatex = src;
+  }
+
+  if (!rhsLatex) throw new Error("Empty parameter right-hand side");
+  // Slot name is authoritative (field may show a=… or a bare RHS).
+  name = expectedName;
+
+
+  const result = compile(rhsLatex);
+  if (!result?.success || typeof result.run !== "function") {
+    const why = result?.unsupported?.length
+      ? `unsupported: ${result.unsupported.join(", ")}`
+      : "could not compile";
+    throw new Error(`Parameter ${why}`);
+  }
+
+  const { run, freeSymbols = [] } = result;
+  /** @type {string[]} */
+  const freeParams = [];
+  let usesTime = false;
+  for (const s of freeSymbols) {
+    const id = String(s);
+    if (id === TIME_SYMBOL) {
+      usesTime = true;
+      continue;
+    }
+    if (RESERVED_SYMBOLS.has(id) || id === name) continue;
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(id)) {
+      throw new Error(`Invalid symbol “${id}” in parameter`);
+    }
+    freeParams.push(id);
+  }
+  freeParams.sort();
+
+  let constantValue = null;
+  let isConstant = freeParams.length === 0 && !usesTime;
+  if (isConstant) {
+    try {
+      constantValue = coerceNumber(run({}));
+      if (!Number.isFinite(constantValue)) {
+        isConstant = false;
+        constantValue = null;
+      }
+    } catch {
+      isConstant = false;
+      constantValue = null;
+    }
+  }
+
+  return {
+    name,
+    rhsLatex,
+    usesTime,
+    freeParams,
+    isConstant,
+    constantValue,
+    eval(scope = {}) {
+      return coerceNumber(run(scope));
+    },
+  };
+}
+
+/** Format a number for embedding in `name=<value>` LaTeX. */
+export function formatParamLatexValue(v) {
+  if (!Number.isFinite(v)) return "0";
+  const a = Math.abs(v);
+  if (a !== 0 && (a >= 1e6 || a < 1e-4)) return v.toExponential(6).replace(/e\+?/, "e");
+  const s = String(Math.round(v * 1e9) / 1e9);
+  return s;
+}
+
+/**
  * Compile a density / constraint expression.
+ *
+ * Plain 0th-order fields (no dependence on x,y,z / r,θ,φ,ρ) get `shade: "none"`
+ * and are not graphed — constants and param-only expressions stay off the volume.
  *
  * @returns {{
  *   freeParams: string[],
+ *   usesSpace: boolean,
  *   kind: "constraint" | "definition" | "bare",
- *   shade: "iso" | "volume",
+ *   shade: "iso" | "volume" | "none",
  *   isoLevel: number,
  *   classifyLabel: string,
  *   bind: (params?: Record<string, number>) => (x: number, y: number, z: number) => number,
@@ -196,8 +347,10 @@ export function compileExpr(raw) {
 
   const { run, freeSymbols = [] } = result;
   const freeParams = [];
+  let usesSpace = false;
   for (const s of freeSymbols) {
     const id = String(s);
+    if (SPATIAL_SYMBOLS.has(id)) usesSpace = true;
     if (RESERVED_SYMBOLS.has(id)) continue;
     if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(id)) {
       throw new Error(`Invalid parameter “${id}” (use letters / digits)`);
@@ -206,12 +359,15 @@ export function compileExpr(raw) {
   }
   freeParams.sort();
 
+  const shade = usesSpace ? classified.shade : "none";
+
   return {
     freeParams,
+    usesSpace,
     kind: classified.kind,
-    shade: classified.shade,
+    shade,
     isoLevel: classified.isoLevel,
-    classifyLabel: classified.label,
+    classifyLabel: usesSpace ? classified.label : "constant (not graphed)",
     /** Bind current parameter values → f(x,y,z); injects r,θ,φ,ρ. */
     bind(params = {}) {
       return (x, y, z) => {
@@ -231,7 +387,7 @@ export function compileExpr(raw) {
 export const PRESETS = {
   blob: {
     label: "Gaussian blob",
-    latex: String.raw`\exp(-(x^{2}+y^{2}+z^{2}))`,
+    latex: String.raw`e^{-(x^{2}+y^{2}+z^{2})}`,
   },
   soft: {
     label: "Soft ellipsoid",

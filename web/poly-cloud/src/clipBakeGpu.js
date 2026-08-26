@@ -712,6 +712,28 @@ export function hasUploadedVolume() {
   return sceneM > 0 && (densLayerCount > 0 || sceneConstraints.length > 0);
 }
 
+/** Clear the WebGPU overlay to transparent (no density / iso). */
+export function clearClipGpuFrame(fbW, fbH) {
+  if (!device || !ctx || !canvas) return false;
+  const { w, h } = resizeClipGpuCanvas(fbW, fbH);
+  const view = ctx.getCurrentTexture().createView();
+  const enc = device.createCommandEncoder();
+  const pass = enc.beginRenderPass({
+    colorAttachments: [{
+      view,
+      clearValue: { r: 0, g: 0, b: 0, a: 0 },
+      loadOp: "clear",
+      storeOp: "store",
+    }],
+  });
+  pass.end();
+  device.queue.submit([enc.finish()]);
+  profileMarchFbW = w;
+  profileMarchFbH = h;
+  profileMethod = "gpu-clear";
+  return true;
+}
+
 export async function initClipBakeGpu(viewportEl) {
   if (isClipBakeGpuReady()) return true;
   if (initFailed) return false;

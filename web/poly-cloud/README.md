@@ -1,6 +1,6 @@
-# Poly cloud
+# Laplacian
 
-Multi-expression 3D polynomial calculator (Three.js + WebGPU).
+Multi-expression 3D polynomial calculator (Three.js + WebGPU). Package folder remains `poly-cloud`.
 
 **Pipeline:** Fit each expression with a Chebyshev polynomial → IDCT dens volume → draw manifolds (opaque isosurfaces) then density clouds (Beer–Lambert), with shared free parameters.
 
@@ -17,8 +17,7 @@ Requires a WebGPU-capable browser for the full multi-layer / manifold path. With
 
 ## Controls
 
-- **Expressions** — Enter splits / adds a row; color swatch per row. `A=B` → manifold; bare / `f=…` → density.
-- **Parameters** — free symbols shared across expressions (animate with ▶).
+- **Expressions** — Enter splits / adds a row. Free symbols get a slider on that same row; write `a=…` for an explicit parameter equation. `A=B` → manifold; bare / `f=…` → density.
 - **poly deg / scale / steps / box size** — fit order, dens opacity, march samples, domain edge length.
 - **march downscale** — internal march resolution (1×–16×); CSS upscales the result.
 

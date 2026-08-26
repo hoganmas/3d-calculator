@@ -1,6 +1,6 @@
 # 3dgs-approx
 
-Research sandbox for Gaussian-mixture transmittance / radiance approximations, plus a realtime web splat viewer and a polynomial **poly-cloud** calculator.
+Research sandbox for Gaussian-mixture transmittance / radiance approximations, plus a realtime web splat viewer and a polynomial **Laplacian** calculator (`web/poly-cloud`).
 
 ## Layout
 
@@ -13,10 +13,10 @@ research/
     curves/ results/
 web/
   gsplat/            # Realtime Kerbl-style software raster (Vite + Worker)
-  poly-cloud/        # Multi-expression Chebyshev → IDCT → iso + Beer
+  poly-cloud/        # Laplacian — Multi-expression Chebyshev → IDCT → iso + Beer
 ```
 
-## Quick start — poly-cloud
+## Quick start — Laplacian (poly-cloud)
 
 ```bash
 cd web/poly-cloud && npm install && npm run dev

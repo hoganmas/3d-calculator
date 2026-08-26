@@ -3,7 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Poly cloud</title>
+    <title>Laplacian</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <!-- Latin Modern = Computer Modern OpenType (standard LaTeX text face) -->
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/gh/sugina-dev/latin-modern-web@1.0.1/style/latinmodern-roman.css"
+    />
     <style>
       :root {
         color-scheme: dark;
@@ -15,6 +21,7 @@
         --accent: #6ea8fe;
         --ok: #3dd68c;
         --warn: #f5a524;
+        --panel-w: 360px;
       }
       * {
         box-sizing: border-box;
@@ -23,24 +30,47 @@
       body {
         margin: 0;
         height: 100%;
-        font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+        font-family: Georgia, "Times New Roman", Times, serif;
         background: var(--bg);
         color: var(--text);
       }
       #panel {
-        border-right: 1px solid var(--stroke);
         background: var(--panel);
         padding: 12px 12px 16px;
         overflow: auto;
         display: flex;
         flex-direction: column;
         gap: 10px;
-        width: 360px;
+        min-width: 0;
       }
       #app {
         display: grid;
-        grid-template-columns: 360px 1fr;
+        grid-template-columns: var(--panel-w) 5px 1fr;
         height: 100%;
+      }
+      #panelResize {
+        cursor: col-resize;
+        background: var(--stroke);
+        position: relative;
+        z-index: 3;
+        touch-action: none;
+      }
+      #panelResize::after {
+        content: "";
+        position: absolute;
+        inset: 0 -3px;
+      }
+      #panelResize:hover,
+      #panelResize.dragging {
+        background: var(--accent);
+      }
+      body.panel-resizing {
+        cursor: col-resize;
+        user-select: none;
+      }
+      body.panel-resizing #viewport,
+      body.panel-resizing #viewport * {
+        pointer-events: none;
       }
       .expr-list {
         display: flex;
@@ -50,7 +80,7 @@
       }
       .expr-row {
         display: grid;
-        grid-template-columns: 28px 1fr 28px;
+        grid-template-columns: 28px 1fr 28px 28px;
         gap: 0;
         align-items: stretch;
         min-height: 52px;
@@ -63,6 +93,12 @@
       .expr-row.selected {
         border-color: rgba(110, 168, 254, 0.55);
         box-shadow: 0 0 0 1px rgba(110, 168, 254, 0.2);
+      }
+      .expr-row.is-hidden {
+        opacity: 0.45;
+      }
+      .expr-row.is-hidden .expr-color {
+        opacity: 0.5;
       }
       .expr-color {
         width: 28px;
@@ -115,11 +151,57 @@
         background: rgba(227, 93, 106, 0.12);
         color: #ff7b72;
       }
+      .expr-vis {
+        width: 28px;
+        height: auto;
+        min-height: 100%;
+        padding: 0;
+        border: none;
+        border-left: 1px solid var(--stroke);
+        border-radius: 0;
+        background: transparent;
+        align-self: stretch;
+        color: var(--muted);
+        display: grid;
+        place-items: center;
+      }
+      .expr-vis:hover {
+        color: var(--text);
+        background: rgba(110, 168, 254, 0.1);
+      }
+      .expr-vis svg {
+        width: 14px;
+        height: 14px;
+        display: block;
+      }
+      .expr-vis.is-off {
+        color: var(--stroke);
+      }
+      #panel .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 2px 0 0;
+      }
+      #panel .brand-mark {
+        width: 36px;
+        height: 36px;
+        flex-shrink: 0;
+        border-radius: 8px;
+      }
       #panel h1 {
-        font-size: 15px;
-        font-weight: 600;
+        font-family: "Latin Modern Roman", "Computer Modern Serif", Georgia, serif;
+        font-size: 26px;
+        font-weight: bold;
         margin: 0;
         letter-spacing: 0.01em;
+        line-height: 1.1;
+      }
+      #panel .brand-sub {
+        margin: 2px 0 4px 48px;
+        font-family: "Latin Modern Roman", "Computer Modern Serif", Georgia, serif;
+        font-size: 12px;
+        color: var(--muted);
       }
       #panel p {
         margin: 0;
@@ -224,88 +306,93 @@
         grid-template-columns: 1fr 1fr 1fr;
         gap: 8px;
       }
-      .params-block {
+      .expr-row.is-param .expr-color {
+        opacity: 0.25;
+        pointer-events: none;
+      }
+      .expr-field-row {
         display: flex;
-        flex-direction: column;
-        gap: 8px;
+        align-items: stretch;
+        min-height: 52px;
+        flex: 1 1 auto;
       }
-      .params-block[hidden] {
-        display: none;
+      .expr-field-row .expr-field {
+        flex: 1 1 auto;
+        min-height: 52px;
       }
-      .params-head {
-        font-size: 11px;
-        color: var(--muted);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .params-list {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-      }
-      .param-row {
-        border: 1px solid var(--stroke);
-        border-radius: 4px;
-        padding: 8px 10px;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        background: transparent;
-      }
-      .param-top {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-      .param-name {
-        font-family: "IBM Plex Mono", ui-monospace, monospace;
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--accent);
-        min-width: 1.2em;
-      }
-      .param-value {
-        flex: 1;
-        font-variant-numeric: tabular-nums;
-        font-size: 13px;
-      }
-      .param-value input {
-        width: 100%;
-        padding: 4px 8px;
-      }
-      .param-play {
-        flex: 0 0 auto;
+      .expr-param-play {
+        flex: 0 0 32px;
         width: 32px;
-        height: 28px;
         padding: 0;
         font-size: 12px;
         line-height: 1;
+        border: none;
+        border-left: 1px solid var(--stroke);
+        border-radius: 0;
         background: transparent;
         color: var(--text);
-        border-color: var(--stroke);
         font-weight: 500;
       }
-      .param-play.on {
+      .expr-param-play:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+      }
+      .expr-param-play.on {
         background: rgba(110, 168, 254, 0.18);
-        border-color: var(--accent);
         color: var(--accent);
       }
-      .param-slider {
-        width: 100%;
-        padding: 0;
-        accent-color: var(--accent);
+      .expr-param-block {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        border-top: 1px solid var(--stroke);
+        padding-top: 4px;
       }
-      .param-bounds {
+      .expr-param-head {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        padding: 0 10px;
+        min-height: 28px;
+      }
+      .expr-param-block.is-hosted .expr-param-head {
+        justify-content: space-between;
+      }
+      .expr-param-name {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--accent);
+      }
+      .expr-param-slider {
+        width: 100%;
+        padding: 0 10px 4px;
+        accent-color: var(--accent);
+        box-sizing: border-box;
+      }
+      .expr-param-slider:disabled {
+        opacity: 0.45;
+      }
+      .expr-param-bounds {
         display: grid;
         grid-template-columns: 1fr 1fr 1fr;
         gap: 6px;
+        padding: 0 10px 8px;
       }
-      .param-bounds label {
+      .expr-param-bounds label {
+        font-size: 10px;
+        color: var(--muted);
+        display: flex;
+        flex-direction: column;
         gap: 2px;
       }
-      .param-bounds input {
+      .expr-param-bounds input {
         padding: 4px 6px;
         font-size: 12px;
+      }
+      .expr-row.is-param.has-error {
+        border-color: #e07070;
       }
       .metrics-block {
         display: flex;
@@ -350,16 +437,19 @@
       #viewport {
         position: relative;
         min-width: 0;
+        min-height: 0;
+        height: 100%;
+        overflow: hidden;
         background: #07080b;
       }
       #viewport canvas {
-        display: block;
-        width: 100%;
-        height: 100%;
-      }
-      #viewport canvas.clip-gpu {
         position: absolute;
         inset: 0;
+        width: 100% !important;
+        height: 100% !important;
+        display: block;
+      }
+      #viewport canvas.clip-gpu {
         pointer-events: none;
         z-index: 1;
       }
@@ -435,6 +525,10 @@
           border-right: none;
           border-bottom: 1px solid var(--stroke);
           max-height: 42vh;
+          width: 100%;
+        }
+        #panelResize {
+          display: none;
         }
       }
     </style>
@@ -442,7 +536,11 @@
   <body>
     <div id="app">
       <aside id="panel">
-        <h1>Poly cloud</h1>
+        <div class="brand">
+          <img class="brand-mark" src="/favicon.svg" alt="" width="36" height="36" />
+          <h1>Laplacian</h1>
+        </div>
+        <p class="brand-sub">3D polynomial calculator</p>
 
         <div class="expr-list-head">
           <span style="font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em">Expressions</span>
@@ -450,16 +548,9 @@
         <div id="exprList" class="expr-list"></div>
 
         <label>
-          Insert preset into selected
+          Load preset
           <select id="preset"></select>
         </label>
-
-        <div id="paramsBlock" class="params-block" hidden>
-          <div class="params-head">
-            <span>Parameters (shared)</span>
-          </div>
-          <div id="paramsList" class="params-list"></div>
-        </div>
 
         <div class="row3">
           <label>poly deg<input id="deg" type="number" min="2" max="128" step="1" value="20" /></label>
@@ -495,8 +586,15 @@
           <textarea id="metricsDump" readonly spellcheck="false"></textarea>
         </details>
       </aside>
+      <div
+        id="panelResize"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+        tabindex="0"
+      ></div>
       <main id="viewport">
-        <div id="hud">poly cloud</div>
+        <div id="hud">Laplacian</div>
       </main>
     </div>
     <script type="module" src="/src/main.js"></script>

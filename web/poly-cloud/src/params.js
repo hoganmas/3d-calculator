@@ -1,7 +1,9 @@
 /**
- * Name parameters for the density expression.
- * Each free symbol (besides spatial x,y,z / r,θ,φ,ρ) gets a slider; optional cosine ping-pong animation.
+ * Runtime values for named parameters defined in the expression list (`a = …`).
+ * RHS may use `t` (seconds) or other params.
  */
+
+import { compileParamLatex, formatParamLatexValue } from "./fit.js";
 
 /**
  * @typedef {{
@@ -12,25 +14,30 @@
  *   animating: boolean,
  *   speed: number,
  *   phase: number,
+ *   latex: string,
+ *   exprId: string | null,
+ *   hosted: boolean,
+ *   usesTime: boolean,
+ *   driven: boolean,
+ *   freeParams: string[],
+ *   error: string | null,
  * }} ParamState
  */
 
 /** @type {Map<string, ParamState>} */
 const params = new Map();
 
-/** @type {((name: string, p: ParamState) => void) | null} */
-let onChange = null;
-
 const DEFAULT_MIN = 0;
 const DEFAULT_MAX = 2;
 const DEFAULT_VALUE = 1;
-const DEFAULT_SPEED = 0.35; // cycles / second
+const DEFAULT_SPEED = 0.35;
 
 /**
+ * @param {string} name
  * @param {Partial<ParamState> & { animate?: boolean }} [init]
  * @returns {ParamState}
  */
-function makeParam(init = {}) {
+function makeParam(name, init = {}) {
   let min = Number.isFinite(init.min) ? init.min : DEFAULT_MIN;
   let max = Number.isFinite(init.max) ? init.max : DEFAULT_MAX;
   if (max < min) [min, max] = [max, min];
@@ -41,6 +48,10 @@ function makeParam(init = {}) {
     Number.isFinite(init.step) && init.step > 0
       ? init.step
       : Math.max(0.01, Number((span / 200).toPrecision(2)));
+  const latex =
+    typeof init.latex === "string" && init.latex.trim()
+      ? init.latex.trim()
+      : `${name}=${formatParamLatexValue(value)}`;
   return {
     value,
     min,
@@ -49,16 +60,14 @@ function makeParam(init = {}) {
     animating: !!(init.animating ?? init.animate),
     speed: Number.isFinite(init.speed) && init.speed > 0 ? init.speed : DEFAULT_SPEED,
     phase: Number.isFinite(init.phase) ? init.phase : Math.random(),
+    latex,
+    exprId: typeof init.exprId === "string" ? init.exprId : null,
+    hosted: !!init.hosted,
+    usesTime: false,
+    driven: false,
+    freeParams: [],
+    error: null,
   };
-}
-
-export function setParamsOnChange(fn) {
-  onChange = fn;
-}
-
-function emit(name) {
-  const p = params.get(name);
-  if (p && onChange) onChange(name, p);
 }
 
 /** @returns {string[]} */
@@ -84,34 +93,85 @@ export function anyParamAnimating() {
   return false;
 }
 
+export function anyParamUsesTime() {
+  for (const p of params.values()) if (p.usesTime) return true;
+  return false;
+}
+
+export function anyParamNeedsTick() {
+  return anyParamAnimating() || anyParamUsesTime();
+}
+
 /**
- * Keep only symbols present in the expression; preserve values when names match.
- * @param {string[]} freeParams
+ * Replace param map from expression-list parameter rows.
+ * @param {{
+ *   name: string,
+ *   latex: string,
+ *   exprId: string,
+ *   hosted?: boolean,
+ *   min?: number,
+ *   max?: number,
+ *   speed?: number,
+ *   animating?: boolean,
+ *   phase?: number,
+ *   value?: number,
+ * }[]} defs
  * @param {Record<string, Partial<ParamState> & { animate?: boolean }>} [seed]
  */
-export function syncParamsFromSymbols(freeParams, seed = {}) {
-  const keep = new Set(freeParams);
+export function syncParamsFromDefinitions(defs, seed = {}) {
+  const keep = new Set(defs.map((d) => d.name));
   for (const name of [...params.keys()]) {
     if (!keep.has(name)) params.delete(name);
   }
-  for (const name of freeParams) {
-    if (params.has(name)) continue;
-    params.set(name, makeParam(seed[name] ?? {}));
+  for (const d of defs) {
+    const s = seed[d.name] ?? {};
+    const cur = params.get(d.name);
+    if (!cur) {
+      params.set(
+        d.name,
+        makeParam(d.name, {
+          ...s,
+          latex: d.latex,
+          exprId: d.exprId,
+          hosted: !!d.hosted,
+          min: d.min ?? s.min,
+          max: d.max ?? s.max,
+          speed: d.speed ?? s.speed,
+          animating: d.animating ?? s.animating ?? s.animate,
+          phase: d.phase ?? s.phase,
+          value: d.value ?? s.value,
+        }),
+      );
+      continue;
+    }
+    params.set(d.name, {
+      ...cur,
+      latex: d.hosted ? cur.latex : d.latex,
+      exprId: d.exprId,
+      hosted: !!d.hosted,
+      min: Number.isFinite(d.min) ? d.min : cur.min,
+      max: Number.isFinite(d.max) ? d.max : cur.max,
+      speed: Number.isFinite(d.speed) && d.speed > 0 ? d.speed : cur.speed,
+      animating: typeof d.animating === "boolean" ? d.animating : cur.animating,
+      phase: Number.isFinite(d.phase) ? d.phase : cur.phase,
+    });
   }
 }
 
 /**
- * Apply preset defaults (value/min/max/animate) for known names; create missing.
- * @param {Record<string, Partial<ParamState> & { animate?: boolean }>} seed
+ * @param {Record<string, Partial<ParamState> & { animate?: boolean }}>} seed
  */
 export function applyParamSeed(seed) {
   for (const [name, init] of Object.entries(seed ?? {})) {
     const cur = params.get(name);
-    if (!cur) {
-      params.set(name, makeParam(init));
-      continue;
+    if (!cur) continue;
+    const next = makeParam(name, { ...cur, ...init, latex: cur.latex, exprId: cur.exprId });
+    if (Number.isFinite(init.value) && (typeof init.latex !== "string" || !init.latex.trim())) {
+      next.latex = `${name}=${formatParamLatexValue(init.value)}`;
+      next.value = Math.min(next.max, Math.max(next.min, init.value));
     }
-    const next = makeParam({ ...cur, ...init });
+    if (init.animating === undefined && init.animate === undefined) next.animating = cur.animating;
+    if (!Number.isFinite(init.phase)) next.phase = cur.phase;
     params.set(name, next);
   }
 }
@@ -128,23 +188,25 @@ export function updateParam(name, patch) {
   if (max < min) [min, max] = [max, min];
   let value = Number.isFinite(patch.value) ? patch.value : cur.value;
   value = Math.min(max, Math.max(min, value));
+  let latex = typeof patch.latex === "string" ? patch.latex : cur.latex;
+  if (Number.isFinite(patch.value) && patch.latex === undefined) {
+    latex = `${name}=${formatParamLatexValue(value)}`;
+  }
   const next = {
     ...cur,
     ...patch,
     min,
     max,
     value,
-    step:
-      Number.isFinite(patch.step) && patch.step > 0 ? patch.step : cur.step,
-    speed:
-      Number.isFinite(patch.speed) && patch.speed > 0 ? patch.speed : cur.speed,
+    latex,
+    step: Number.isFinite(patch.step) && patch.step > 0 ? patch.step : cur.step,
+    speed: Number.isFinite(patch.speed) && patch.speed > 0 ? patch.speed : cur.speed,
   };
   params.set(name, next);
-  emit(name);
   return next;
 }
 
-export function setParamValue(name, value, { stopAnim = true } = {}) {
+export function setParamValue(name, value, { stopAnim = true, rewriteLatex = true } = {}) {
   const cur = params.get(name);
   if (!cur) return null;
   const v = Math.min(cur.max, Math.max(cur.min, Number(value)));
@@ -153,15 +215,108 @@ export function setParamValue(name, value, { stopAnim = true } = {}) {
     ...cur,
     value: v,
     animating: stopAnim ? false : cur.animating,
+    latex: rewriteLatex ? `${name}=${formatParamLatexValue(v)}` : cur.latex,
+    driven: rewriteLatex ? false : cur.driven,
+    usesTime: rewriteLatex ? false : cur.usesTime,
+    freeParams: rewriteLatex ? [] : cur.freeParams,
+    error: rewriteLatex ? null : cur.error,
   };
   params.set(name, next);
-  emit(name);
   return next;
+}
+
+/** Recompile one param from its latex. */
+export function recompileParam(name) {
+  const cur = params.get(name);
+  if (!cur) return false;
+  try {
+    const compiled = compileParamLatex(cur.latex, name);
+    const driven = compiled.usesTime || compiled.freeParams.length > 0;
+    /** @type {ParamState} */
+    const next = {
+      ...cur,
+      usesTime: compiled.usesTime,
+      freeParams: compiled.freeParams,
+      driven,
+      error: null,
+      animating: driven ? false : cur.animating,
+    };
+    if (compiled.isConstant && compiled.constantValue != null) {
+      next.value = Math.min(next.max, Math.max(next.min, compiled.constantValue));
+    }
+    params.set(name, next);
+    return true;
+  } catch (err) {
+    params.set(name, {
+      ...cur,
+      error: err instanceof Error ? err.message : String(err),
+      driven: false,
+      usesTime: false,
+      freeParams: [],
+    });
+    return false;
+  }
+}
+
+export function recompileAllParams() {
+  for (const name of listParamNames()) recompileParam(name);
+  return listParamNames().flatMap((name) => params.get(name)?.freeParams ?? []);
+}
+
+/**
+ * @param {number} timeSec
+ * @returns {boolean}
+ */
+export function evalParamEquations(timeSec) {
+  const names = listParamNames();
+  if (!names.length) return false;
+
+  /** @type {Map<string, ReturnType<typeof compileParamLatex>>} */
+  const compiled = new Map();
+  for (const name of names) {
+    const p = params.get(name);
+    if (!p || p.error) continue;
+    if (!p.driven && !p.usesTime) continue;
+    try {
+      compiled.set(name, compileParamLatex(p.latex, name));
+    } catch {
+      /* keep */
+    }
+  }
+  if (!compiled.size) return false;
+
+  /** @type {Record<string, number>} */
+  const scope = { t: timeSec };
+  for (const [n, p] of params) scope[n] = p.value;
+
+  let changed = false;
+  for (let pass = 0; pass < names.length + 2; pass++) {
+    let passChanged = false;
+    for (const [name, c] of compiled) {
+      const p = params.get(name);
+      if (!p) continue;
+      try {
+        const v = c.eval(scope);
+        if (!Number.isFinite(v)) continue;
+        const clamped = Math.min(p.max, Math.max(p.min, v));
+        scope[name] = clamped;
+        if (Math.abs(clamped - p.value) > 1e-12) {
+          params.set(name, { ...p, value: clamped });
+          changed = true;
+          passChanged = true;
+        }
+      } catch {
+        /* skip */
+      }
+    }
+    if (!passChanged) break;
+  }
+  return changed;
 }
 
 export function toggleParamAnimate(name, timeSec = performance.now() / 1000) {
   const cur = params.get(name);
-  if (!cur) return null;
+  if (!cur || cur.driven) return cur;
   const next = { ...cur, animating: !cur.animating };
   if (next.animating) {
     const u = (cur.value - cur.min) / Math.max(1e-9, cur.max - cur.min);
@@ -169,23 +324,25 @@ export function toggleParamAnimate(name, timeSec = performance.now() / 1000) {
     next.phase = Math.asin(s) / (2 * Math.PI) - timeSec * next.speed;
   }
   params.set(name, next);
-  emit(name);
   return next;
 }
 
 /**
- * Advance animated params. Cosine ping-pong in [min, max].
- * @param {number} timeSec absolute time (performance.now()/1000)
- * @returns {boolean} true if any value changed
+ * @param {number} timeSec
+ * @returns {boolean}
  */
 export function tickParamAnimation(timeSec) {
   let changed = false;
   for (const [name, p] of params) {
-    if (!p.animating) continue;
+    if (!p.animating || p.driven) continue;
     const u = 0.5 + 0.5 * Math.sin(2 * Math.PI * (timeSec * p.speed + p.phase));
     const value = p.min + (p.max - p.min) * u;
     if (Math.abs(value - p.value) > 1e-12) {
-      params.set(name, { ...p, value });
+      params.set(name, {
+        ...p,
+        value,
+        latex: `${name}=${formatParamLatexValue(value)}`,
+      });
       changed = true;
     }
   }
@@ -195,3 +352,5 @@ export function tickParamAnimation(timeSec) {
 export function clearParams() {
   params.clear();
 }
+
+export { formatParamLatexValue };

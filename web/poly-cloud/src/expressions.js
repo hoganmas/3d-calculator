@@ -1,11 +1,11 @@
 /**
- * Named parameter expression list: equation, color, density vs constraint role.
- * Free parameters are shared across all expressions (union of symbols).
+ * Expression list: density / constraint fields and optional named parameters.
+ * Parameter rows (`a = …`) share values across all field expressions.
  */
 
 let nextId = 1;
 
-/** Named parameter default palette. */
+/** Default palette for field expressions (manifolds / densities). */
 export const EXPR_COLORS = [
   "#c74440",
   "#2d70b3",
@@ -24,6 +24,11 @@ export const EXPR_COLORS = [
  *   color: string,
  *   role: ExprRole,
  *   enabled: boolean,
+ *   sliderMin: number,
+ *   sliderMax: number,
+ *   sliderSpeed: number,
+ *   sliderAnimating: boolean,
+ *   sliderPhase: number,
  * }} ExprItem
  */
 
@@ -57,17 +62,38 @@ export function nextExprColor() {
 }
 
 /**
- * @param {Partial<ExprItem>} [init]
+ * @param {Partial<ExprItem> & { animate?: boolean, min?: number, max?: number, speed?: number, value?: number }} [init]
  * @returns {ExprItem}
  */
 export function createExprItem(init = {}) {
   const id = init.id ?? `e${nextId++}`;
+  let sliderMin = Number.isFinite(init.sliderMin)
+    ? init.sliderMin
+    : Number.isFinite(init.min)
+      ? init.min
+      : 0;
+  let sliderMax = Number.isFinite(init.sliderMax)
+    ? init.sliderMax
+    : Number.isFinite(init.max)
+      ? init.max
+      : 2;
+  if (sliderMax < sliderMin) [sliderMin, sliderMax] = [sliderMax, sliderMin];
   return {
     id,
     latex: init.latex ?? "",
     color: init.color ?? nextExprColor(),
     role: init.role ?? "auto",
     enabled: init.enabled !== false,
+    sliderMin,
+    sliderMax,
+    sliderSpeed:
+      Number.isFinite(init.sliderSpeed) && init.sliderSpeed > 0
+        ? init.sliderSpeed
+        : Number.isFinite(init.speed) && init.speed > 0
+          ? init.speed
+          : 0.35,
+    sliderAnimating: !!(init.sliderAnimating ?? init.animate),
+    sliderPhase: Number.isFinite(init.sliderPhase) ? init.sliderPhase : Math.random(),
   };
 }
 
@@ -187,6 +213,14 @@ export function updateExpr(id, patch) {
   return row;
 }
 
+/** Like updateExpr but does not notify listeners (animation / silent latex sync). */
+export function updateExprSilent(id, patch) {
+  const row = items.find((e) => e.id === id);
+  if (!row) return null;
+  Object.assign(row, patch);
+  return row;
+}
+
 /** Hex → [r,g,b] in 0..1 */
 export function hexToRgb01(hex) {
   const s = String(hex || "").replace("#", "");
@@ -198,11 +232,12 @@ export function hexToRgb01(hex) {
 }
 
 /**
- * Effective role from expression kind (`A=B` → manifold, else density).
- * @param {ExprRole} _role  unused (kept for call-site compatibility)
- * @param {"constraint" | "definition" | "bare"} kind
- * @returns {"density" | "constraint"}
+ * Effective role from expression kind.
+ * @param {ExprRole} _role
+ * @param {"parameter" | "constraint" | "definition" | "bare"} kind
+ * @returns {"parameter" | "density" | "constraint"}
  */
 export function resolveExprRole(_role, kind) {
+  if (kind === "parameter") return "parameter";
   return kind === "constraint" ? "constraint" : "density";
 }

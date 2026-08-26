@@ -2,24 +2,22 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import "mathlive";
 import "mathlive/static.css";
-import { compileExpr, fitChebyshev3D, PRESETS } from "./fit.js";
+import { compileExpr, classifyExpr, fitChebyshev3D, PRESETS, formatParamLatexValue } from "./fit.js";
 import {
-  syncParamsFromSymbols,
+  syncParamsFromDefinitions,
   applyParamSeed,
   getParamValues,
   listParamNames,
   getParam,
-  updateParam,
-  setParamValue,
-  toggleParamAnimate,
+  recompileAllParams,
+  evalParamEquations,
   tickParamAnimation,
-  anyParamAnimating,
+  anyParamNeedsTick,
 } from "./params.js";
 import {
   listExpressions,
   setExpressions,
-  getSelectedId,
-  updateExpr,
+  updateExprSilent,
   hexToRgb01,
   resolveExprRole,
   setExpressionsOnChange,
@@ -40,6 +38,8 @@ import {
   uploadSceneVolumes,
   uploadSceneColors,
   hasUploadedVolume,
+  resizeClipGpuCanvas,
+  clearClipGpuFrame,
 } from "./clipBakeGpu.js";
 
 const els = {
@@ -57,8 +57,6 @@ const els = {
   hud: document.getElementById("hud"),
   metricsDump: document.getElementById("metricsDump"),
   copyMetrics: document.getElementById("copyMetrics"),
-  paramsBlock: document.getElementById("paramsBlock"),
-  paramsList: document.getElementById("paramsList"),
 };
 
 for (const [key, p] of Object.entries(PRESETS)) {
@@ -72,16 +70,15 @@ function applyPreset(key) {
   const p = PRESETS[key] ?? PRESETS.blob;
   els.preset.value = key;
   pendingParamSeed = p.params ?? {};
-  const id = getSelectedId();
-  if (id) updateExpr(id, { latex: p.latex });
-  else setExpressions([{ latex: p.latex }]);
+  // Density / constraint only — free params host their slider on this row.
+  setExpressions([{ latex: p.latex }]);
   exprListApi?.render();
 }
 
 /** Preset param defaults applied on next successful compile/sync. */
 let pendingParamSeed = {};
 
-/** @type {{ render: () => void } | null} */
+/** @type {{ render: () => void, syncAllParamSliders?: () => void, syncParamChrome?: () => boolean } | null} */
 let exprListApi = null;
 
 function fmtParamNum(v) {
@@ -91,145 +88,45 @@ function fmtParamNum(v) {
   return String(Math.round(v * 1000) / 1000);
 }
 
-/** Rebuild parameter slider rows from current param map. */
-function renderParamsUi() {
-  const names = listParamNames();
-  if (!els.paramsBlock || !els.paramsList) return;
-  if (names.length === 0) {
-    els.paramsBlock.hidden = true;
-    els.paramsList.replaceChildren();
-    return;
-  }
-  els.paramsBlock.hidden = false;
-  els.paramsList.replaceChildren();
-  for (const name of names) {
-    const p = getParam(name);
-    if (!p) continue;
-    const row = document.createElement("div");
-    row.className = "param-row";
-    row.dataset.param = name;
-
-    const top = document.createElement("div");
-    top.className = "param-top";
-
-    const nameEl = document.createElement("span");
-    nameEl.className = "param-name";
-    nameEl.textContent = name;
-
-    const valWrap = document.createElement("div");
-    valWrap.className = "param-value";
-    const valInput = document.createElement("input");
-    valInput.type = "number";
-    valInput.step = String(p.step);
-    valInput.value = String(p.value);
-    valInput.title = "Value";
-    valInput.addEventListener("input", () => {
-      setParamValue(name, Number(valInput.value), { stopAnim: true });
-      syncParamRow(name);
-      scheduleUploadFit(120);
-    });
-    valWrap.appendChild(valInput);
-
-    const play = document.createElement("button");
-    play.type = "button";
-    play.className = "param-play" + (p.animating ? " on" : "");
-    play.textContent = p.animating ? "⏸" : "▶";
-    play.title = p.animating ? "Pause animation" : "Animate between min and max";
-    play.addEventListener("click", () => {
-      toggleParamAnimate(name);
-      syncParamRow(name);
-    });
-
-    top.append(nameEl, valWrap, play);
-
-    const slider = document.createElement("input");
-    slider.type = "range";
-    slider.className = "param-slider";
-    slider.min = String(p.min);
-    slider.max = String(p.max);
-    slider.step = String(p.step);
-    slider.value = String(p.value);
-    slider.addEventListener("input", () => {
-      setParamValue(name, Number(slider.value), { stopAnim: true });
-      syncParamRow(name);
-      scheduleUploadFit(80);
-    });
-
-    const bounds = document.createElement("div");
-    bounds.className = "param-bounds";
-
-    const mkBound = (key, label, val) => {
-      const lab = document.createElement("label");
-      lab.textContent = label;
-      const inp = document.createElement("input");
-      inp.type = "number";
-      inp.step = "any";
-      inp.value = String(val);
-      inp.dataset.bound = key;
-      inp.addEventListener("change", () => {
-        const patch = { [key]: Number(inp.value) };
-        updateParam(name, patch);
-        renderParamsUi();
-        scheduleUploadFit(80);
-      });
-      lab.appendChild(inp);
-      return lab;
-    };
-
-    bounds.append(
-      mkBound("min", "min", p.min),
-      mkBound("max", "max", p.max),
-      mkBound("speed", "Hz", p.speed),
-    );
-
-    row.append(top, slider, bounds);
-    els.paramsList.appendChild(row);
-  }
-}
-
-/** Update one row’s live value/slider/play without full rebuild. */
-function syncParamRow(name) {
-  const p = getParam(name);
-  const row = els.paramsList?.querySelector(`[data-param="${CSS.escape(name)}"]`);
-  if (!p || !row) return;
-  const slider = row.querySelector(".param-slider");
-  const valInput = row.querySelector(".param-value input");
-  const play = row.querySelector(".param-play");
-  if (slider instanceof HTMLInputElement) {
-    slider.min = String(p.min);
-    slider.max = String(p.max);
-    slider.step = String(p.step);
-    if (document.activeElement !== slider) slider.value = String(p.value);
-  }
-  if (valInput instanceof HTMLInputElement && document.activeElement !== valInput) {
-    valInput.step = String(p.step);
-    valInput.value = fmtParamNum(p.value);
-  }
-  if (play instanceof HTMLButtonElement) {
-    play.classList.toggle("on", p.animating);
-    play.textContent = p.animating ? "⏸" : "▶";
-    play.title = p.animating ? "Pause animation" : "Animate between min and max";
-  }
-}
-
-function syncAllParamRows() {
-  for (const name of listParamNames()) syncParamRow(name);
-}
-
 /**
- * Compile all expressions, sync shared params, return bound fields.
+ * Compile all expressions: parameter rows feed shared values; field rows become layers.
+ * Free symbols without a dedicated `a=…` row host a slider on the field that uses them.
  * @param {{ rebuildUi?: boolean }} [opts]
  */
 function compileAllExprs(opts = {}) {
   const rebuildUi = opts.rebuildUi !== false;
   const items = listExpressions().filter((e) => e.enabled && String(e.latex || "").trim());
+
+  /** @type {{ item: any, name: string }[]} */
+  const paramRows = [];
   /** @type {{ item: any, compiled: any, fn: Function, role: string }[]} */
   const layers = [];
   const freeSet = new Set();
+  /** @type {Map<string, { id: string, item: any }>} */
+  const freeHost = new Map();
+  const definedParams = new Set();
 
   for (const item of items) {
+    let classified;
+    try {
+      classified = classifyExpr(item.latex);
+    } catch {
+      continue;
+    }
+    if (classified.kind === "parameter") {
+      const name = classified.paramName;
+      if (!name || definedParams.has(name)) continue;
+      definedParams.add(name);
+      paramRows.push({ item, name });
+      continue;
+    }
     const compiled = compileExpr(item.latex);
-    for (const p of compiled.freeParams) freeSet.add(p);
+    for (const p of compiled.freeParams) {
+      freeSet.add(p);
+      if (!freeHost.has(p)) freeHost.set(p, { id: item.id, item });
+    }
+    // Spatially constant (0th-order) fields: keep param hosts, do not graph.
+    if (!compiled.usesSpace || compiled.shade === "none") continue;
     const role = resolveExprRole(item.role, compiled.kind);
     layers.push({
       item,
@@ -239,22 +136,86 @@ function compileAllExprs(opts = {}) {
     });
   }
 
-  const freeParams = [...freeSet].sort();
-  const before = listParamNames().join("\0");
-  syncParamsFromSymbols(freeParams, pendingParamSeed);
-  let seeded = false;
+  /** @type {Parameters<typeof syncParamsFromDefinitions>[0]} */
+  const defs = paramRows.map(({ item, name }) => ({
+    name,
+    latex: item.latex,
+    exprId: item.id,
+    hosted: false,
+    min: item.sliderMin,
+    max: item.sliderMax,
+    speed: item.sliderSpeed,
+    animating: item.sliderAnimating,
+    phase: item.sliderPhase,
+  }));
+
+  for (const name of [...freeSet].sort()) {
+    if (definedParams.has(name)) continue;
+    const host = freeHost.get(name);
+    const seed = pendingParamSeed[name] ?? {};
+    const value = Number.isFinite(seed.value) ? seed.value : 1;
+    const hostItem = host?.item;
+    defs.push({
+      name,
+      latex: `${name}=${formatParamLatexValue(value)}`,
+      exprId: host?.id ?? "",
+      hosted: true,
+      min: seed.min ?? hostItem?.sliderMin,
+      max: seed.max ?? hostItem?.sliderMax,
+      speed: seed.speed ?? hostItem?.sliderSpeed,
+      animating: !!(seed.animate ?? seed.animating ?? hostItem?.sliderAnimating),
+      value,
+    });
+  }
+
+  syncParamsFromDefinitions(defs, pendingParamSeed);
+
+  // Param-equation deps (a=b+1) without their own row → host on the equation row.
+  let depNames = recompileAllParams();
+  const known = new Set(defs.map((d) => d.name));
+  const extra = [...new Set(depNames)].filter((n) => !known.has(n));
+  if (extra.length) {
+    for (const name of extra) {
+      let host = paramRows.find((r) => String(r.item.latex).includes(name)) ?? paramRows[0];
+      if (!host) continue;
+      defs.push({
+        name,
+        latex: `${name}=${formatParamLatexValue(1)}`,
+        exprId: host.item.id,
+        hosted: true,
+      });
+      known.add(name);
+    }
+    syncParamsFromDefinitions(defs, pendingParamSeed);
+    recompileAllParams();
+  }
+
   if (Object.keys(pendingParamSeed).length) {
     applyParamSeed(pendingParamSeed);
+    for (const { item, name } of paramRows) {
+      const p = getParam(name);
+      if (!p || p.hosted) continue;
+      updateExprSilent(item.id, {
+        latex: p.latex,
+        sliderMin: p.min,
+        sliderMax: p.max,
+        sliderSpeed: p.speed,
+        sliderAnimating: p.animating,
+        sliderPhase: p.phase,
+      });
+    }
     pendingParamSeed = {};
-    seeded = true;
   }
-  // Re-bind after param sync (values may have changed).
+
+  evalParamEquations(performance.now() / 1000);
   const params = getParamValues();
   for (const L of layers) L.fn = L.compiled.bind(params);
 
-  const after = listParamNames().join("\0");
-  if (rebuildUi && (before !== after || seeded || (after && !els.paramsList?.children.length))) {
-    renderParamsUi();
+  if (rebuildUi) {
+    // In-place slider chrome keeps the math-field (and caret) alive while typing.
+    if (!exprListApi?.syncParamChrome?.()) {
+      exprListApi?.render();
+    }
   }
 
   const nCons = layers.filter((L) => L.role === "constraint").length;
@@ -266,7 +227,7 @@ function compileAllExprs(opts = {}) {
     label: `${nDens} density · ${nCons} manifold`,
   };
 
-  return { freeParams, layers };
+  return { freeParams: [...freeSet].sort(), layers };
 }
 
 /** Last successful classify/compile summary. */
@@ -336,6 +297,10 @@ exprListApi = mountExprList({
     syncExprCompileState();
     scheduleUploadFit();
   },
+  onParamChange: () => {
+    syncExprCompileState();
+    scheduleUploadFit(80);
+  },
   onColorChange: () => {
     // Colors only — skip Chebyshev refit; push RGB to GPU dens layers + constraints.
     if (lastSceneBake) {
@@ -343,13 +308,15 @@ exprListApi = mountExprList({
       const densCols = [];
       const consCols = [];
       for (const item of items) {
-        let kind = "bare";
+        let compiled;
         try {
-          kind = compileExpr(item.latex).kind;
+          if (classifyExpr(item.latex).kind === "parameter") continue;
+          compiled = compileExpr(item.latex);
         } catch {
-          /* ignore */
+          continue;
         }
-        const role = resolveExprRole(item.role, kind);
+        if (!compiled.usesSpace) continue;
+        const role = resolveExprRole(item.role, compiled.kind);
         const rgb = hexToRgb01(item.color);
         if (role === "constraint") consCols.push(rgb);
         else densCols.push(rgb);
@@ -361,7 +328,6 @@ exprListApi = mountExprList({
         if (consCols[i]) lastSceneBake.constraints[i].color = consCols[i];
       }
       uploadSceneColors(lastSceneBake.densLayers.map((d) => d.color));
-      // Constraint colors need a volume re-upload of metadata (bases unchanged).
       if (isClipBakeGpuReady()) {
         uploadSceneVolumes({
           densLayers: lastSceneBake.densLayers,
@@ -625,7 +591,6 @@ function setExprCompileOk(ok) {
 function syncExprCompileState() {
   try {
     compileAllExprs({ rebuildUi: true });
-    if (listParamNames().length && !els.paramsList?.children.length) renderParamsUi();
     setExprCompileOk(true);
     setErr("");
     return true;
@@ -785,8 +750,11 @@ function applyDisplaySize(rw, rh, vw, vh, { markClipDirty = true } = {}) {
   camera.aspect = vw / Math.max(vh, 1);
   camera.updateProjectionMatrix();
   renderer.setSize(rw, rh, false);
-  renderer.domElement.style.width = "100%";
-  renderer.domElement.style.height = "100%";
+  const canvas = renderer.domElement;
+  canvas.style.width = "100%";
+  canvas.style.height = "100%";
+  canvas.style.position = "absolute";
+  canvas.style.inset = "0";
   if (markClipDirty) clipDirty = true;
   if (els.hud) els.hud.textContent = hudText();
 }
@@ -794,6 +762,10 @@ function applyDisplaySize(rw, rh, vw, vh, { markClipDirty = true } = {}) {
 function resize() {
   const { vw, vh } = viewportSize();
   applyDisplaySize(vw, vh, vw, vh, { markClipDirty: true });
+  // Keep the WebGPU overlay matched to the viewport CSS box immediately
+  // (buffer stays at march resolution; style fills the viewport).
+  const { mw, mh } = marchFramebufferSize();
+  resizeClipGpuCanvas(mw, mh);
 }
 
 /** @type {{ densLayers: any[], constraints: any[], M: number, dens: Float32Array | null } | null} */
@@ -849,18 +821,26 @@ function useGpuClipPath() {
 }
 
 function syncClipPresentation() {
-  const gpu = useGpuClipPath();
-  clipQuad.visible = !gpu;
-  setClipGpuCanvasVisible(gpu);
+  const hasVolume = hasUploadedVolume() || Boolean(
+    lastSceneBake && (lastSceneBake.densLayers.length || lastSceneBake.constraints.length),
+  );
+  const gpu = useGpuClipPath() && hasVolume;
+  clipQuad.visible = !gpu && hasVolume && Boolean(worldCheb);
+  setClipGpuCanvasVisible(isClipBakeGpuReady());
 }
 
 /** Per-frame GPU volume march (IDCT bake is fit-time only). */
 function drawClipGpuFrame() {
   densSubmittedThisFrame = false;
-  if (!lastSceneBake || !useGpuClipPath()) return false;
-  if (!hasUploadedVolume()) bakeChebVolume();
-
   const { mw, mh } = marchFramebufferSize();
+  if (!lastSceneBake || !isClipBakeGpuReady()) return false;
+  if (!hasUploadedVolume()) {
+    clearClipGpuFrame(mw, mh);
+    clipDirty = false;
+    return true;
+  }
+  if (!useGpuClipPath()) return false;
+
   camera.updateMatrixWorld(true);
   const t0 = performance.now();
   const ok = renderClipFrameGpu({
@@ -882,7 +862,11 @@ function drawClipGpuFrame() {
 }
 
 function syncClipCpuVolume() {
-  if (!worldCheb || useGpuClipPath()) return;
+  if (useGpuClipPath()) return;
+  if (!worldCheb || !hasUploadedVolume()) {
+    clipQuad.visible = false;
+    return;
+  }
   if (clipDirty || !clipVolumeTex) bakeChebVolume();
   syncClipFiberUniforms();
   setClipGpuCanvasVisible(false);
@@ -919,8 +903,32 @@ function uploadFit(opts = {}) {
 
     const tUpload = performance.now();
     const { layers } = compileAllExprs({ rebuildUi: false });
-    if (!layers.length) throw new Error("Add at least one non-empty expression");
     setExprCompileOk(true);
+
+    // No visible / non-empty expressions → clear volume, draw nothing.
+    if (!layers.length) {
+      lastSceneBake = { densLayers: [], constraints: [], M: Math.max(2, deg + 1), dens: null };
+      lastFitTiming = null;
+      lastNCoeff = 0;
+      lastFitRel = NaN;
+      worldCheb = null;
+      fitDeg = deg;
+      if (isClipBakeGpuReady()) {
+        uploadSceneVolumes({ densLayers: [], constraints: [], M: lastSceneBake.M });
+      }
+      clipUniforms.uScale.value = densScale;
+      clipUniforms.uSteps.value = steps;
+      setBoxSize(boxSize);
+      clipQuad.visible = false;
+      clipDirty = true;
+      if (!fromAnim) resize();
+      syncClipPresentation();
+      if (isClipBakeGpuReady()) {
+        const { mw, mh } = marchFramebufferSize();
+        clearClipGpuFrame(mw, mh);
+      }
+      return;
+    }
 
     const densLayers = [];
     const constraints = [];
@@ -1031,7 +1039,6 @@ els.preset.addEventListener("change", () => {
   applyPreset(els.preset.value);
   if (fitTimer) clearTimeout(fitTimer);
   uploadFit();
-  renderParamsUi();
 });
 els.deg.addEventListener("input", () => scheduleUploadFit(200));
 els.deg.addEventListener("change", () => scheduleUploadFit(0));
@@ -1062,9 +1069,92 @@ els.copyMetrics?.addEventListener("click", (ev) => {
 
 window.addEventListener("resize", resize);
 resize();
+
+/** Drag the sidebar edge to change --panel-w; persists in localStorage. */
+(function initPanelResize() {
+  const handle = document.getElementById("panelResize");
+  if (!handle) return;
+  const PANEL_MIN = 240;
+  const PANEL_MAX = 720;
+  const STORAGE_KEY = "poly-cloud-panel-w";
+
+  function clampW(w) {
+    const max = Math.min(PANEL_MAX, Math.max(PANEL_MIN, window.innerWidth - 200));
+    return Math.round(Math.min(max, Math.max(PANEL_MIN, w)));
+  }
+
+  function applyW(w) {
+    const px = clampW(w);
+    document.documentElement.style.setProperty("--panel-w", `${px}px`);
+    handle.setAttribute("aria-valuenow", String(px));
+    return px;
+  }
+
+  try {
+    const saved = Number(localStorage.getItem(STORAGE_KEY));
+    if (Number.isFinite(saved) && saved > 0) applyW(saved);
+  } catch (_) {
+    /* ignore */
+  }
+
+  handle.setAttribute("aria-valuemin", String(PANEL_MIN));
+  handle.setAttribute("aria-valuemax", String(PANEL_MAX));
+
+  let dragging = false;
+
+  function onMove(ev) {
+    if (!dragging) return;
+    const x = ev.touches ? ev.touches[0].clientX : ev.clientX;
+    applyW(x);
+    resize();
+  }
+
+  function onUp() {
+    if (!dragging) return;
+    dragging = false;
+    handle.classList.remove("dragging");
+    document.body.classList.remove("panel-resizing");
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    window.removeEventListener("pointercancel", onUp);
+    try {
+      const cur = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--panel-w"));
+      if (Number.isFinite(cur)) localStorage.setItem(STORAGE_KEY, String(cur));
+    } catch (_) {
+      /* ignore */
+    }
+    resize();
+  }
+
+  handle.addEventListener("pointerdown", (ev) => {
+    if (window.matchMedia("(max-width: 800px)").matches) return;
+    ev.preventDefault();
+    dragging = true;
+    handle.classList.add("dragging");
+    document.body.classList.add("panel-resizing");
+    handle.setPointerCapture?.(ev.pointerId);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  });
+
+  handle.addEventListener("keydown", (ev) => {
+    const cur = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--panel-w")) || 360;
+    const step = ev.shiftKey ? 40 : 16;
+    if (ev.key === "ArrowLeft") {
+      ev.preventDefault();
+      applyW(cur - step);
+      resize();
+    } else if (ev.key === "ArrowRight") {
+      ev.preventDefault();
+      applyW(cur + step);
+      resize();
+    }
+  });
+})();
+
 if (els.hud) els.hud.textContent = "clip-grid · idct volume";
 uploadFit();
-renderParamsUi();
 
 controls.addEventListener("start", () => {
   clipDirty = true;
@@ -1089,10 +1179,30 @@ function frame(rafNow) {
   lastRafAt = rafNow > 0 ? rafNow : t0;
   loopFpsFrames++;
 
-  // Named param animation → Chebyshev refit (throttled).
-  if (anyParamAnimating()) {
-    if (tickParamAnimation(t0 / 1000)) {
-      syncAllParamRows();
+  // Named param animation / LaTeX time → Chebyshev refit (throttled).
+  if (anyParamNeedsTick()) {
+    const tSec = t0 / 1000;
+    const animChanged = tickParamAnimation(tSec);
+    const eqChanged = evalParamEquations(tSec);
+    if (animChanged || eqChanged) {
+      if (animChanged) {
+        for (const name of listParamNames()) {
+          const p = getParam(name);
+          if (p?.exprId && !p.driven && !p.hosted) {
+            updateExprSilent(p.exprId, {
+              latex: p.latex,
+              sliderAnimating: p.animating,
+              sliderPhase: p.phase,
+            });
+          } else if (p?.exprId && p.hosted && p.animating) {
+            updateExprSilent(p.exprId, {
+              sliderAnimating: p.animating,
+              sliderPhase: p.phase,
+            });
+          }
+        }
+      }
+      exprListApi?.syncAllParamSliders?.();
       if (t0 - lastAnimFitAt >= ANIM_FIT_MIN_MS) {
         lastAnimFitAt = t0;
         if (fitTimer) {
@@ -1116,14 +1226,20 @@ function frame(rafNow) {
   controls.update();
   clipUniforms.uCameraPos.value.copy(camera.position);
 
-  if (worldCheb && !useGpuClipPath()) {
+  if (!useGpuClipPath()) {
     syncClipCpuVolume();
   }
 
   renderer.render(scene, camera);
 
-  if (worldCheb && useGpuClipPath()) {
-    drawClipGpuFrame();
+  if (isClipBakeGpuReady()) {
+    if (hasUploadedVolume() && useGpuClipPath()) {
+      drawClipGpuFrame();
+    } else if (!hasUploadedVolume()) {
+      const { mw, mh } = marchFramebufferSize();
+      clearClipGpuFrame(mw, mh);
+      densSubmittedThisFrame = false;
+    }
   }
 
   const dt = performance.now() - t0;
