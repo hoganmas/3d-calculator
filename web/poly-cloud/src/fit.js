@@ -94,21 +94,85 @@ export function compileExpr(raw) {
   };
 }
 
-function chebT(k, u) {
-  if (k === 0) return 1;
-  if (k === 1) return u;
-  let t0 = 1;
-  let t1 = u;
-  for (let j = 2; j <= k; j++) {
-    const t2 = 2 * u * t1 - t0;
-    t0 = t1;
-    t1 = t2;
-  }
-  return t1;
-}
-
 function fromUnit(u, a, b) {
   return 0.5 * (a + b) + 0.5 * (b - a) * u;
+}
+
+/**
+ * DCT matrix W[i,a] = T_i(u_a) for Gauss–Chebyshev nodes.
+ * Built via recurrence in O(n²).
+ */
+function chebWeightMatrix(n, uNodes) {
+  const W = new Float64Array(n * n);
+  for (let a = 0; a < n; a++) {
+    const u = uNodes[a];
+    W[a] = 1;
+    if (n > 1) W[n + a] = u;
+    for (let i = 2; i < n; i++) {
+      W[i * n + a] = 2 * u * W[(i - 1) * n + a] - W[(i - 2) * n + a];
+    }
+  }
+  return W;
+}
+
+/**
+ * Separable 3D Chebyshev DCT of samples on the tensor Chebyshev grid.
+ * Same math as the naive O(n⁶) sum, but three 1D passes → O(n⁴).
+ *
+ * c_ijk = (α_i α_j α_k / n³) Σ_{a,b,c} f_abc T_i(u_a) T_j(u_b) T_k(u_c)
+ * with α_0 = 1, α_{>0} = 2.
+ *
+ * Packing: idx = x + y*n + z*n*n (same as vals / cheb elsewhere).
+ */
+function chebDCT3DSeparable(vals, n, uNodes) {
+  const W = chebWeightMatrix(n, uNodes);
+  const scale = new Float64Array(n);
+  for (let i = 0; i < n; i++) scale[i] = (i === 0 ? 1 : 2) / n;
+
+  const n2 = n * n;
+  const tmp = new Float64Array(n * n * n);
+  const tmp2 = new Float64Array(n * n * n);
+  const out = new Float32Array(n * n * n);
+
+  // X: vals[a,b,c] → tmp[i,b,c]
+  for (let b = 0; b < n; b++) {
+    for (let c = 0; c < n; c++) {
+      const base = b * n + c * n2;
+      for (let i = 0; i < n; i++) {
+        let s = 0;
+        const Wi = i * n;
+        for (let a = 0; a < n; a++) s += vals[a + base] * W[Wi + a];
+        tmp[i + base] = s * scale[i];
+      }
+    }
+  }
+
+  // Y: tmp[i,b,c] → tmp2[i,j,c]
+  for (let i = 0; i < n; i++) {
+    for (let c = 0; c < n; c++) {
+      for (let j = 0; j < n; j++) {
+        let s = 0;
+        const Wj = j * n;
+        for (let b = 0; b < n; b++) s += tmp[i + b * n + c * n2] * W[Wj + b];
+        tmp2[i + j * n + c * n2] = s * scale[j];
+      }
+    }
+  }
+
+  // Z: tmp2[i,j,c] → out[i,j,k]
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      const ij = i + j * n;
+      for (let k = 0; k < n; k++) {
+        let s = 0;
+        const Wk = k * n;
+        for (let c = 0; c < n; c++) s += tmp2[ij + c * n2] * W[Wk + c];
+        out[ij + k * n2] = s * scale[k];
+      }
+    }
+  }
+
+  return out;
 }
 
 /** T_0..T_deg as monomial coeffs in u (length deg+1 arrays). */
@@ -182,8 +246,10 @@ export function evalMonomial3D(mono, deg, x, y, z) {
 
 /**
  * Fit f on [-half,half]^3 with tensor Chebyshev, convert to world monomials.
+ * @param {{ skipL2?: boolean }} [opts]
  */
-export function fitChebyshev3D(fn, half, deg) {
+export function fitChebyshev3D(fn, half, deg, opts = {}) {
+  const tAll = performance.now();
   const N = Math.max(0, Math.min(MAX_DEG, deg | 0));
   const n = N + 1;
   const uNodes = new Array(n);
@@ -194,6 +260,7 @@ export function fitChebyshev3D(fn, half, deg) {
     pts[i] = fromUnit(u, -half, half);
   }
 
+  let t0 = performance.now();
   const vals = new Float64Array(n * n * n);
   let fMin = Infinity;
   let fMax = -Infinity;
@@ -208,56 +275,57 @@ export function fitChebyshev3D(fn, half, deg) {
       }
     }
   }
+  const sampleMs = performance.now() - t0;
 
-  const cheb = new Float32Array(n * n * n);
-  for (let i = 0; i < n; i++) {
-    for (let j = 0; j < n; j++) {
-      for (let k = 0; k < n; k++) {
-        let s = 0;
-        for (let a = 0; a < n; a++) {
-          const Ti = chebT(i, uNodes[a]);
-          for (let b = 0; b < n; b++) {
-            const Tj = chebT(j, uNodes[b]);
-            for (let c = 0; c < n; c++) {
-              s += vals[a + b * n + c * n * n] * Ti * Tj * chebT(k, uNodes[c]);
-            }
-          }
-        }
-        const ai = i === 0 ? 1 : 2;
-        const aj = j === 0 ? 1 : 2;
-        const ak = k === 0 ? 1 : 2;
-        cheb[i + j * n + k * n * n] = (s * ai * aj * ak) / (n * n * n);
-      }
-    }
-  }
+  t0 = performance.now();
+  // Separable DCT: O(n⁴). Mutates vals as scratch after the X-pass buffer.
+  const cheb = chebDCT3DSeparable(vals, n, uNodes);
+  const chebMs = performance.now() - t0;
 
+  t0 = performance.now();
   const mono = chebToMonomial3D(cheb, N, half);
+  const monoMs = performance.now() - t0;
 
-  const M = 10;
-  let num = 0;
-  let den = 0;
-  for (let ix = 0; ix < M; ix++) {
-    for (let iy = 0; iy < M; iy++) {
-      for (let iz = 0; iz < M; iz++) {
-        const x = -half + (2 * half * (ix + 0.5)) / M;
-        const y = -half + (2 * half * (iy + 0.5)) / M;
-        const z = -half + (2 * half * (iz + 0.5)) / M;
-        const truth = fn(x, y, z);
-        const approx = evalMonomial3D(mono, N, x, y, z);
-        const d = approx - truth;
-        num += d * d;
-        den += truth * truth;
+  let fitRelL2 = NaN;
+  let l2Ms = 0;
+  if (!opts.skipL2) {
+    t0 = performance.now();
+    const M = 10;
+    let num = 0;
+    let den = 0;
+    for (let ix = 0; ix < M; ix++) {
+      for (let iy = 0; iy < M; iy++) {
+        for (let iz = 0; iz < M; iz++) {
+          const x = -half + (2 * half * (ix + 0.5)) / M;
+          const y = -half + (2 * half * (iy + 0.5)) / M;
+          const z = -half + (2 * half * (iz + 0.5)) / M;
+          const truth = fn(x, y, z);
+          const approx = evalMonomial3D(mono, N, x, y, z);
+          const d = approx - truth;
+          num += d * d;
+          den += truth * truth;
+        }
       }
     }
+    fitRelL2 = Math.sqrt(num) / (Math.sqrt(den) + 1e-15);
+    l2Ms = performance.now() - t0;
   }
 
+  const totalMs = performance.now() - tAll;
   return {
     cheb,
     mono,
     deg: N,
     half,
-    fitRelL2: Math.sqrt(num) / (Math.sqrt(den) + 1e-15),
+    fitRelL2,
     fMin,
     fMax,
+    timing: {
+      sampleMs,
+      chebMs,
+      monoMs,
+      l2Ms,
+      totalMs,
+    },
   };
 }

@@ -46,6 +46,7 @@ const els = {
   reset: document.getElementById("reset"),
   err: document.getElementById("err"),
   fitErr: document.getElementById("fitErr"),
+  fitMs: document.getElementById("fitMs"),
   nCoeff: document.getElementById("nCoeff"),
   cpuMs: document.getElementById("cpuMs"),
   gpuMs: document.getElementById("gpuMs"),
@@ -372,6 +373,8 @@ let lastDensAtlasH = 0;
 let lastDensTile = 0;
 let lastMetricsText = "";
 let copyMetricsResetTimer = 0;
+/** Last CPU Chebyshev→monomial fit breakdown (ms). */
+let lastFitTiming = null;
 
 /** @returns {"auto" | "exact" | number} */
 function readTileOverride() {
@@ -789,6 +792,17 @@ function buildMetricsReport() {
   }
   lines.push(`fit_rel_L2      ${els.fitErr?.textContent ?? "—"}`);
   lines.push(`n_coeffs       ${els.nCoeff?.textContent ?? "—"}`);
+  if (lastFitTiming) {
+    const t = lastFitTiming;
+    lines.push(
+      `fit_total_ms    ${t.totalMs.toFixed(2)}`,
+      `fit_sample_ms   ${t.sampleMs.toFixed(2)}`,
+      `fit_cheb_ms     ${t.chebMs.toFixed(2)}`,
+      `fit_mono_ms     ${t.monoMs.toFixed(2)}`,
+      `fit_l2_ms       ${t.l2Ms.toFixed(2)}`,
+      `fit_upload_ms   ${t.uploadMs.toFixed(2)}`,
+    );
+  }
   const pv = getParamValues();
   const pNames = Object.keys(pv);
   if (pNames.length) {
@@ -1080,9 +1094,35 @@ function uploadFit(opts = {}) {
     if (!(half > 0)) throw new Error("half-size must be > 0");
     if (deg < 1 || deg > MAX_DEG) throw new Error(`poly deg must be 1…${MAX_DEG}`);
 
+    const tUpload = performance.now();
     const { fn } = compileBoundExpr({ rebuildUi: false });
     setExprCompileOk(true);
-    const fit = fitChebyshev3D(fn, half, deg);
+    // Skip L2 probe while animating — it's extra CPU on the hot path.
+    const fit = fitChebyshev3D(fn, half, deg, { skipL2: fromAnim });
+    const uploadMs = performance.now() - tUpload;
+    lastFitTiming = {
+      ...(fit.timing || {
+        sampleMs: 0,
+        chebMs: 0,
+        monoMs: 0,
+        l2Ms: 0,
+        totalMs: 0,
+      }),
+      uploadMs,
+    };
+    if (els.fitMs) {
+      const t = lastFitTiming;
+      els.fitMs.textContent = `${t.totalMs.toFixed(0)}ms`;
+      els.fitMs.title = [
+        `sample ${t.sampleMs.toFixed(1)}ms`,
+        `cheb ${t.chebMs.toFixed(1)}ms`,
+        `mono ${t.monoMs.toFixed(1)}ms`,
+        `L2 ${t.l2Ms.toFixed(1)}ms`,
+        `upload+fit wall ${t.uploadMs.toFixed(1)}ms`,
+      ].join(" · ");
+      els.fitMs.className =
+        "v " + (t.totalMs > 40 ? "warn" : t.totalMs > 16 ? "" : "ok");
+    }
 
     worldMono = fit.mono;
     fitDeg = fit.deg;
@@ -1096,8 +1136,10 @@ function uploadFit(opts = {}) {
     setBoxHalf(half);
 
     const n = (fit.deg + 1) ** 3;
-    els.fitErr.textContent = fmtRel(fit.fitRelL2);
-    els.fitErr.className = "v " + (fit.fitRelL2 < 0.08 ? "ok" : "warn");
+    if (Number.isFinite(fit.fitRelL2)) {
+      els.fitErr.textContent = fmtRel(fit.fitRelL2);
+      els.fitErr.className = "v " + (fit.fitRelL2 < 0.08 ? "ok" : "warn");
+    }
     els.nCoeff.textContent = String(n);
 
     // Mode sync + resize; GPU path draws every frame, CPU rebakes when dirty.
