@@ -77,10 +77,12 @@
         flex-direction: column;
         gap: 6px;
         margin: 0 -4px;
+        padding: 10px 0 28px;
+        min-height: 48px;
       }
       .expr-row {
         display: grid;
-        grid-template-columns: 28px minmax(0, 1fr) 28px 28px;
+        grid-template-columns: 16px 28px minmax(0, 1fr) 28px 28px;
         gap: 0;
         align-items: stretch;
         min-height: 52px;
@@ -89,6 +91,68 @@
         border: 1px solid var(--stroke);
         background: transparent;
         overflow: hidden;
+        position: relative;
+      }
+      .expr-row.is-dragging {
+        opacity: 0.35;
+      }
+      .expr-row-ghost {
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 10000;
+        margin: 0;
+        opacity: 0.72;
+        pointer-events: none;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+        background: var(--panel, #12141a);
+        will-change: transform;
+      }
+      .expr-row.drag-over-before::before,
+      .expr-row.drag-over-after::after {
+        content: "";
+        position: absolute;
+        left: 4px;
+        right: 4px;
+        height: 2px;
+        border-radius: 1px;
+        background: var(--accent);
+        pointer-events: none;
+        z-index: 2;
+      }
+      .expr-row.drag-over-before::before {
+        top: -1px;
+      }
+      .expr-row.drag-over-after::after {
+        bottom: -1px;
+      }
+      .expr-list.is-reordering {
+        cursor: grabbing;
+        user-select: none;
+      }
+      .expr-drag {
+        width: 16px;
+        padding: 0;
+        border: none;
+        border-right: 1px solid var(--stroke);
+        border-radius: 0;
+        background: transparent;
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1;
+        cursor: grab;
+        align-self: stretch;
+        user-select: none;
+        -webkit-user-select: none;
+        touch-action: none;
+      }
+      .expr-drag:hover {
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.04);
+      }
+      .expr-list.is-reordering .expr-drag,
+      .expr-drag:active {
+        cursor: grabbing;
       }
       .expr-row.selected {
         border-color: rgba(110, 168, 254, 0.55);
@@ -520,6 +584,126 @@
         white-space: pre;
         overflow: auto;
       }
+      .brand-row {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .brand-row .brand {
+        flex: 1;
+        min-width: 0;
+      }
+      .icon-btn {
+        flex-shrink: 0;
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        display: grid;
+        place-items: center;
+        background: transparent;
+        color: var(--muted);
+        border: 1px solid var(--stroke);
+        border-radius: 8px;
+        font-weight: 500;
+      }
+      .icon-btn:hover {
+        color: var(--text);
+        border-color: rgba(110, 168, 254, 0.45);
+        background: rgba(110, 168, 254, 0.08);
+      }
+      .icon-btn svg {
+        width: 18px;
+        height: 18px;
+        display: block;
+      }
+      .panel-actions {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+      .settings-dialog {
+        border: 1px solid var(--stroke);
+        border-radius: 12px;
+        padding: 0;
+        background: var(--panel);
+        color: var(--text);
+        max-width: min(440px, calc(100vw - 28px));
+        width: 100%;
+        max-height: min(88vh, 720px);
+        overflow: hidden;
+        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+      }
+      .settings-dialog::backdrop {
+        background: rgba(6, 8, 12, 0.62);
+      }
+      .settings-sheet {
+        display: flex;
+        flex-direction: column;
+        max-height: min(88vh, 720px);
+      }
+      .settings-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 14px 16px 12px;
+        border-bottom: 1px solid var(--stroke);
+      }
+      .settings-head h2 {
+        margin: 0;
+        font-family: "Latin Modern Roman", "Computer Modern Serif", Georgia, serif;
+        font-size: 20px;
+        font-weight: bold;
+        letter-spacing: 0.01em;
+      }
+      .settings-body {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 14px 16px 18px;
+        overflow: auto;
+      }
+      .settings-section {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .settings-section-title {
+        margin: 2px 0 0;
+        font-size: 11px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .settings-dialog label {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: 11px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .settings-dialog input,
+      .settings-dialog select,
+      .settings-dialog textarea,
+      .settings-dialog button.secondary {
+        font: inherit;
+        font-size: 13px;
+        text-transform: none;
+        letter-spacing: 0;
+        color: var(--text);
+        background: transparent;
+        border: 1px solid var(--stroke);
+        border-radius: 4px;
+        padding: 8px 10px;
+      }
+      .settings-dialog .row3 {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 8px;
+      }
       #viewport {
         position: relative;
         min-width: 0;
@@ -622,55 +806,42 @@
   <body>
     <div id="app">
       <aside id="panel">
-        <div class="brand">
-          <img class="brand-mark" src="/favicon.svg" alt="" width="36" height="36" />
-          <h1>Laplacian</h1>
+        <div class="brand-row">
+          <div>
+            <div class="brand">
+              <img class="brand-mark" src="/favicon.svg" alt="" width="36" height="36" />
+              <h1>Laplacian</h1>
+            </div>
+            <p class="brand-sub">3D polynomial calculator</p>
+          </div>
+          <button
+            id="openSettings"
+            class="icon-btn"
+            type="button"
+            aria-label="Open settings"
+            title="Settings"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75">
+              <circle cx="12" cy="12" r="3" />
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+              />
+            </svg>
+          </button>
         </div>
-        <p class="brand-sub">3D polynomial calculator</p>
 
         <div class="expr-list-head">
           <span style="font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em">Expressions</span>
         </div>
         <div id="exprList" class="expr-list"></div>
 
-        <label>
-          Load preset
-          <select id="preset"></select>
-        </label>
-
-        <div class="row3">
-          <label>poly deg<input id="deg" type="number" min="2" max="128" step="1" value="20" /></label>
-          <label>scale<input id="scale" type="number" min="0.1" max="20" step="0.1" value="2.5" /></label>
-          <label>steps<input id="steps" type="number" min="8" max="96" step="4" value="32" /></label>
-        </div>
-
-        <label>box size<input id="boxSize" type="number" min="1" max="10" step="0.1" value="4" title="Full edge length of the axis-aligned cube [-S/2,S/2]³" /></label>
-
-        <label class="march-slider-label">
-          <span class="march-slider-head">
-            <span>march downscale</span>
-            <span id="marchScaleLabel" class="march-scale-badge">1×</span>
-          </span>
-          <div class="march-slider-wrap">
-            <div class="march-slider-ticks" id="marchSliderTicks" aria-hidden="true"></div>
-            <input id="marchDownscale" type="range" min="1" max="16" step="1" value="1" />
-            <div class="march-slider-labels" id="marchSliderLabels" aria-hidden="true"></div>
-          </div>
-        </label>
-
-        <div class="row">
+        <div class="panel-actions">
           <button id="reset" class="secondary" type="button">Reset view</button>
         </div>
 
         <div id="err"></div>
-
-        <details class="metrics-block">
-          <summary class="metrics-head">
-            <span>Diagnostics</span>
-            <button id="copyMetrics" class="secondary" type="button">Copy</button>
-          </summary>
-          <textarea id="metricsDump" readonly spellcheck="false"></textarea>
-        </details>
       </aside>
       <div
         id="panelResize"
@@ -683,6 +854,64 @@
         <div id="hud">Laplacian</div>
       </main>
     </div>
+
+    <dialog id="settingsDialog" class="settings-dialog" aria-labelledby="settingsTitle">
+      <div class="settings-sheet">
+        <header class="settings-head">
+          <h2 id="settingsTitle">Settings</h2>
+          <button id="closeSettings" class="icon-btn" type="button" aria-label="Close settings" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75">
+              <path stroke-linecap="round" d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </header>
+        <div class="settings-body">
+          <section class="settings-section">
+            <p class="settings-section-title">Scene</p>
+            <label>
+              Load preset
+              <select id="preset"></select>
+            </label>
+            <label>box size<input id="boxSize" type="number" min="1" max="10" step="0.1" value="4" title="Full edge length of the axis-aligned cube [-S/2,S/2]³" /></label>
+          </section>
+
+          <section class="settings-section">
+            <p class="settings-section-title">Approximation</p>
+            <div class="row3">
+              <label>poly deg<input id="deg" type="number" min="2" max="128" step="1" value="20" /></label>
+              <label>scale<input id="scale" type="number" min="0.1" max="20" step="0.1" value="2.5" /></label>
+              <label>steps<input id="steps" type="number" min="8" max="96" step="4" value="32" /></label>
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <p class="settings-section-title">Rendering</p>
+            <label class="march-slider-label">
+              <span class="march-slider-head">
+                <span>march downscale</span>
+                <span id="marchScaleLabel" class="march-scale-badge">1×</span>
+              </span>
+              <div class="march-slider-wrap">
+                <div class="march-slider-ticks" id="marchSliderTicks" aria-hidden="true"></div>
+                <input id="marchDownscale" type="range" min="1" max="16" step="1" value="1" />
+                <div class="march-slider-labels" id="marchSliderLabels" aria-hidden="true"></div>
+              </div>
+            </label>
+          </section>
+
+          <section class="settings-section">
+            <details class="metrics-block" open>
+              <summary class="metrics-head">
+                <span>Diagnostics</span>
+                <button id="copyMetrics" class="secondary" type="button">Copy</button>
+              </summary>
+              <textarea id="metricsDump" readonly spellcheck="false"></textarea>
+            </details>
+          </section>
+        </div>
+      </div>
+    </dialog>
+
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

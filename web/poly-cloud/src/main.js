@@ -75,6 +75,9 @@ const els = {
   hud: document.getElementById("hud"),
   metricsDump: document.getElementById("metricsDump"),
   copyMetrics: document.getElementById("copyMetrics"),
+  openSettings: document.getElementById("openSettings"),
+  closeSettings: document.getElementById("closeSettings"),
+  settingsDialog: document.getElementById("settingsDialog"),
 };
 
 for (const [key, p] of Object.entries(PRESETS)) {
@@ -1388,6 +1391,20 @@ els.copyMetrics?.addEventListener("click", (ev) => {
   ev.preventDefault();
   ev.stopPropagation();
   void copyMetricsToClipboard();
+});
+
+function openSettingsDialog() {
+  if (!els.settingsDialog || typeof els.settingsDialog.showModal !== "function") return;
+  if (!els.settingsDialog.open) els.settingsDialog.showModal();
+}
+function closeSettingsDialog() {
+  if (!els.settingsDialog?.open) return;
+  els.settingsDialog.close();
+}
+els.openSettings?.addEventListener("click", () => openSettingsDialog());
+els.closeSettings?.addEventListener("click", () => closeSettingsDialog());
+els.settingsDialog?.addEventListener("click", (ev) => {
+  if (ev.target === els.settingsDialog) closeSettingsDialog();
 });
 
 window.addEventListener("resize", resize);

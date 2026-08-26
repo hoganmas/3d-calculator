@@ -15,6 +15,7 @@ import {
   updateExprSilent,
   getExprWarning,
   commitAutoParams,
+  moveExpr,
 } from "./expressions.js";
 import { classifyExpr } from "./fit.js";
 import {
@@ -439,8 +440,8 @@ export function mountExprList(opts) {
       const item = items[i];
       const row = rows[i];
       if (!(row instanceof HTMLElement) || row.dataset.id !== item.id) return false;
-      // Unified DOM: always color | mid | vis | del
-      if (row.children.length !== 4) return false;
+      // Unified DOM: always drag | color | mid | vis | del
+      if (row.children.length !== 5) return false;
       const mid = row.querySelector(".expr-mid");
       const mf = row.querySelector("math-field");
       if (!(mid instanceof HTMLElement)) return false;
@@ -481,6 +482,187 @@ export function mountExprList(opts) {
       for (const { name } of needed) syncParamSlider(row, name);
     }
     return true;
+  }
+
+  /** @type {{ id: string, pointerId: number, startY: number, moved: boolean, offsetX: number, offsetY: number } | null} */
+  let dragState = null;
+  /** @type {{ beforeId: string | null, el: Element | null, where: "before" | "after" } | null} */
+  let lastInsert = null;
+  /** @type {HTMLElement | null} */
+  let dragGhost = null;
+
+  function clearDragGhost() {
+    if (dragGhost) {
+      dragGhost.remove();
+      dragGhost = null;
+    }
+  }
+
+  function clearDragIndicators() {
+    root.classList.remove("is-reordering");
+    clearDragGhost();
+    root.querySelectorAll(".expr-row").forEach((r) => {
+      r.classList.remove("drag-over-before", "drag-over-after", "is-dragging");
+    });
+  }
+
+  /**
+   * Floating clone that tracks the pointer (replaces HTML5 drag image).
+   * @param {HTMLElement} row
+   * @param {number} clientX
+   * @param {number} clientY
+   * @param {number} offsetX
+   * @param {number} offsetY
+   */
+  function showDragGhost(row, clientX, clientY, offsetX, offsetY) {
+    clearDragGhost();
+    const ghost = /** @type {HTMLElement} */ (row.cloneNode(true));
+    ghost.classList.add("expr-row-ghost");
+    ghost.classList.remove("is-dragging", "selected", "drag-over-before", "drag-over-after");
+    ghost.removeAttribute("data-id");
+    ghost.querySelectorAll("input, button, math-field").forEach((el) => {
+      el.setAttribute("tabindex", "-1");
+      if (el instanceof HTMLInputElement || el instanceof HTMLButtonElement) el.disabled = true;
+    });
+    const rect = row.getBoundingClientRect();
+    ghost.style.width = `${rect.width}px`;
+    ghost.style.height = `${rect.height}px`;
+    document.body.appendChild(ghost);
+    dragGhost = ghost;
+    moveDragGhost(clientX, clientY, offsetX, offsetY);
+  }
+
+  function moveDragGhost(clientX, clientY, offsetX, offsetY) {
+    if (!dragGhost) return;
+    dragGhost.style.transform = `translate(${clientX - offsetX}px, ${clientY - offsetY}px)`;
+  }
+
+  /**
+   * Map pointer Y to an insert slot. Top/bottom use large edge zones so ends are easy.
+   * @param {number} clientY
+   * @param {string | null} excludeId
+   * @returns {{ beforeId: string | null, el: Element | null, where: "before" | "after" }}
+   */
+  function resolveInsert(clientY, excludeId) {
+    const others = [...root.querySelectorAll(".expr-row")].filter(
+      (r) => r instanceof HTMLElement && r.dataset.id && r.dataset.id !== excludeId,
+    );
+    if (!others.length) return { beforeId: null, el: null, where: "after" };
+
+    const listRect = root.getBoundingClientRect();
+    const first = others[0];
+    const last = others[others.length - 1];
+    const firstRect = first.getBoundingClientRect();
+    const lastRect = last.getBoundingClientRect();
+    const topEdge = Math.min(listRect.top + 36, firstRect.top + firstRect.height / 3);
+    const botEdge = Math.max(listRect.bottom - 36, lastRect.bottom - lastRect.height / 3);
+
+    if (clientY <= topEdge) {
+      return { beforeId: first.dataset.id ?? null, el: first, where: "before" };
+    }
+    if (clientY >= botEdge) {
+      return { beforeId: null, el: last, where: "after" };
+    }
+
+    for (const row of others) {
+      const rect = row.getBoundingClientRect();
+      if (clientY < rect.top + rect.height / 2) {
+        return { beforeId: row.dataset.id ?? null, el: row, where: "before" };
+      }
+    }
+    return { beforeId: null, el: last, where: "after" };
+  }
+
+  function updateInsertIndicator(clientY, excludeId) {
+    lastInsert = resolveInsert(clientY, excludeId);
+    const { el, where } = lastInsert;
+    for (const r of root.querySelectorAll(".expr-row")) {
+      r.classList.toggle("drag-over-before", r === el && where === "before");
+      r.classList.toggle("drag-over-after", r === el && where === "after");
+    }
+  }
+
+  function finishPointerDrag() {
+    const state = dragState;
+    dragState = null;
+    if (!state?.moved) {
+      clearDragIndicators();
+      lastInsert = null;
+      return;
+    }
+    const beforeId = lastInsert ? lastInsert.beforeId : null;
+    const id = state.id;
+    clearDragIndicators();
+    lastInsert = null;
+    if (moveExpr(id, beforeId)) {
+      onStructuralChange();
+      render();
+    }
+  }
+
+  function onPointerMove(ev) {
+    if (!dragState || ev.pointerId !== dragState.pointerId) return;
+    if (!dragState.moved) {
+      if (Math.abs(ev.clientY - dragState.startY) < 3) return;
+      dragState.moved = true;
+      commitAutoParams();
+      root.classList.add("is-reordering");
+      const row = root.querySelector(`.expr-row[data-id="${CSS.escape(dragState.id)}"]`);
+      if (row instanceof HTMLElement) {
+        row.classList.add("is-dragging");
+        showDragGhost(row, ev.clientX, ev.clientY, dragState.offsetX, dragState.offsetY);
+      }
+    } else {
+      moveDragGhost(ev.clientX, ev.clientY, dragState.offsetX, dragState.offsetY);
+    }
+    ev.preventDefault();
+    updateInsertIndicator(ev.clientY, dragState.id);
+  }
+
+  function onPointerUp(ev) {
+    if (!dragState || ev.pointerId !== dragState.pointerId) return;
+    if (dragState.moved) updateInsertIndicator(ev.clientY, dragState.id);
+    finishPointerDrag();
+  }
+
+  /**
+   * @param {HTMLElement} row
+   * @param {any} item
+   */
+  function createDragHandle(row, item) {
+    const handle = document.createElement("button");
+    handle.type = "button";
+    handle.className = "expr-drag";
+    handle.title = "Drag to reorder";
+    handle.setAttribute("aria-label", "Drag to reorder");
+    handle.tabIndex = -1;
+    handle.textContent = "⠿";
+
+    handle.addEventListener("pointerdown", (ev) => {
+      if (ev.button !== 0 || dragState) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const rect = row.getBoundingClientRect();
+      dragState = {
+        id: item.id,
+        pointerId: ev.pointerId,
+        startY: ev.clientY,
+        moved: false,
+        offsetX: ev.clientX - rect.left,
+        offsetY: ev.clientY - rect.top,
+      };
+      lastInsert = null;
+      try {
+        handle.setPointerCapture(ev.pointerId);
+      } catch (_) {
+        /* ignore */
+      }
+    });
+    handle.addEventListener("pointermove", onPointerMove);
+    handle.addEventListener("pointerup", onPointerUp);
+    handle.addEventListener("pointercancel", onPointerUp);
+
+    return handle;
   }
 
   function render() {
@@ -648,6 +830,7 @@ export function mountExprList(opts) {
 
       row.addEventListener("click", (ev) => {
         if (ev.target === del || ev.target === swatch || ev.target === vis) return;
+        if (ev.target instanceof Element && ev.target.closest(".expr-drag")) return;
         if (vis.contains(ev.target)) return;
         if (ev.target === mf || mf.contains?.(ev.target)) return;
         if (ev.target instanceof HTMLInputElement || ev.target instanceof HTMLButtonElement) return;
@@ -658,8 +841,9 @@ export function mountExprList(opts) {
         mf.focus?.();
       });
 
-      // Always the same 4 children so CSS grid never crushes mid during kind flips.
-      row.append(swatch, mid, vis, del);
+      const drag = createDragHandle(row, item);
+      // Always the same 5 children so CSS grid never crushes mid during kind flips.
+      row.append(drag, swatch, mid, vis, del);
       root.appendChild(row);
       }
 

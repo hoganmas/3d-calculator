@@ -221,6 +221,27 @@ export function commitAutoParams() {
 }
 
 /**
+ * Move expression `id` so it sits before `beforeId` (or at end if `beforeId` is null).
+ * @param {string} id
+ * @param {string | null} beforeId
+ * @returns {boolean} true if order changed
+ */
+export function moveExpr(id, beforeId) {
+  const from = items.findIndex((e) => e.id === id);
+  if (from < 0) return false;
+  if (beforeId === id) return false;
+  let to = beforeId == null ? items.length : items.findIndex((e) => e.id === beforeId);
+  if (to < 0) to = items.length;
+  // Index after removing `from`.
+  const dest = from < to ? to - 1 : to;
+  if (dest === from) return false;
+  const [row] = items.splice(from, 1);
+  items.splice(dest, 0, row);
+  emit();
+  return true;
+}
+
+/**
  * Merge row `id` into the one above (concat LaTeX). Keeps the upper row's color/role.
  * @returns {{ id: string, caretOffset: number } | null}
  */
