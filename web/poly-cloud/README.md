@@ -28,6 +28,6 @@ npm run dev
 
 - Drag to orbit · scroll to zoom · right-drag to pan
 - **mode** — prefer **clip-grid**; LOS raymarch is a secondary reference
-- **Parameters** — free symbols besides `x,y,z` (e.g. `a` in `\exp(-(x^2+y^2+z^2)/a^2)`) get sliders; ▶ animates between min/max (cosine), **Hz** is cycles/sec. Changing a param refits the Chebyshev approximant.
+- **Parameters** — free symbols besides spatial `x,y,z` / `r,θ,φ,ρ` (e.g. `a` in `\exp(-r^2/a^2)`) get sliders; ▶ animates between min/max (cosine), **Hz** is cycles/sec. Changing a param refits the Chebyshev approximant.
 - **Dens tile** — auto shrinks with projected box size; `exact` skips interpolation
 - **steps** / **march downscale** — Beer samples and internal march resolution

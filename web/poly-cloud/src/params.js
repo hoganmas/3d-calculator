@@ -1,6 +1,6 @@
 /**
  * Name parameters for the density expression.
- * Each free symbol (besides x,y,z) gets a slider; optional cosine ping-pong animation.
+ * Each free symbol (besides spatial x,y,z / r,θ,φ,ρ) gets a slider; optional cosine ping-pong animation.
  */
 
 /**

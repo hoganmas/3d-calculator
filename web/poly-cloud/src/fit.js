@@ -19,7 +19,15 @@ export const PRESETS = {
   },
   shell: {
     label: "Spherical shell",
-    latex: String.raw`\exp(-12(\sqrt{x^{2}+y^{2}+z^{2}}-0.9)^{2})`,
+    latex: String.raw`\exp(-12(r-0.9)^{2})`,
+  },
+  lobe: {
+    label: "Polar lobe (θ)",
+    latex: String.raw`\exp(-4r^{2})\max(0,\cos\theta)^{2}`,
+  },
+  torus: {
+    label: "Polar torus (ρ)",
+    latex: String.raw`\exp(-20(\rho-0.9)^{2}-8z^{2})`,
   },
   ridge: {
     label: "Vertical ridge",
@@ -27,7 +35,7 @@ export const PRESETS = {
   },
   pulse: {
     label: "Pulse blob (a)",
-    latex: String.raw`\exp(-(x^{2}+y^{2}+z^{2})/a^{2})`,
+    latex: String.raw`\exp(-r^{2}/a^{2})`,
     params: { a: { value: 1, min: 0.35, max: 1.6, animate: true } },
   },
   twist: {
@@ -37,13 +45,36 @@ export const PRESETS = {
   },
 };
 
-/** Spatial vars; everything else in freeSymbols is a slider parameter. */
-const RESERVED_SYMBOLS = new Set(["x", "y", "z"]);
+/**
+ * Spatial vars (not sliders). Cartesian + spherical + cylindrical:
+ *   r, θ, φ  — physics spherical (θ from +z, φ = atan2(y,x))
+ *   ρ        — cylindrical radius √(x²+y²)
+ * LaTeX `\theta`/`\phi`/`\rho` bind as `theta`/`phi`/`rho`.
+ */
+const RESERVED_SYMBOLS = new Set([
+  "x",
+  "y",
+  "z",
+  "r",
+  "theta",
+  "phi",
+  "rho",
+]);
 
 function coerceNumber(v) {
   if (typeof v === "number") return v;
   if (v && typeof v.valueOf === "function") return Number(v.valueOf());
   return Number(v);
+}
+
+/** World (x,y,z) → spherical / cylindrical auxiliaries for the expr scope. */
+export function polarFromCartesian(x, y, z) {
+  const rho = Math.hypot(x, y);
+  const r = Math.hypot(rho, z);
+  const phi = Math.atan2(y, x);
+  // θ ∈ [0, π]; undefined at origin → 0
+  const theta = r > 1e-15 ? Math.acos(Math.min(1, Math.max(-1, z / r))) : 0;
+  return { r, theta, phi, rho };
 }
 
 /**
@@ -80,10 +111,11 @@ export function compileExpr(raw) {
 
   return {
     freeParams,
-    /** Bind current parameter values → f(x,y,z). */
+    /** Bind current parameter values → f(x,y,z); injects r,θ,φ,ρ. */
     bind(params = {}) {
       return (x, y, z) => {
-        const scope = { x, y, z };
+        const { r, theta, phi, rho } = polarFromCartesian(x, y, z);
+        const scope = { x, y, z, r, theta, phi, rho };
         for (const name of freeParams) {
           const v = params[name];
           scope[name] = Number.isFinite(v) ? v : 1;
