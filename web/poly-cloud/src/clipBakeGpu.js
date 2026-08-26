@@ -24,6 +24,10 @@ struct DrawParams {
   m2: vec4f,
   absorb: vec4f,
   emit: vec4f,
+  volBaseB: f32,
+  blendT: f32,
+  _pad0: f32,
+  _pad1: f32,
 }
 
 @group(0) @binding(0) var<uniform> draw: DrawParams;
@@ -85,7 +89,9 @@ fn sampleFieldBase(base: u32, p: vec3f) -> f32 {
 }
 
 fn sampleVolume(p: vec3f) -> f32 {
-  return sampleFieldBase(u32(draw.volBase), p);
+  let a = sampleFieldBase(u32(draw.volBase), p);
+  let b = sampleFieldBase(u32(draw.volBaseB), p);
+  return mix(a, b, draw.blendT);
 }
 
 fn fieldAt(p: vec3f) -> f32 {
@@ -99,9 +105,11 @@ fn fieldGrad(p: vec3f) -> vec3f {
   let half = draw.half;
   let volN = draw.gridM * draw.gridM * draw.gridM;
   let b0 = u32(draw.volBase);
-  let gxi = sampleFieldBase(b0 + volN, p);
-  let geta = sampleFieldBase(b0 + 2u * volN, p);
-  let gzeta = sampleFieldBase(b0 + 3u * volN, p);
+  let b1 = u32(draw.volBaseB);
+  let t = draw.blendT;
+  let gxi = mix(sampleFieldBase(b0 + volN, p), sampleFieldBase(b1 + volN, p), t);
+  let geta = mix(sampleFieldBase(b0 + 2u * volN, p), sampleFieldBase(b1 + 2u * volN, p), t);
+  let gzeta = mix(sampleFieldBase(b0 + 3u * volN, p), sampleFieldBase(b1 + 3u * volN, p), t);
   let invH = select(0.0, 1.0 / half, abs(half) > 1e-12);
   return vec3f(gxi, geta, gzeta) * invH;
 }
@@ -726,11 +734,17 @@ let lastPresentAt = 0;
 let profileMethod = "";
 let profileGridM = 0;
 
-const PIPELINE_EPOCH = 15;
+const PIPELINE_EPOCH = 16;
 let builtEpoch = -1;
 
-/** Classic 256-byte pack; volBase lives in the f32 pad after ro (index 11). */
-function packDrawParamsIso(fbW, fbH, gridM, steps, half, scale, isoLevel, volBase, ro, M, absorb, emit) {
+/**
+ * Classic 256-byte pack; volBase / volBaseB / blendT for GPU keyframe mix.
+ * volBase at f32[11]; volBaseB + blendT after emit at f32[32], f32[33].
+ */
+function packDrawParamsIso(
+  fbW, fbH, gridM, steps, half, scale, isoLevel, volBase, ro, M, absorb, emit,
+  volBaseB = volBase, blendT = 0,
+) {
   const buf = new ArrayBuffer(256);
   const u32 = new Uint32Array(buf);
   const f32 = new Float32Array(buf);
@@ -743,6 +757,8 @@ function packDrawParamsIso(fbW, fbH, gridM, steps, half, scale, isoLevel, volBas
   f32[20] = M[6]; f32[21] = M[7]; f32[22] = M[8];
   f32[24] = absorb[0]; f32[25] = absorb[1]; f32[26] = absorb[2];
   f32[28] = emit[0]; f32[29] = emit[1]; f32[30] = emit[2];
+  f32[32] = volBaseB;
+  f32[33] = blendT;
   return buf;
 }
 
@@ -1093,9 +1109,16 @@ export function uploadSceneVolumes(scene) {
     return [c[0], c[1], c[2]];
   });
 
-  // Each constraint packs dens + gx + gy + gz (Chebyshev-diff IDCT slabs).
+  // Constraints: dens+gx+gy+gz per keyframe (K=1 if static). Dens: one slab each.
   const consStride = 4;
-  const totalFloats = (cons.length * consStride + dens.length) * volN;
+  let consFloats = 0;
+  for (const c of cons) {
+    const K = Array.isArray(c.keyframes) && c.keyframes.length > 0
+      ? c.keyframes.length
+      : 1;
+    consFloats += K * consStride * volN;
+  }
+  const totalFloats = consFloats + dens.length * volN;
   scenePacked = totalFloats > 0 ? new Float32Array(Math.max(volN, totalFloats)) : null;
   let off = 0;
   const putVol = (src) => {
@@ -1107,14 +1130,34 @@ export function uploadSceneVolumes(scene) {
   };
   sceneConstraints = cons.map((c) => {
     const base = off;
-    putVol(c.dens);
-    putVol(c.gx);
-    putVol(c.gy);
-    putVol(c.gz);
+    const frames = Array.isArray(c.keyframes) && c.keyframes.length > 0
+      ? c.keyframes
+      : null;
+    if (frames) {
+      for (const fr of frames) {
+        putVol(fr.dens);
+        putVol(fr.gx);
+        putVol(fr.gy);
+        putVol(fr.gz);
+      }
+    } else {
+      putVol(c.dens);
+      putVol(c.gx);
+      putVol(c.gy);
+      putVol(c.gz);
+    }
+    const blend = c.blend || { i0: 0, i1: 0, t: 0 };
+    const K = frames ? frames.length : 1;
     return {
+      id: c.id || null,
       color: c.color || [0.9, 0.45, 0.35],
       isoLevel: Number.isFinite(c.isoLevel) ? c.isoLevel : 0,
       base,
+      frameStride: consStride * volN,
+      K,
+      i0: blend.i0 | 0,
+      i1: blend.i1 | 0,
+      t: Number.isFinite(blend.t) ? blend.t : 0,
     };
   });
   densBase = off;
@@ -1132,8 +1175,29 @@ export function uploadSceneVolumes(scene) {
 
   profileBakeMs = profileBakeMs * 0.5 + (performance.now() - t0) * 0.5;
   profileGridM = M;
-  profileMethod = "cpu-idct-scene";
+  const anyKf = sceneConstraints.some((c) => c.K > 1);
+  profileMethod = anyKf ? "gpu-kf-scene" : "cpu-idct-scene";
   return { M, bakeMs: performance.now() - t0, epoch: sceneEpoch };
+}
+
+/**
+ * Hot-path anim: update keyframe segment indices + blend t without rewriting volumes.
+ * @param {{ id?: string, i0: number, i1: number, t: number }[]} blends
+ */
+export function setConstraintKeyframeBlends(blends) {
+  if (!blends?.length || !sceneConstraints.length) return;
+  const byId = new Map();
+  for (const b of blends) {
+    if (b?.id != null) byId.set(b.id, b);
+  }
+  for (let i = 0; i < sceneConstraints.length; i++) {
+    const c = sceneConstraints[i];
+    const b = (c.id != null && byId.get(c.id)) || blends[i];
+    if (!b) continue;
+    c.i0 = Math.max(0, Math.min((c.K || 1) - 1, b.i0 | 0));
+    c.i1 = Math.max(0, Math.min((c.K || 1) - 1, b.i1 | 0));
+    c.t = Number.isFinite(b.t) ? b.t : 0;
+  }
 }
 
 export function hasUploadedVolume() {
@@ -1480,12 +1544,17 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps }) {
   }
 
   for (const c of sceneConstraints) {
+    const stride = c.frameStride || 0;
+    const base0 = c.base + (c.i0 | 0) * stride;
+    const base1 = c.base + (c.i1 | 0) * stride;
+    const blendT = Number.isFinite(c.t) ? c.t : 0;
     device.queue.writeBuffer(
       drawParamBuf,
       0,
       packDrawParamsIso(
-        marchW, marchH, Mgrid, steps, h, scale, c.isoLevel, c.base, ro, Mat,
+        marchW, marchH, Mgrid, steps, h, scale, c.isoLevel, base0, ro, Mat,
         darken(c.color, 0.35), c.color,
+        base1, blendT,
       ),
     );
     const bg = device.createBindGroup({

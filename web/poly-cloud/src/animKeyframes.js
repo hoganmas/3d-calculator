@@ -1,6 +1,6 @@
 /**
  * Dens/iso keyframe cache for animated free parameters.
- * Cold: fit K volumes over [min,max]. Hot: lerp adjacent frames (no DCT).
+ * Cold: fit K volumes over [min,max]. Hot: GPU blends adjacent frames (no DCT / no N³ upload).
  */
 
 import { fitChebyshev3D } from "./fit.js";
@@ -105,7 +105,7 @@ export function lerpFloat32(a, b, t, out) {
  * @param {number} value
  * @returns {{ i0: number, i1: number, t: number }}
  */
-function segmentForValue(cache, value) {
+export function segmentForValue(cache, value) {
   const span = Math.max(1e-12, cache.max - cache.min);
   const u = Math.min(1, Math.max(0, (value - cache.min) / span));
   const K = cache.K;
@@ -136,7 +136,7 @@ function cacheMatches(cache, { paramName, min, max, K, deg, half, role, latex, i
 }
 
 /**
- * Bake or reuse keyframes for one layer; return lerped dens (± grads) at `value`.
+ * Bake or reuse keyframes; return GPU blend indices (no dens lerp).
  *
  * @param {{
  *   layerId: string,
@@ -151,17 +151,15 @@ function cacheMatches(cache, { paramName, min, max, K, deg, half, role, latex, i
  *   K?: number,
  * }} opts
  * @returns {{
- *   dens: Float32Array,
- *   gx?: Float32Array,
- *   gy?: Float32Array,
- *   gz?: Float32Array,
+ *   frames: KeyframeFrame[],
+ *   blend: { i0: number, i1: number, t: number },
  *   cheb?: Float32Array,
  *   fitRel?: number,
  *   M: number,
  *   baked: boolean,
  * }}
  */
-export function sampleLayerKeyframes(opts) {
+export function ensureLayerKeyframes(opts) {
   const K = Math.max(2, opts.K ?? DEFAULT_KEYFRAME_K);
   const st = getParam(opts.paramName);
   if (!st) throw new Error(`Unknown param “${opts.paramName}” for keyframes`);
@@ -187,8 +185,6 @@ export function sampleLayerKeyframes(opts) {
   if (!cache || !cacheMatches(cache, meta)) {
     const t0 = performance.now();
     const frames = [];
-    let firstCheb = null;
-    let firstRel = NaN;
     for (let k = 0; k < K; k++) {
       const a = min + ((max - min) * k) / (K - 1);
       const params = { ...opts.baseParams, [opts.paramName]: a };
@@ -202,10 +198,6 @@ export function sampleLayerKeyframes(opts) {
         frame.gx = grad.gx;
         frame.gy = grad.gy;
         frame.gz = grad.gz;
-      }
-      if (!firstCheb) {
-        firstCheb = fit.cheb;
-        firstRel = fit.fitRelL2;
       }
       frames.push(frame);
     }
@@ -228,8 +220,41 @@ export function sampleLayerKeyframes(opts) {
     baked = true;
   }
 
+  const blend = segmentForValue(cache, value);
+  const a = cache.frames[blend.i0];
+  const b = cache.frames[blend.i1];
+  return {
+    frames: cache.frames,
+    blend,
+    cheb: blend.t < 0.5 ? a.cheb : b.cheb,
+    fitRel: blend.t < 0.5 ? a.fitRel : b.fitRel,
+    M: Math.round(Math.cbrt(cache.frames[0].dens.length)),
+    baked,
+  };
+}
+
+/**
+ * Bake or reuse keyframes; CPU-lerp dens (± grads) at current param value.
+ * Used for density layers (Beer path still single-slab) until dens GPU blend lands.
+ *
+ * @param {Parameters<typeof ensureLayerKeyframes>[0]} opts
+ * @returns {{
+ *   dens: Float32Array,
+ *   gx?: Float32Array,
+ *   gy?: Float32Array,
+ *   gz?: Float32Array,
+ *   cheb?: Float32Array,
+ *   fitRel?: number,
+ *   M: number,
+ *   baked: boolean,
+ * }}
+ */
+export function sampleLayerKeyframes(opts) {
+  const ensured = ensureLayerKeyframes(opts);
+  const cache = caches.get(opts.layerId);
+  if (!cache) throw new Error("keyframe cache missing after ensure");
   const tLerp = performance.now();
-  const { i0, i1, t } = segmentForValue(cache, value);
+  const { i0, i1, t } = ensured.blend;
   const a = cache.frames[i0];
   const b = cache.frames[i1];
   const out = cache.scratch;
@@ -247,10 +272,10 @@ export function sampleLayerKeyframes(opts) {
     gx: out.gx,
     gy: out.gy,
     gz: out.gz,
-    cheb: t < 0.5 ? a.cheb : b.cheb,
-    fitRel: t < 0.5 ? a.fitRel : b.fitRel,
-    M: Math.round(Math.cbrt(out.dens.length)),
-    baked,
+    cheb: ensured.cheb,
+    fitRel: ensured.fitRel,
+    M: ensured.M,
+    baked: ensured.baked,
   };
 }
 

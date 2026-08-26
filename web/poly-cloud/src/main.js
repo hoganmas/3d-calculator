@@ -38,6 +38,7 @@ import {
   getKeyframeMetrics,
   keyframeAnimParam,
   noteKeyframeLayer,
+  ensureLayerKeyframes,
   sampleLayerKeyframes,
 } from "./animKeyframes.js";
 import {
@@ -52,6 +53,7 @@ import {
   uploadSceneVolumes,
   uploadSceneColors,
   hasUploadedVolume,
+  setConstraintKeyframeBlends,
   resizeClipGpuCanvas,
   clearClipGpuFrame,
   syncClipGpuWorldGrid,
@@ -793,8 +795,10 @@ function buildMetricsReport() {
     if (Number.isFinite(t.kfBakeMs) && t.kfBakeMs > 0) {
       lines.push(`kf_bake_ms      ${t.kfBakeMs.toFixed(2)}`);
     }
-    if (Number.isFinite(t.kfLerpMs) && t.keyframedCount > 0) {
+    if (Number.isFinite(t.kfLerpMs) && t.kfLerpMs > 0) {
       lines.push(`kf_lerp_ms      ${t.kfLerpMs.toFixed(2)}`);
+    } else if (Number.isFinite(t.keyframedCount) && t.keyframedCount > 0) {
+      lines.push(`kf_blend        gpu`);
     }
     if (Number.isFinite(t.kfK) && t.keyframedCount > 0) {
       lines.push(`kf_K            ${t.kfK}`);
@@ -1048,9 +1052,11 @@ function uploadFit(opts = {}) {
     let M = deg + 1;
     let fittedCount = 0;
     let keyframedCount = 0;
+    let keyframeBaked = false;
+    let densKeyframedCpu = false;
 
     // Anim ticks: only refit layers that depend on dirty params; reuse the rest.
-    // Dirty layers with exactly one animating slider param use dens keyframe lerp.
+    // Dirty layers with exactly one animating slider: GPU keyframe blend (iso) / CPU lerp (dens).
     const dirty = fromAnim ? collectAnimDirtyParams() : null;
     if (fromAnim) beginKeyframePass();
     else clearKeyframeCaches();
@@ -1080,23 +1086,41 @@ function uploadFit(opts = {}) {
         !dirty ||
         L.compiled.freeParams.some((p) => dirty.has(p));
       const prev = canReuseCache && !depends ? prevById.get(L.item.id) : null;
+      const prevHasKf =
+        prev && Array.isArray(prev.keyframes) && prev.keyframes.length > 0;
       const reuseDens =
         prev &&
         prev.kind === (L.role === "constraint" ? "constraint" : "density") &&
-        prev.dens instanceof Float32Array;
+        (prev.dens instanceof Float32Array || prevHasKf);
 
       if (reuseDens) {
-        M = Math.round(Math.cbrt(prev.dens.length)) || M;
+        if (prevHasKf) {
+          M = Math.round(Math.cbrt(prev.keyframes[0].dens.length)) || M;
+        } else {
+          M = Math.round(Math.cbrt(prev.dens.length)) || M;
+        }
         if (L.role === "constraint") {
-          constraints.push({
-            id: L.item.id,
-            dens: prev.dens,
-            gx: prev.gx,
-            gy: prev.gy,
-            gz: prev.gz,
-            color,
-            isoLevel: L.compiled.isoLevel ?? prev.isoLevel ?? 0,
-          });
+          if (prevHasKf) {
+            constraints.push({
+              id: L.item.id,
+              keyframes: prev.keyframes,
+              blend: prev.blend || { i0: 0, i1: 0, t: 0 },
+              color,
+              isoLevel: L.compiled.isoLevel ?? prev.isoLevel ?? 0,
+              cheb: prev.cheb,
+              fitRel: prev.fitRel,
+            });
+          } else {
+            constraints.push({
+              id: L.item.id,
+              dens: prev.dens,
+              gx: prev.gx,
+              gy: prev.gy,
+              gz: prev.gz,
+              color,
+              isoLevel: L.compiled.isoLevel ?? prev.isoLevel ?? 0,
+            });
+          }
         } else {
           densLayers.push({ id: L.item.id, dens: prev.dens, color });
         }
@@ -1107,40 +1131,55 @@ function uploadFit(opts = {}) {
         continue;
       }
 
-      // Keyframe path: one dirty cosine-animated slider → lerp dens (no DCT).
+      // Keyframe path: one dirty cosine-animated slider → GPU blend (iso) / CPU lerp (dens).
       const kfParam =
         fromAnim && depends
           ? keyframeAnimParam(L.compiled.freeParams, dirty)
           : null;
       if (kfParam) {
-        const sample = sampleLayerKeyframes({
-          layerId: L.item.id,
-          latex: L.item.latex,
-          role: L.role === "constraint" ? "constraint" : "density",
-          isoLevel: L.compiled.isoLevel ?? 0,
-          paramName: kfParam,
-          compiled: L.compiled,
-          baseParams,
-          half,
-          deg,
-        });
         noteKeyframeLayer();
         keyframedCount++;
-        M = sample.M || M;
-        // Copy out of cache scratch — async bakeChebVolume must not see a later lerp.
         if (L.role === "constraint") {
+          const sample = ensureLayerKeyframes({
+            layerId: L.item.id,
+            latex: L.item.latex,
+            role: "constraint",
+            isoLevel: L.compiled.isoLevel ?? 0,
+            paramName: kfParam,
+            compiled: L.compiled,
+            baseParams,
+            half,
+            deg,
+          });
+          if (sample.baked) keyframeBaked = true;
+          M = sample.M || M;
           constraints.push({
             id: L.item.id,
-            dens: sample.dens.slice(),
-            gx: sample.gx.slice(),
-            gy: sample.gy.slice(),
-            gz: sample.gz.slice(),
+            keyframes: sample.frames,
+            blend: sample.blend,
             color,
             isoLevel: L.compiled.isoLevel ?? 0,
             cheb: sample.cheb,
             fitRel: sample.fitRel,
           });
+          if (!cheb && sample.cheb) {
+            cheb = sample.cheb;
+            fitRel = sample.fitRel ?? fitRel;
+          }
         } else {
+          const sample = sampleLayerKeyframes({
+            layerId: L.item.id,
+            latex: L.item.latex,
+            role: "density",
+            isoLevel: L.compiled.isoLevel ?? 0,
+            paramName: kfParam,
+            compiled: L.compiled,
+            baseParams,
+            half,
+            deg,
+          });
+          if (sample.baked) keyframeBaked = true;
+          M = sample.M || M;
           densLayers.push({
             id: L.item.id,
             dens: sample.dens.slice(),
@@ -1148,10 +1187,11 @@ function uploadFit(opts = {}) {
             cheb: sample.cheb,
             fitRel: sample.fitRel,
           });
-        }
-        if (!cheb && sample.cheb) {
-          cheb = sample.cheb;
-          fitRel = sample.fitRel ?? fitRel;
+          densKeyframedCpu = true;
+          if (!cheb && sample.cheb) {
+            cheb = sample.cheb;
+            fitRel = sample.fitRel ?? fitRel;
+          }
         }
         continue;
       }
@@ -1229,10 +1269,18 @@ function uploadFit(opts = {}) {
     if (cheb) worldCheb = cheb;
     else if (!fromAnim) worldCheb = null;
     fitDeg = deg;
-    // Keyframed layers still need GPU upload (lerped dens changed).
-    const needUpload = fittedCount > 0 || keyframedCount > 0 || !fromAnim;
+    // GPU iso keyframes: upload only on bake / dens CPU lerp / full fit.
+    // Warm anim ticks only update blend uniforms.
+    const needUpload =
+      fittedCount > 0 || keyframeBaked || densKeyframedCpu || !fromAnim;
     if (needUpload) {
       bakeChebVolume();
+    } else if (keyframedCount > 0) {
+      setConstraintKeyframeBlends(
+        constraints
+          .filter((c) => c.blend && c.id != null)
+          .map((c) => ({ id: c.id, i0: c.blend.i0, i1: c.blend.i1, t: c.blend.t })),
+      );
     }
 
     clipUniforms.uScale.value = densScale;
