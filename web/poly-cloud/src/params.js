@@ -27,10 +27,6 @@ import { compileParamLatex, formatParamLatexValue } from "./fit.js";
 /** @type {Map<string, ParamState>} */
 const params = new Map();
 
-/** Params whose math-field is focused — animation holds value until blur. */
-/** @type {Set<string>} */
-const uiEditing = new Set();
-
 const DEFAULT_MIN = -10;
 const DEFAULT_MAX = 10;
 const DEFAULT_VALUE = 1;
@@ -361,26 +357,16 @@ export function toggleParamAnimate(name, timeSec = performance.now() / 1000) {
 }
 
 /**
- * Soft-pause cosine animation while the param's LaTeX field is focused,
- * so the typed value stays in sync with the slider.
+ * Permanently stop cosine animation for a param (e.g. when editing its LaTeX).
  * @param {string} name
- * @param {boolean} editing
- * @param {number} [timeSec]
+ * @returns {ParamState | null}
  */
-export function setParamUiEditing(name, editing, timeSec = performance.now() / 1000) {
-  if (!name) return;
-  if (editing) {
-    uiEditing.add(name);
-    return;
-  }
-  if (!uiEditing.delete(name)) return;
+export function stopParamAnimation(name) {
   const cur = params.get(name);
-  if (!cur?.animating || cur.driven) return;
-  // Re-anchor phase so motion resumes from the held value (no jump).
-  const u = (cur.value - cur.min) / Math.max(1e-9, cur.max - cur.min);
-  const s = Math.min(1, Math.max(-1, (u - 0.5) / 0.5));
-  const phase = Math.asin(s) / (2 * Math.PI) - timeSec * cur.speed;
-  params.set(name, { ...cur, phase });
+  if (!cur || !cur.animating) return cur;
+  const next = { ...cur, animating: false };
+  params.set(name, next);
+  return next;
 }
 
 /**
@@ -390,7 +376,7 @@ export function setParamUiEditing(name, editing, timeSec = performance.now() / 1
 export function tickParamAnimation(timeSec) {
   let changed = false;
   for (const [name, p] of params) {
-    if (!p.animating || p.driven || uiEditing.has(name)) continue;
+    if (!p.animating || p.driven) continue;
     const u = 0.5 + 0.5 * Math.sin(2 * Math.PI * (timeSec * p.speed + p.phase));
     const value = p.min + (p.max - p.min) * u;
     if (Math.abs(value - p.value) > 1e-12) {
@@ -407,7 +393,6 @@ export function tickParamAnimation(timeSec) {
 
 export function clearParams() {
   params.clear();
-  uiEditing.clear();
 }
 
 export { formatParamLatexValue };

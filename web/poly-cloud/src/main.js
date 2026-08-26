@@ -22,6 +22,8 @@ import {
   hexToRgb01,
   resolveExprRole,
   setExpressionsOnChange,
+  replaceExprWarnings,
+  getExprWarning,
 } from "./expressions.js";
 import { mountExprList } from "./exprListUi.js";
 import { clipGridVertex, clipGridFragment } from "./clipShaders.js";
@@ -107,6 +109,9 @@ function compileAllExprs(opts = {}) {
   /** @type {Map<string, { id: string, item: any }>} */
   const freeHost = new Map();
   const definedParams = new Set();
+  /** @type {[string, string][]} */
+  const warnings = [];
+  replaceExprWarnings([]);
 
   for (const item of items) {
     let classified;
@@ -117,7 +122,11 @@ function compileAllExprs(opts = {}) {
     }
     if (classified.kind === "parameter") {
       const name = classified.paramName;
-      if (!name || definedParams.has(name)) continue;
+      if (!name) continue;
+      if (definedParams.has(name)) {
+        warnings.push([item.id, `Variable “${name}” is already declared`]);
+        continue;
+      }
       definedParams.add(name);
       paramRows.push({ item, name });
       continue;
@@ -137,6 +146,8 @@ function compileAllExprs(opts = {}) {
       fn: compiled.bind(getParamValues()),
     });
   }
+
+  replaceExprWarnings(warnings);
 
   /** @type {Parameters<typeof syncParamsFromDefinitions>[0]} */
   const defs = paramRows.map(({ item, name }) => ({
@@ -229,7 +240,11 @@ function compileAllExprs(opts = {}) {
     label: `${nDens} density · ${nCons} manifold`,
   };
 
-  return { freeParams: [...freeSet].sort(), layers };
+  return {
+    freeParams: [...freeSet].sort(),
+    layers,
+    warnings: warnings.map(([, msg]) => msg),
+  };
 }
 
 /** Last successful classify/compile summary. */
@@ -594,18 +609,32 @@ function setErr(msg) {
   els.err.textContent = msg || "";
 }
 
-/** Highlight expression fields when compile fails. */
+/** Highlight expression fields when compile fails (preserve duplicate-var warnings). */
 function setExprCompileOk(ok) {
   els.exprList?.querySelectorAll(".expr-field").forEach((mf) => {
+    const row = mf.closest?.(".expr-row");
+    const id = row instanceof HTMLElement ? row.dataset.id : null;
+    const warn = id ? getExprWarning(id) : null;
+    if (warn) {
+      mf.classList.add("invalid");
+      if (mf instanceof HTMLElement) mf.title = warn;
+      return;
+    }
     mf.classList.toggle("invalid", !ok);
+    if (mf instanceof HTMLElement && !ok) {
+      /* keep existing title if any */
+    } else if (mf instanceof HTMLElement) {
+      mf.removeAttribute("title");
+    }
   });
 }
 
 function syncExprCompileState() {
   try {
-    compileAllExprs({ rebuildUi: true });
+    const result = compileAllExprs({ rebuildUi: true });
     setExprCompileOk(true);
-    setErr("");
+    const warn = result?.warnings?.length ? result.warnings.join(" · ") : "";
+    setErr(warn);
     return true;
   } catch (e) {
     setExprCompileOk(false);

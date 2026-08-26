@@ -13,6 +13,7 @@ import {
   splitExprAt,
   updateExpr,
   updateExprSilent,
+  getExprWarning,
 } from "./expressions.js";
 import { classifyExpr } from "./fit.js";
 import {
@@ -21,7 +22,7 @@ import {
   setParamValue,
   updateParam,
   toggleParamAnimate,
-  setParamUiEditing,
+  stopParamAnimation,
 } from "./params.js";
 
 function readFieldLatex(mf) {
@@ -380,32 +381,17 @@ export function mountExprList(opts) {
     requestAnimationFrame(() => requestAnimationFrame(apply));
   }
 
-  function isMathFieldFocused(mf) {
-    if (!mf) return false;
-    const active = document.activeElement;
-    if (!active) return false;
-    if (active === mf || (typeof mf.contains === "function" && mf.contains(active))) return true;
-    try {
-      if (mf.shadowRoot && mf.shadowRoot.contains(active)) return true;
-    } catch (_) {
-      /* ignore */
-    }
-    try {
-      const path = typeof active.composedPath === "function" ? active.composedPath() : [];
-      if (path.includes(mf)) return true;
-    } catch (_) {
-      /* ignore */
-    }
-    return false;
-  }
-
-  /** Params needed under a row: explicit `a=…` and/or hosted free symbols. */
+  /** Params needed under a row: explicit `a=…` (owner only) and/or hosted free symbols. */
   function neededParamsForItem(item) {
     /** @type {{ name: string, hosted: boolean }[]} */
     const out = [];
     const classified = String(item.latex || "").trim() ? classifyKind(item.latex) : null;
     if (classified?.kind === "parameter" && classified.paramName) {
-      out.push({ name: classified.paramName, hosted: false });
+      const p = getParam(classified.paramName);
+      // Skip duplicates — only the owning declaration gets slider chrome.
+      if (p && !p.hosted && p.exprId === item.id) {
+        out.push({ name: classified.paramName, hosted: false });
+      }
     }
     for (const n of listParamNames()) {
       const p = getParam(n);
@@ -446,25 +432,24 @@ export function mountExprList(opts) {
 
       const explicit = needed.find((n) => !n.hosted);
       const isParamDef = !!explicit;
-      row.classList.toggle("is-param", needed.length > 0);
-      row.classList.toggle("is-param-def", isParamDef);
+      const warn = getExprWarning(item.id);
+      row.classList.toggle("is-param", needed.length > 0 || !!warn);
+      row.classList.toggle("is-param-def", isParamDef || !!warn);
       row.classList.toggle("is-hidden", !item.enabled);
       row.classList.toggle("selected", item.id === getSelectedId());
-      if (explicit) {
-        row.dataset.param = explicit.name;
-        if (isMathFieldFocused(mf)) setParamUiEditing(explicit.name, true);
-      } else {
-        delete row.dataset.param;
-        for (const n of listParamNames()) {
-          const p = getParam(n);
-          if (p?.exprId === item.id && !p.hosted) setParamUiEditing(n, false);
-        }
-      }
+      row.classList.toggle("has-error", !!warn);
+      if (explicit) row.dataset.param = explicit.name;
+      else delete row.dataset.param;
 
       const swatch = row.querySelector(".expr-color");
       if (swatch instanceof HTMLInputElement) {
-        swatch.disabled = isParamDef;
-        swatch.title = isParamDef ? "Parameters are not drawn" : "Color";
+        swatch.disabled = isParamDef || !!warn;
+        swatch.title = isParamDef || warn ? "Parameters are not drawn" : "Color";
+      }
+      if (mf instanceof HTMLElement) {
+        mf.classList.toggle("invalid", !!warn);
+        if (warn) mf.title = warn;
+        else mf.removeAttribute("title");
       }
 
       for (const { name } of needed) syncParamSlider(row, name);
@@ -480,8 +465,15 @@ export function mountExprList(opts) {
 
     for (const item of items) {
       const classified = String(item.latex || "").trim() ? classifyKind(item.latex) : null;
-      const isParam = classified?.kind === "parameter";
-      const paramName = isParam ? classified.paramName : null;
+      const warn = getExprWarning(item.id);
+      const isParamKind = classified?.kind === "parameter";
+      const paramName = isParamKind ? classified.paramName : null;
+      const ownsParam =
+        !!paramName &&
+        (() => {
+          const p = getParam(paramName);
+          return !!(p && !p.hosted && p.exprId === item.id);
+        })();
       const hostedNames = listParamNames().filter((n) => {
         const p = getParam(n);
         return !!(p && p.hosted && p.exprId === item.id);
@@ -492,17 +484,18 @@ export function mountExprList(opts) {
         "expr-row" +
         (item.id === selected ? " selected" : "") +
         (item.enabled ? "" : " is-hidden") +
-        (isParam || hostedNames.length ? " is-param" : "") +
-        (isParam ? " is-param-def" : "");
+        (ownsParam || hostedNames.length || warn ? " is-param" : "") +
+        (ownsParam || warn ? " is-param-def" : "") +
+        (warn ? " has-error" : "");
       row.dataset.id = item.id;
-      if (paramName) row.dataset.param = paramName;
+      if (ownsParam && paramName) row.dataset.param = paramName;
 
       const swatch = document.createElement("input");
       swatch.type = "color";
       swatch.className = "expr-color";
       swatch.value = item.color.startsWith("#") ? item.color : "#2d70b3";
-      swatch.title = isParam ? "Parameters are not drawn" : "Color";
-      swatch.disabled = !!isParam;
+      swatch.title = ownsParam || warn ? "Parameters are not drawn" : "Color";
+      swatch.disabled = !!(ownsParam || warn);
       swatch.addEventListener("input", () => {
         updateExpr(item.id, { color: swatch.value });
         if (onColorChange) onColorChange();
@@ -528,13 +521,11 @@ export function mountExprList(opts) {
         });
         const classified = classifyKind(readFieldLatex(mf));
         if (classified?.kind === "parameter" && classified.paramName) {
-          setParamUiEditing(classified.paramName, true);
-        }
-      });
-      mf.addEventListener("blur", () => {
-        for (const n of listParamNames()) {
-          const p = getParam(n);
-          if (p?.exprId === item.id && !p.hosted) setParamUiEditing(n, false);
+          const next = stopParamAnimation(classified.paramName);
+          if (next) {
+            updateExprSilent(item.id, { sliderAnimating: false });
+            syncParamSlider(row, classified.paramName);
+          }
         }
       });
       mf.addEventListener("input", () => {
@@ -591,8 +582,12 @@ export function mountExprList(opts) {
 
       fieldRow.appendChild(mf);
       mid.appendChild(fieldRow);
+      if (warn) {
+        mf.classList.add("invalid");
+        mf.title = warn;
+      }
 
-      if (isParam && paramName) {
+      if (ownsParam && paramName) {
         appendParamControls(mid, row, item, paramName, mf, { hosted: false });
       }
       for (const name of hostedNames) {

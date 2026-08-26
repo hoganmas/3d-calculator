@@ -41,8 +41,21 @@ let selectedId = null;
 /** @type {(() => void) | null} */
 let onChange = null;
 
+/** Per-row compile warnings (e.g. duplicate variable). @type {Map<string, string>} */
+let exprWarnings = new Map();
+
 export function setExpressionsOnChange(fn) {
   onChange = fn;
+}
+
+/** @param {[string, string][] | Map<string, string> | Iterable<[string, string]>} entries */
+export function replaceExprWarnings(entries) {
+  exprWarnings = new Map(entries);
+}
+
+/** @param {string} id */
+export function getExprWarning(id) {
+  return exprWarnings.get(id) ?? null;
 }
 
 function emit() {
