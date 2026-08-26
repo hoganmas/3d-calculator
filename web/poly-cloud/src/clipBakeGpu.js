@@ -262,6 +262,8 @@ let canvas = null;
 let canvasFormat = "bgra8unorm";
 /** @type {GPURenderPipeline | null} */
 let marchPipeline = null;
+/** Opaque isosurface (manifolds) — no blending. */
+let isoPipeline = null;
 /** @type {GPUBindGroup | null} */
 let marchBindGroup = null;
 /** @type {GPUBuffer | null} */
@@ -271,6 +273,13 @@ let volumeBuf = null;
 let volumeCapacity = 0;
 let volumeM = 0;
 let uploadedVolumeRef = null;
+
+/** @type {{ dens: Float32Array, color: number[], isoLevel: number }[]} */
+let sceneConstraints = [];
+/** @type {{ dens: Float32Array, color: number[] }[]} */
+let sceneDensities = [];
+let sceneM = 0;
+let sceneEpoch = 0;
 
 let initFailed = false;
 /** @type {Promise<boolean> | null} */
@@ -329,11 +338,18 @@ function packDrawParams(fbW, fbH, gridM, steps, half, scale, isoLevel, shadeMode
 }
 
 export function isClipBakeGpuReady() {
-  return Boolean(device && marchPipeline);
+  return Boolean(device && marchPipeline && isoPipeline);
 }
 
 export function isClipMarchReady() {
-  return Boolean(device && marchPipeline && ctx && volumeBuf && volumeM > 0);
+  return Boolean(
+    device &&
+      marchPipeline &&
+      isoPipeline &&
+      ctx &&
+      (sceneM > 1 || volumeM > 1) &&
+      (sceneDensities.length > 0 || sceneConstraints.length > 0 || volumeM > 0),
+  );
 }
 
 function noteGpuPresent(submitWallAt) {
@@ -445,7 +461,7 @@ function bindMarch() {
  * CPU separable IDCT → upload dens volume. Call on fit / coeff change only.
  * @returns {{ M: number, bakeMs: number, dens: Float32Array }}
  */
-export function uploadChebVolume(cheb, deg) {
+export function uploadChebVolume(cheb, deg, color = [0.55, 0.75, 1.0]) {
   if (!device || !cheb) return null;
   const t0 = performance.now();
   const M = volumeGridM(deg);
@@ -454,6 +470,10 @@ export function uploadChebVolume(cheb, deg) {
   device.queue.writeBuffer(volumeBuf, 0, dens);
   volumeM = M;
   uploadedVolumeRef = cheb;
+  sceneM = M;
+  sceneDensities = [{ dens, color }];
+  sceneConstraints = [];
+  sceneEpoch++;
   profileBakeMs = profileBakeMs * 0.5 + (performance.now() - t0) * 0.5;
   profileGridM = M;
   profileMethod = "cpu-idct-volume";
@@ -462,8 +482,43 @@ export function uploadChebVolume(cheb, deg) {
   return { M, bakeMs: performance.now() - t0, dens };
 }
 
-/** True if current GPU volume matches this cheb buffer reference. */
+/**
+ * Multi-expression scene: constraint manifolds + density clouds.
+ * @param {{
+ *   densLayers?: { dens: Float32Array, color: number[] }[],
+ *   constraints?: { dens: Float32Array, color: number[], isoLevel?: number }[],
+ *   M: number,
+ * }} scene
+ */
+export function uploadSceneVolumes(scene) {
+  if (!device || !scene) return null;
+  const t0 = performance.now();
+  const M = Math.max(2, scene.M | 0);
+  sceneM = M;
+  volumeM = M;
+  sceneDensities = (scene.densLayers || []).map((d) => ({
+    dens: d.dens,
+    color: d.color || [0.55, 0.75, 1],
+  }));
+  sceneConstraints = (scene.constraints || []).map((c) => ({
+    dens: c.dens,
+    color: c.color || [0.9, 0.45, 0.35],
+    isoLevel: Number.isFinite(c.isoLevel) ? c.isoLevel : 0,
+  }));
+  sceneEpoch++;
+  uploadedVolumeRef = null;
+  const need = M * M * M;
+  ensureVolumeBuf(need);
+  profileBakeMs = profileBakeMs * 0.5 + (performance.now() - t0) * 0.5;
+  profileGridM = M;
+  profileMethod = "cpu-idct-scene";
+  marchBindGroup = null;
+  return { M, bakeMs: performance.now() - t0, epoch: sceneEpoch };
+}
+
+/** True if a scene / volume is ready to march. */
 export function hasUploadedVolume(cheb) {
+  if (sceneDensities.length > 0 || sceneConstraints.length > 0) return sceneM > 0;
   return uploadedVolumeRef === cheb && volumeM > 0;
 }
 
@@ -490,6 +545,7 @@ export async function initClipBakeGpu(viewportEl) {
       device.lost.then(() => {
         device = null;
         marchPipeline = null;
+        isoPipeline = null;
         initFailed = true;
       });
 
@@ -530,42 +586,62 @@ export async function initClipBakeGpu(viewportEl) {
 
 export async function ensurePipelinesForDegree(_deg) {
   if (!device) return false;
-  if (marchPipeline) return true;
+  if (marchPipeline && isoPipeline) return true;
 
   const marchMod = device.createShaderModule({ code: makeMarchWgsl() });
   canvasFormat = navigator.gpu.getPreferredCanvasFormat();
+
+  const beerTarget = {
+    format: canvasFormat,
+    blend: {
+      color: {
+        srcFactor: "one",
+        dstFactor: "one-minus-src-alpha",
+        operation: "add",
+      },
+      alpha: {
+        srcFactor: "one",
+        dstFactor: "one-minus-src-alpha",
+        operation: "add",
+      },
+    },
+  };
+  const isoTarget = { format: canvasFormat, writeMask: 0xf };
+
   device.pushErrorScope("validation");
-  const nextMarch = device.createRenderPipeline({
+  const nextBeer = device.createRenderPipeline({
     layout: "auto",
     vertex: { module: marchMod, entryPoint: "vsMain" },
     fragment: {
       module: marchMod,
       entryPoint: "fsMain",
-      targets: [
-        {
-          format: canvasFormat,
-          blend: {
-            color: {
-              srcFactor: "one",
-              dstFactor: "one-minus-src-alpha",
-              operation: "add",
-            },
-            alpha: {
-              srcFactor: "one",
-              dstFactor: "one-minus-src-alpha",
-              operation: "add",
-            },
-          },
-        },
-      ],
+      targets: [beerTarget],
     },
     primitive: { topology: "triangle-list" },
   });
   {
     const err = await device.popErrorScope();
-    if (err) throw new Error(`march pipeline: ${err.message}`);
+    if (err) throw new Error(`beer pipeline: ${err.message}`);
   }
-  marchPipeline = nextMarch;
+
+  device.pushErrorScope("validation");
+  const nextIso = device.createRenderPipeline({
+    layout: "auto",
+    vertex: { module: marchMod, entryPoint: "vsMain" },
+    fragment: {
+      module: marchMod,
+      entryPoint: "fsMain",
+      targets: [isoTarget],
+    },
+    primitive: { topology: "triangle-list" },
+  });
+  {
+    const err = await device.popErrorScope();
+    if (err) throw new Error(`iso pipeline: ${err.message}`);
+  }
+
+  marchPipeline = nextBeer;
+  isoPipeline = nextIso;
   marchBindGroup = null;
   if (volumeBuf) bindMarch();
   return true;
@@ -589,7 +665,7 @@ function scheduleStampReadback() {
 }
 
 /**
- * Per-frame march only (volume must already be uploaded).
+ * Two-pass march: opaque manifolds (constraints), then density Beer layers.
  */
 export function renderClipFrameGpu({
   camera,
@@ -603,59 +679,86 @@ export function renderClipFrameGpu({
   shadeMode = 0,
   isoLevel = 0,
 }) {
-  if (!device || !marchPipeline || !ctx || !volumeBuf || volumeM < 2) return false;
+  if (!device || !marchPipeline || !isoPipeline || !ctx || !volumeBuf) return false;
+
+  const dens = sceneDensities.length
+    ? sceneDensities
+    : volumeM > 1 && shadeMode !== 1 && shadeMode !== "iso"
+      ? [{ dens: null, color: emit, _useBuf: true }]
+      : [];
+  const cons = sceneConstraints.length
+    ? sceneConstraints
+    : volumeM > 1 && (shadeMode === 1 || shadeMode === "iso")
+      ? [{ dens: null, color: emit, isoLevel: Number(isoLevel) || 0, _useBuf: true }]
+      : [];
+
+  if (dens.length < 1 && cons.length < 1) return false;
 
   const o = camera.position;
   const { sx, sy } = perspectiveDirScale(camera);
-  const M = ndcToDirMatrix(camera, sx, sy);
+  const Mat = ndcToDirMatrix(camera, sx, sy);
   const ro = [o.x, o.y, o.z];
   const h = half ?? 2;
-  const mode = shadeMode === 1 || shadeMode === "iso" ? 1 : 0;
-
-  if (!marchBindGroup) bindMarch();
-  if (!marchBindGroup) return false;
+  const Mgrid = sceneM || volumeM;
 
   resizeClipGpuCanvas(fbW, fbH);
   const marchW = canvas?.width ?? fbW;
   const marchH = canvas?.height ?? fbH;
   profileMarchFbW = marchW;
   profileMarchFbH = marchH;
-  profileMethod = mode === 1 ? "gpu-idct-iso" : "gpu-idct-volume";
-  profileGridM = volumeM;
+  profileMethod = "gpu-two-pass";
+  profileGridM = Mgrid;
 
-  device.queue.writeBuffer(
-    drawParamBuf,
-    0,
-    packDrawParams(
-      marchW,
-      marchH,
-      volumeM,
-      steps,
-      h,
-      scale,
-      Number(isoLevel) || 0,
-      mode,
-      ro,
-      M,
-      absorb,
-      emit,
-    ),
-  );
-
-  const enc = device.createCommandEncoder();
   const useStamps = timestampsSupported && stampQuerySet;
-  {
+  let firstPass = true;
+
+  function darken(c, t) {
+    return [c[0] * t, c[1] * t, c[2] * t];
+  }
+
+  function drawLayer(pipeline, layerDens, mode, iso, col) {
+    // writeBuffer must not race an open encoder that uses volumeBuf
+    if (layerDens) {
+      ensureVolumeBuf(layerDens.length);
+      device.queue.writeBuffer(volumeBuf, 0, layerDens);
+    }
+    device.queue.writeBuffer(
+      drawParamBuf,
+      0,
+      packDrawParams(
+        marchW,
+        marchH,
+        Mgrid,
+        steps,
+        h,
+        scale,
+        iso,
+        mode,
+        ro,
+        Mat,
+        darken(col, 0.35),
+        col,
+      ),
+    );
+    const bg = device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: drawParamBuf } },
+        { binding: 1, resource: { buffer: volumeBuf } },
+      ],
+    });
+    const enc = device.createCommandEncoder();
     const view = ctx.getCurrentTexture().createView();
     const pass = enc.beginRenderPass({
       colorAttachments: [
         {
           view,
           clearValue: { r: 0, g: 0, b: 0, a: 0 },
-          loadOp: "clear",
+          loadOp: firstPass ? "clear" : "load",
           storeOp: "store",
         },
       ],
-      ...(useStamps
+      ...(useStamps && firstPass
         ? {
             timestampWrites: {
               querySet: stampQuerySet,
@@ -665,19 +768,29 @@ export function renderClipFrameGpu({
           }
         : {}),
     });
-    pass.setPipeline(marchPipeline);
-    pass.setBindGroup(0, marchBindGroup);
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bg);
     pass.draw(3);
     pass.end();
+    if (useStamps && firstPass && stampResolveBuf && stampReadBuf && !stampReadPending) {
+      enc.resolveQuerySet(stampQuerySet, 0, 2, stampResolveBuf, 0);
+      enc.copyBufferToBuffer(stampResolveBuf, 0, stampReadBuf, 0, 16);
+    }
+    device.queue.submit([enc.finish()]);
+    firstPass = false;
   }
 
-  if (useStamps && stampResolveBuf && stampReadBuf && !stampReadPending) {
-    enc.resolveQuerySet(stampQuerySet, 0, 2, stampResolveBuf, 0);
-    enc.copyBufferToBuffer(stampResolveBuf, 0, stampReadBuf, 0, 16);
+  for (const c of cons) {
+    drawLayer(isoPipeline, c._useBuf ? null : c.dens, 1, c.isoLevel || 0, c.color);
+  }
+  for (const d of dens) {
+    drawLayer(marchPipeline, d._useBuf ? null : d.dens, 0, 0, d.color);
+  }
+  if (firstPass) {
+    drawLayer(marchPipeline, null, 0, 0, emit);
   }
 
   const submitWallAt = performance.now();
-  device.queue.submit([enc.finish()]);
   void device.queue.onSubmittedWorkDone().then(() => {
     noteGpuPresent(submitWallAt);
     if (useStamps) scheduleStampReadback();

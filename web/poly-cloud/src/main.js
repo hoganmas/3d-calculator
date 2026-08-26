@@ -15,6 +15,17 @@ import {
   tickParamAnimation,
   anyParamAnimating,
 } from "./params.js";
+import {
+  listExpressions,
+  setExpressions,
+  insertExprAfter,
+  getSelectedId,
+  updateExpr,
+  hexToRgb01,
+  resolveExprRole,
+  setExpressionsOnChange,
+} from "./expressions.js";
+import { mountExprList } from "./exprListUi.js";
 import { volumeVertex, volumeFragment } from "./shaders.js";
 import { clipGridVertex, clipGridFragment } from "./clipShaders.js";
 import { ndcToDirMatrix, perspectiveDirScale, MAX_DEG } from "./clipGrid.js";
@@ -28,14 +39,15 @@ import {
   ensurePipelinesForDegree,
   getClipGpuProfile,
   resetClipGpuProfile,
-  uploadChebVolume,
+  uploadSceneVolumes,
   hasUploadedVolume,
   MAX_COEFFS,
 } from "./clipBakeGpu.js";
 
 const els = {
   preset: document.getElementById("preset"),
-  expr: document.getElementById("expr"),
+  exprList: document.getElementById("exprList"),
+  addExpr: document.getElementById("addExpr"),
   deg: document.getElementById("deg"),
   scale: document.getElementById("scale"),
   steps: document.getElementById("steps"),
@@ -45,7 +57,6 @@ const els = {
   babbageTile: document.getElementById("babbageTile"),
   densFill: document.getElementById("densFill"),
   mode: document.getElementById("mode"),
-  exprKind: document.getElementById("exprKind"),
   reset: document.getElementById("reset"),
   err: document.getElementById("err"),
   fitErr: document.getElementById("fitErr"),
@@ -70,30 +81,21 @@ for (const [key, p] of Object.entries(PRESETS)) {
   els.preset.appendChild(opt);
 }
 
-function getExprLatex() {
-  const mf = els.expr;
-  if (!mf) return "";
-  if (typeof mf.getValue === "function") return String(mf.getValue("latex") || "").trim();
-  return String(mf.value || "").trim();
-}
-
-function setExprLatex(latex) {
-  const mf = els.expr;
-  if (!mf) return;
-  const v = latex ?? "";
-  if (typeof mf.setValue === "function") mf.setValue(v, { silenceNotifications: true });
-  else mf.value = v;
-}
-
 function applyPreset(key) {
   const p = PRESETS[key] ?? PRESETS.blob;
   els.preset.value = key;
-  setExprLatex(p.latex);
   pendingParamSeed = p.params ?? {};
+  const id = getSelectedId();
+  if (id) updateExpr(id, { latex: p.latex });
+  else setExpressions([{ latex: p.latex, color: "#2d70b3" }]);
+  exprListApi?.render();
 }
 
 /** Preset param defaults applied on next successful compile/sync. */
 let pendingParamSeed = {};
+
+/** @type {{ render: () => void } | null} */
+let exprListApi = null;
 
 function fmtParamNum(v) {
   if (!Number.isFinite(v)) return "—";
@@ -228,49 +230,59 @@ function syncAllParamRows() {
 }
 
 /**
- * Compile expr, sync param list, return bound f(x,y,z).
+ * Compile all expressions, sync shared params, return bound fields.
  * @param {{ rebuildUi?: boolean }} [opts]
- * @returns {{ freeParams: string[], fn: (x:number,y:number,z:number)=>number, shade: string, kind: string, isoLevel: number }}
  */
-function compileBoundExpr(opts = {}) {
+function compileAllExprs(opts = {}) {
   const rebuildUi = opts.rebuildUi !== false;
-  const compiled = compileExpr(getExprLatex());
-  lastExprMeta = {
-    kind: compiled.kind,
-    shade: compiled.shade,
-    isoLevel: compiled.isoLevel,
-    label: compiled.classifyLabel,
-  };
-  if (els.exprKind) {
-    els.exprKind.textContent =
-      compiled.kind === "constraint"
-        ? "Constraint A=B → isosurface (zero set of A−B)."
-        : compiled.kind === "definition"
-          ? "Definition f(…)=E → volume from E."
-          : "Expression → volume (Beer). Spatial x,y,z / r,θ,φ,ρ; extra letters → sliders.";
+  const items = listExpressions().filter((e) => e.enabled && String(e.latex || "").trim());
+  /** @type {{ item: any, compiled: any, fn: Function, role: string }[]} */
+  const layers = [];
+  const freeSet = new Set();
+
+  for (const item of items) {
+    const compiled = compileExpr(item.latex);
+    for (const p of compiled.freeParams) freeSet.add(p);
+    const role = resolveExprRole(item.role, compiled.kind);
+    layers.push({
+      item,
+      compiled,
+      role,
+      fn: compiled.bind(getParamValues()),
+    });
   }
+
+  const freeParams = [...freeSet].sort();
   const before = listParamNames().join("\0");
-  syncParamsFromSymbols(compiled.freeParams, pendingParamSeed);
+  syncParamsFromSymbols(freeParams, pendingParamSeed);
   let seeded = false;
   if (Object.keys(pendingParamSeed).length) {
     applyParamSeed(pendingParamSeed);
     pendingParamSeed = {};
     seeded = true;
   }
+  // Re-bind after param sync (values may have changed).
+  const params = getParamValues();
+  for (const L of layers) L.fn = L.compiled.bind(params);
+
   const after = listParamNames().join("\0");
   if (rebuildUi && (before !== after || seeded || (after && !els.paramsList?.children.length))) {
     renderParamsUi();
   }
-  return {
-    freeParams: compiled.freeParams,
-    fn: compiled.bind(getParamValues()),
-    shade: compiled.shade,
-    kind: compiled.kind,
-    isoLevel: compiled.isoLevel,
+
+  const nCons = layers.filter((L) => L.role === "constraint").length;
+  const nDens = layers.filter((L) => L.role === "density").length;
+  lastExprMeta = {
+    kind: nCons && nDens ? "mixed" : nCons ? "constraint" : "bare",
+    shade: nCons && !nDens ? "iso" : "volume",
+    isoLevel: 0,
+    label: `${nDens} density · ${nCons} manifold`,
   };
+
+  return { freeParams, layers };
 }
 
-/** Last successful classify/compile of the expression field. */
+/** Last successful classify/compile summary. */
 let lastExprMeta = {
   kind: "bare",
   shade: "volume",
@@ -325,8 +337,31 @@ function marchDownscale() {
 }
 
 applyPreset("blob");
+if (!listExpressions().length) {
+  setExpressions([{ latex: PRESETS.blob.latex, color: "#2d70b3" }]);
+}
 initMarchSliderUi();
 syncMarchSlider();
+
+exprListApi = mountExprList({
+  root: els.exprList,
+  onExprChange: () => {
+    syncExprCompileState();
+    scheduleUploadFit();
+  },
+  onStructuralChange: () => {
+    scheduleUploadFit(0);
+  },
+});
+exprListApi.render();
+els.addExpr?.addEventListener("click", () => {
+  insertExprAfter(getSelectedId(), { latex: "" });
+  exprListApi?.render();
+  scheduleUploadFit(0);
+});
+setExpressionsOnChange(() => {
+  /* list mutations already call render from UI helpers */
+});
 
 const renderer = new THREE.WebGLRenderer({
   antialias: true,
@@ -644,25 +679,23 @@ function setErr(msg) {
   els.err.textContent = msg || "";
 }
 
-/** Highlight the expression field when compileExpr fails. */
+/** Highlight expression fields when compile fails. */
 function setExprCompileOk(ok) {
-  if (!els.expr) return;
-  els.expr.classList.toggle("invalid", !ok);
+  els.exprList?.querySelectorAll(".expr-field").forEach((mf) => {
+    mf.classList.toggle("invalid", !ok);
+  });
 }
 
 function syncExprCompileState() {
   try {
-    compileBoundExpr({ rebuildUi: true });
-    // Ensure rows exist even when the symbol set is unchanged (first paint).
+    compileAllExprs({ rebuildUi: true });
     if (listParamNames().length && !els.paramsList?.children.length) renderParamsUi();
     setExprCompileOk(true);
     setErr("");
     return true;
   } catch (e) {
     setExprCompileOk(false);
-    const raw = getExprLatex();
-    if (raw) setErr(e instanceof Error ? e.message : String(e));
-    else setErr("");
+    setErr(e instanceof Error ? e.message : String(e));
     return false;
   }
 }
@@ -673,8 +706,7 @@ function isClipMode() {
 
 function modeLabel() {
   if (els.mode.value === "clipgrid") {
-    const shade = lastExprMeta.shade === "iso" ? "iso" : "Beer";
-    return `clip-grid · ${shade}`;
+    return `clip-grid · ${lastExprMeta.label || "scene"}`;
   }
   return "raymarch";
 }
@@ -864,29 +896,22 @@ function uploadWorldCoeffs() {
   if (els.basisMs && !isClipMode()) els.basisMs.textContent = "world · once";
 }
 
-/** Fit-time: Chebyshev IDCT → dens volume (GPU buffer and/or WebGL texture). */
+/** @type {{ densLayers: any[], constraints: any[], M: number, dens: Float32Array | null } | null} */
+let lastSceneBake = null;
+
+/** Fit-time: IDCT each expression → GPU scene (manifolds + densities). */
 function bakeChebVolume() {
-  if (!worldCheb) return null;
-  const t0 = performance.now();
-  let dens = null;
-  let M = fitDeg + 1;
+  if (!lastSceneBake) return null;
+  const { densLayers, constraints, M, dens } = lastSceneBake;
   if (isClipBakeGpuReady()) {
-    const up = uploadChebVolume(worldCheb, fitDeg);
-    if (up) {
-      dens = up.dens;
-      M = up.M;
-      bakeMsSmooth = bakeMsSmooth * 0.5 + up.bakeMs * 0.5;
-    }
-  }
-  if (!dens) {
-    const out = idctCheb3D(worldCheb, fitDeg, M);
-    dens = out.dens;
-    M = out.M;
-    bakeMsSmooth = bakeMsSmooth * 0.5 + (performance.now() - t0) * 0.5;
+    const up = uploadSceneVolumes({ densLayers, constraints, M });
+    if (up) bakeMsSmooth = bakeMsSmooth * 0.5 + up.bakeMs * 0.5;
   }
   lastVolumeM = M;
-  applyVolumeTexture(dens, M);
-  if (els.basisMs) els.basisMs.textContent = `idct volume · ${M}³`;
+  if (dens) applyVolumeTexture(dens, M);
+  if (els.basisMs) {
+    els.basisMs.textContent = `idct · ${densLayers.length} dens · ${constraints.length} iso · ${M}³`;
+  }
   return { dens, M };
 }
 
@@ -934,13 +959,11 @@ function syncClipPresentation() {
 /** Per-frame GPU volume march (IDCT bake is fit-time only). */
 function drawClipGpuFrame() {
   densSubmittedThisFrame = false;
-  if (!worldCheb || !useGpuClipPath()) return false;
-  if (!hasUploadedVolume(worldCheb)) bakeChebVolume();
+  if (!lastSceneBake || !useGpuClipPath()) return false;
+  if (!hasUploadedVolume()) bakeChebVolume();
 
   const { mw, mh } = marchFramebufferSize();
   camera.updateMatrixWorld(true);
-  const absorb = clipUniforms.uAbsorbColor.value;
-  const emit = clipUniforms.uEmitColor.value;
   const t0 = performance.now();
   const ok = renderClipFrameGpu({
     camera,
@@ -949,10 +972,6 @@ function drawClipGpuFrame() {
     fbH: mh,
     scale: clipUniforms.uScale.value,
     steps: clipUniforms.uSteps.value | 0,
-    absorb: [absorb.r, absorb.g, absorb.b],
-    emit: [emit.r, emit.g, emit.b],
-    shadeMode: readShadeMode(),
-    isoLevel: readIsoLevel(),
   });
   const submitMs = performance.now() - t0;
   if (ok) {
@@ -1025,56 +1044,86 @@ function uploadFit(opts = {}) {
     const half = 0.5 * boxSize;
 
     const tUpload = performance.now();
-    const { fn } = compileBoundExpr({ rebuildUi: false });
+    const { layers } = compileAllExprs({ rebuildUi: false });
+    if (!layers.length) throw new Error("Add at least one non-empty expression");
     setExprCompileOk(true);
-    // Skip L2 probe while animating — it's extra CPU on the hot path.
-    const fit = fitChebyshev3D(fn, half, deg, { skipL2: fromAnim });
+
+    const densLayers = [];
+    const constraints = [];
+    let mono = null;
+    let cheb = null;
+    let fitRel = NaN;
+    let timingAcc = { sampleMs: 0, chebMs: 0, monoMs: 0, l2Ms: 0, totalMs: 0 };
+    let M = deg + 1;
+
+    for (const L of layers) {
+      const fit = fitChebyshev3D(L.fn, half, deg, { skipL2: fromAnim || layers.length > 1 });
+      const idct = idctCheb3D(fit.cheb, fit.deg, fit.deg + 1);
+      M = idct.M;
+      const color = hexToRgb01(L.item.color);
+      if (L.role === "constraint") {
+        constraints.push({ dens: idct.dens, color, isoLevel: L.compiled.isoLevel });
+      } else {
+        densLayers.push({ dens: idct.dens, color });
+      }
+      if (!cheb) {
+        cheb = fit.cheb;
+        mono = fit.mono;
+        fitRel = fit.fitRelL2;
+      }
+      for (const k of Object.keys(timingAcc)) {
+        timingAcc[k] += fit.timing?.[k] || 0;
+      }
+    }
+
+    // Preview texture: sum of density layers (manifolds omitted).
+    let densSum = null;
+    if (densLayers.length) {
+      densSum = new Float32Array(M * M * M);
+      for (const d of densLayers) {
+        for (let i = 0; i < densSum.length; i++) densSum[i] += d.dens[i] || 0;
+      }
+    } else if (constraints.length) {
+      densSum = constraints[0].dens;
+    }
+
+    lastSceneBake = { densLayers, constraints, M, dens: densSum };
     const uploadMs = performance.now() - tUpload;
-    lastFitTiming = {
-      ...(fit.timing || {
-        sampleMs: 0,
-        chebMs: 0,
-        monoMs: 0,
-        l2Ms: 0,
-        totalMs: 0,
-      }),
-      uploadMs,
-    };
+    lastFitTiming = { ...timingAcc, uploadMs };
     if (els.fitMs) {
       const t = lastFitTiming;
       els.fitMs.textContent = `${t.totalMs.toFixed(0)}ms`;
       els.fitMs.title = [
+        `${layers.length} expr`,
         `sample ${t.sampleMs.toFixed(1)}ms`,
         `cheb ${t.chebMs.toFixed(1)}ms`,
         `mono ${t.monoMs.toFixed(1)}ms`,
-        `L2 ${t.l2Ms.toFixed(1)}ms`,
         `upload+fit wall ${t.uploadMs.toFixed(1)}ms`,
       ].join(" · ");
       els.fitMs.className =
         "v " + (t.totalMs > 40 ? "warn" : t.totalMs > 16 ? "" : "ok");
     }
 
-    worldMono = fit.mono;
-    worldCheb = fit.cheb;
-    fitDeg = fit.deg;
+    worldMono = mono;
+    worldCheb = cheb;
+    fitDeg = deg;
     uploadWorldCoeffs();
     if (isClipMode()) bakeChebVolume();
 
-    setShaderDegree(fit.deg);
+    setShaderDegree(deg);
     uniforms.uScale.value = densScale;
     uniforms.uSteps.value = steps;
     clipUniforms.uScale.value = densScale;
     clipUniforms.uSteps.value = steps;
     setBoxSize(boxSize);
 
-    const n = (fit.deg + 1) ** 3;
-    if (Number.isFinite(fit.fitRelL2)) {
-      els.fitErr.textContent = fmtRel(fit.fitRelL2);
-      els.fitErr.className = "v " + (fit.fitRelL2 < 0.08 ? "ok" : "warn");
+    const n = (deg + 1) ** 3 * layers.length;
+    if (Number.isFinite(fitRel)) {
+      els.fitErr.textContent = fmtRel(fitRel);
+      els.fitErr.className = "v " + (fitRel < 0.08 ? "ok" : "warn");
     }
     els.nCoeff.textContent = String(n);
 
-    // Mode sync + resize; GPU path draws every frame, CPU rebakes when dirty.
     const clip = isClipMode();
     volumeMesh.visible = !clip;
     clipUniforms.uScale.value = densScale;
@@ -1082,9 +1131,8 @@ function uploadFit(opts = {}) {
     els.modeLabel.textContent = modeLabel();
     if (!fromAnim) resize();
     clipDirty = true;
-    // Param animation refits often — stay on move atlas, skip settle bump.
     if (!fromAnim) settleHiRes = true;
-    void prepareClipGpuForDegree(fit.deg).then(() => {
+    void prepareClipGpuForDegree(deg).then(() => {
       syncClipPresentation();
       if (clip && !useGpuClipPath()) {
         clipDirty = true;
@@ -1093,7 +1141,7 @@ function uploadFit(opts = {}) {
     });
   } catch (e) {
     try {
-      compileBoundExpr();
+      compileAllExprs();
       setExprCompileOk(true);
     } catch {
       setExprCompileOk(false);
@@ -1135,10 +1183,6 @@ els.preset.addEventListener("change", () => {
   if (fitTimer) clearTimeout(fitTimer);
   uploadFit();
   renderParamsUi();
-});
-els.expr.addEventListener("input", () => {
-  syncExprCompileState();
-  scheduleUploadFit();
 });
 els.deg.addEventListener("input", () => scheduleUploadFit(200));
 els.deg.addEventListener("change", () => scheduleUploadFit(0));
