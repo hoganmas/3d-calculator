@@ -154,6 +154,89 @@
       .stat .v.warn {
         color: var(--warn);
       }
+      .params-block {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .params-block[hidden] {
+        display: none;
+      }
+      .params-head {
+        font-size: 11px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .params-list {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .param-row {
+        border: 1px solid var(--stroke);
+        border-radius: 4px;
+        padding: 8px 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        background: var(--bg);
+      }
+      .param-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .param-name {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--accent);
+        min-width: 1.2em;
+      }
+      .param-value {
+        flex: 1;
+        font-variant-numeric: tabular-nums;
+        font-size: 13px;
+      }
+      .param-value input {
+        width: 100%;
+        padding: 4px 8px;
+      }
+      .param-play {
+        flex: 0 0 auto;
+        width: 32px;
+        height: 28px;
+        padding: 0;
+        font-size: 12px;
+        line-height: 1;
+        background: transparent;
+        color: var(--text);
+        border-color: var(--stroke);
+        font-weight: 500;
+      }
+      .param-play.on {
+        background: rgba(110, 168, 254, 0.18);
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .param-slider {
+        width: 100%;
+        padding: 0;
+        accent-color: var(--accent);
+      }
+      .param-bounds {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 6px;
+      }
+      .param-bounds label {
+        gap: 2px;
+      }
+      .param-bounds input {
+        padding: 4px 6px;
+        font-size: 12px;
+      }
       .metrics-block {
         display: flex;
         flex-direction: column;
@@ -293,7 +376,7 @@
         </label>
 
         <label>
-          f(x,y,z) density
+          f(x,y,z,…) density
           <math-field
             id="expr"
             math-virtual-keyboard-policy="sandboxed"
@@ -301,6 +384,16 @@
             smart-superscript
           ></math-field>
         </label>
+        <p style="font-size: 11px; color: var(--muted); margin-top: -6px">
+          Extra letters (a, k, d, …) become sliders — drag or hit ▶ to animate.
+        </p>
+
+        <div id="paramsBlock" class="params-block" hidden>
+          <div class="params-head">
+            <span>Parameters</span>
+          </div>
+          <div id="paramsList" class="params-list"></div>
+        </div>
 
         <div class="row3">
           <label>poly deg<input id="deg" type="number" min="2" max="16" step="1" /></label>

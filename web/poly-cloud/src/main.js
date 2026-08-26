@@ -3,6 +3,18 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import "mathlive";
 import "mathlive/static.css";
 import { compileExpr, fitChebyshev3D, PRESETS } from "./fit.js";
+import {
+  syncParamsFromSymbols,
+  applyParamSeed,
+  getParamValues,
+  listParamNames,
+  getParam,
+  updateParam,
+  setParamValue,
+  toggleParamAnimate,
+  tickParamAnimation,
+  anyParamAnimating,
+} from "./params.js";
 import { volumeVertex, volumeFragment } from "./shaders.js";
 import { clipGridVertex, clipGridFragment } from "./clipShaders.js";
 import { bakeClipGridFibers, MAX_DEG } from "./clipGrid.js";
@@ -43,6 +55,8 @@ const els = {
   hud: document.getElementById("hud"),
   metricsDump: document.getElementById("metricsDump"),
   copyMetrics: document.getElementById("copyMetrics"),
+  paramsBlock: document.getElementById("paramsBlock"),
+  paramsList: document.getElementById("paramsList"),
 };
 
 for (const [key, p] of Object.entries(PRESETS)) {
@@ -76,6 +90,168 @@ function applyPreset(key) {
   els.half.value = String(p.half);
   els.steps.value = "32";
   if (els.marchDownscale) els.marchDownscale.value = "2";
+  pendingParamSeed = p.params ?? {};
+}
+
+/** Preset param defaults applied on next successful compile/sync. */
+let pendingParamSeed = {};
+
+function fmtParamNum(v) {
+  if (!Number.isFinite(v)) return "—";
+  const a = Math.abs(v);
+  if (a !== 0 && (a >= 1000 || a < 0.01)) return v.toPrecision(3);
+  return String(Math.round(v * 1000) / 1000);
+}
+
+/** Rebuild parameter slider rows from current param map. */
+function renderParamsUi() {
+  const names = listParamNames();
+  if (!els.paramsBlock || !els.paramsList) return;
+  if (names.length === 0) {
+    els.paramsBlock.hidden = true;
+    els.paramsList.replaceChildren();
+    return;
+  }
+  els.paramsBlock.hidden = false;
+  els.paramsList.replaceChildren();
+  for (const name of names) {
+    const p = getParam(name);
+    if (!p) continue;
+    const row = document.createElement("div");
+    row.className = "param-row";
+    row.dataset.param = name;
+
+    const top = document.createElement("div");
+    top.className = "param-top";
+
+    const nameEl = document.createElement("span");
+    nameEl.className = "param-name";
+    nameEl.textContent = name;
+
+    const valWrap = document.createElement("div");
+    valWrap.className = "param-value";
+    const valInput = document.createElement("input");
+    valInput.type = "number";
+    valInput.step = String(p.step);
+    valInput.value = String(p.value);
+    valInput.title = "Value";
+    valInput.addEventListener("input", () => {
+      setParamValue(name, Number(valInput.value), { stopAnim: true });
+      syncParamRow(name);
+      scheduleUploadFit(120);
+    });
+    valWrap.appendChild(valInput);
+
+    const play = document.createElement("button");
+    play.type = "button";
+    play.className = "param-play" + (p.animating ? " on" : "");
+    play.textContent = p.animating ? "⏸" : "▶";
+    play.title = p.animating ? "Pause animation" : "Animate between min and max";
+    play.addEventListener("click", () => {
+      toggleParamAnimate(name);
+      syncParamRow(name);
+    });
+
+    top.append(nameEl, valWrap, play);
+
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.className = "param-slider";
+    slider.min = String(p.min);
+    slider.max = String(p.max);
+    slider.step = String(p.step);
+    slider.value = String(p.value);
+    slider.addEventListener("input", () => {
+      setParamValue(name, Number(slider.value), { stopAnim: true });
+      syncParamRow(name);
+      scheduleUploadFit(80);
+    });
+
+    const bounds = document.createElement("div");
+    bounds.className = "param-bounds";
+
+    const mkBound = (key, label, val) => {
+      const lab = document.createElement("label");
+      lab.textContent = label;
+      const inp = document.createElement("input");
+      inp.type = "number";
+      inp.step = "any";
+      inp.value = String(val);
+      inp.dataset.bound = key;
+      inp.addEventListener("change", () => {
+        const patch = { [key]: Number(inp.value) };
+        updateParam(name, patch);
+        renderParamsUi();
+        scheduleUploadFit(80);
+      });
+      lab.appendChild(inp);
+      return lab;
+    };
+
+    bounds.append(
+      mkBound("min", "min", p.min),
+      mkBound("max", "max", p.max),
+      mkBound("speed", "Hz", p.speed),
+    );
+
+    row.append(top, slider, bounds);
+    els.paramsList.appendChild(row);
+  }
+}
+
+/** Update one row’s live value/slider/play without full rebuild. */
+function syncParamRow(name) {
+  const p = getParam(name);
+  const row = els.paramsList?.querySelector(`[data-param="${CSS.escape(name)}"]`);
+  if (!p || !row) return;
+  const slider = row.querySelector(".param-slider");
+  const valInput = row.querySelector(".param-value input");
+  const play = row.querySelector(".param-play");
+  if (slider instanceof HTMLInputElement) {
+    slider.min = String(p.min);
+    slider.max = String(p.max);
+    slider.step = String(p.step);
+    if (document.activeElement !== slider) slider.value = String(p.value);
+  }
+  if (valInput instanceof HTMLInputElement && document.activeElement !== valInput) {
+    valInput.step = String(p.step);
+    valInput.value = fmtParamNum(p.value);
+  }
+  if (play instanceof HTMLButtonElement) {
+    play.classList.toggle("on", p.animating);
+    play.textContent = p.animating ? "⏸" : "▶";
+    play.title = p.animating ? "Pause animation" : "Animate between min and max";
+  }
+}
+
+function syncAllParamRows() {
+  for (const name of listParamNames()) syncParamRow(name);
+}
+
+/**
+ * Compile expr, sync param list, return bound f(x,y,z).
+ * @param {{ rebuildUi?: boolean }} [opts]
+ * @returns {{ freeParams: string[], fn: (x:number,y:number,z:number)=>number }}
+ */
+function compileBoundExpr(opts = {}) {
+  const rebuildUi = opts.rebuildUi !== false;
+  const compiled = compileExpr(getExprLatex());
+  const before = listParamNames().join("\0");
+  syncParamsFromSymbols(compiled.freeParams, pendingParamSeed);
+  let seeded = false;
+  if (Object.keys(pendingParamSeed).length) {
+    applyParamSeed(pendingParamSeed);
+    pendingParamSeed = {};
+    seeded = true;
+  }
+  const after = listParamNames().join("\0");
+  if (rebuildUi && (before !== after || seeded || (after && !els.paramsList?.children.length))) {
+    renderParamsUi();
+  }
+  return {
+    freeParams: compiled.freeParams,
+    fn: compiled.bind(getParamValues()),
+  };
 }
 
 const MARCH_DOWNSCALE_MIN = 1;
@@ -492,7 +668,9 @@ function setExprCompileOk(ok) {
 
 function syncExprCompileState() {
   try {
-    compileExpr(getExprLatex());
+    compileBoundExpr({ rebuildUi: true });
+    // Ensure rows exist even when the symbol set is unchanged (first paint).
+    if (listParamNames().length && !els.paramsList?.children.length) renderParamsUi();
     setExprCompileOk(true);
     setErr("");
     return true;
@@ -616,6 +794,13 @@ function buildMetricsReport() {
   }
   lines.push(`fit_rel_L2      ${els.fitErr?.textContent ?? "—"}`);
   lines.push(`n_coeffs       ${els.nCoeff?.textContent ?? "—"}`);
+  const pv = getParamValues();
+  const pNames = Object.keys(pv);
+  if (pNames.length) {
+    lines.push(
+      `params         ${pNames.map((n) => `${n}=${fmtParamNum(pv[n])}`).join(" ")}`,
+    );
+  }
   return lines.join("\n");
 }
 
@@ -888,7 +1073,8 @@ function syncModeUniforms() {
   }
 }
 
-function uploadFit() {
+function uploadFit(opts = {}) {
+  const fromAnim = !!opts.fromAnim;
   setErr("");
   try {
     const half = Number(els.half.value);
@@ -899,7 +1085,7 @@ function uploadFit() {
     if (!(half > 0)) throw new Error("half-size must be > 0");
     if (deg < 1 || deg > MAX_DEG) throw new Error(`poly deg must be 1…${MAX_DEG}`);
 
-    const fn = compileExpr(getExprLatex());
+    const { fn } = compileBoundExpr({ rebuildUi: false });
     setExprCompileOk(true);
     const fit = fitChebyshev3D(fn, half, deg);
 
@@ -925,9 +1111,10 @@ function uploadFit() {
     clipUniforms.uScale.value = densScale;
     clipUniforms.uSteps.value = steps;
     els.modeLabel.textContent = modeLabel();
-    resize();
+    if (!fromAnim) resize();
     clipDirty = true;
-    settleHiRes = true;
+    // Param animation refits often — stay on move atlas, skip settle bump.
+    if (!fromAnim) settleHiRes = true;
     void prepareClipGpuForDegree(fit.deg).then(() => {
       syncClipPresentation();
       if (clip && !useGpuClipPath()) {
@@ -937,7 +1124,7 @@ function uploadFit() {
     });
   } catch (e) {
     try {
-      compileExpr(getExprLatex());
+      compileBoundExpr();
       setExprCompileOk(true);
     } catch {
       setExprCompileOk(false);
@@ -949,6 +1136,9 @@ function uploadFit() {
 /** Debounced Chebyshev refit when expr / deg / half become valid. */
 let fitTimer = 0;
 const FIT_DEBOUNCE_MS = 320;
+/** Min ms between refits while a parameter is animating. */
+const ANIM_FIT_MIN_MS = 50;
+let lastAnimFitAt = 0;
 
 function scheduleUploadFit(delay = FIT_DEBOUNCE_MS) {
   if (fitTimer) clearTimeout(fitTimer);
@@ -975,6 +1165,7 @@ els.preset.addEventListener("change", () => {
   applyPreset(els.preset.value);
   if (fitTimer) clearTimeout(fitTimer);
   uploadFit();
+  renderParamsUi();
 });
 els.expr.addEventListener("input", () => {
   syncExprCompileState();
@@ -1018,6 +1209,7 @@ els.copyMetrics?.addEventListener("click", () => {
 window.addEventListener("resize", resize);
 resize();
 uploadFit();
+renderParamsUi();
 
 function pollGpuTimer() {
   if (!useGpuTimer || !gpuQuery || gpuQueryActive) return;
@@ -1070,6 +1262,22 @@ function frame(rafNow) {
   }
   lastRafAt = rafNow > 0 ? rafNow : t0;
   loopFpsFrames++;
+
+  // Named param animation → Chebyshev refit (throttled).
+  if (anyParamAnimating()) {
+    if (tickParamAnimation(t0 / 1000)) {
+      syncAllParamRows();
+      if (t0 - lastAnimFitAt >= ANIM_FIT_MIN_MS) {
+        lastAnimFitAt = t0;
+        if (fitTimer) {
+          clearTimeout(fitTimer);
+          fitTimer = 0;
+        }
+        uploadFit({ fromAnim: true });
+      }
+    }
+  }
+
   if (t0 - loopFpsLast >= 500) {
     const winMs = t0 - loopFpsLast;
     loopFps = (loopFpsFrames * 1000) / winMs;

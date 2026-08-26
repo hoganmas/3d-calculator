@@ -40,11 +40,40 @@ export const PRESETS = {
     scale: 4,
     half: 2,
   },
+  pulse: {
+    label: "Pulse blob (a)",
+    latex: String.raw`\exp(-(x^{2}+y^{2}+z^{2})/a^{2})`,
+    deg: 4,
+    scale: 2.5,
+    half: 2,
+    params: { a: { value: 1, min: 0.35, max: 1.6, animate: true } },
+  },
+  twist: {
+    label: "Two blobs (d)",
+    latex: String.raw`\exp(-4((x-d)^{2}+y^{2}+z^{2}))+\exp(-4((x+d)^{2}+y^{2}+z^{2}))`,
+    deg: 5,
+    scale: 2.2,
+    half: 2,
+    params: { d: { value: 0.7, min: 0.15, max: 1.2, animate: true } },
+  },
 };
 
+/** Spatial vars; everything else in freeSymbols is a slider parameter. */
+const RESERVED_SYMBOLS = new Set(["x", "y", "z"]);
+
+function coerceNumber(v) {
+  if (typeof v === "number") return v;
+  if (v && typeof v.valueOf === "function") return Number(v.valueOf());
+  return Number(v);
+}
+
 /**
- * Compile a density expression to f(x,y,z) → number.
- * Accepts LaTeX (preferred) or ASCII Math–ish strings Compute Engine can parse.
+ * Compile a density expression.
+ *
+ * @returns {{
+ *   freeParams: string[],
+ *   bind: (params?: Record<string, number>) => (x: number, y: number, z: number) => number,
+ * }}
  */
 export function compileExpr(raw) {
   const src = String(raw ?? "").trim();
@@ -59,21 +88,30 @@ export function compileExpr(raw) {
   }
 
   const { run, freeSymbols = [] } = result;
+  const freeParams = [];
   for (const s of freeSymbols) {
     const id = String(s);
-    if (id !== "x" && id !== "y" && id !== "z") {
-      throw new Error(`Unknown symbol “${id}” (use x, y, z)`);
+    if (RESERVED_SYMBOLS.has(id)) continue;
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(id)) {
+      throw new Error(`Invalid parameter “${id}” (use letters / digits)`);
     }
+    freeParams.push(id);
   }
+  freeParams.sort();
 
-  return (x, y, z) => {
-    const v = run({ x, y, z });
-    if (typeof v === "number") return v;
-    if (v && typeof v.valueOf === "function") {
-      const n = Number(v.valueOf());
-      return n;
-    }
-    return Number(v);
+  return {
+    freeParams,
+    /** Bind current parameter values → f(x,y,z). */
+    bind(params = {}) {
+      return (x, y, z) => {
+        const scope = { x, y, z };
+        for (const name of freeParams) {
+          const v = params[name];
+          scope[name] = Number.isFinite(v) ? v : 1;
+        }
+        return coerceNumber(run(scope));
+      };
+    },
   };
 }
 

@@ -31,5 +31,6 @@ Requires **WebGPU** (`navigator.gpu`) for GPU dens bake + Beer march. Without it
 
 - Drag to orbit · scroll to zoom · right-drag to pan
 - **mode** — prefer **clip-grid**; LOS raymarch is a secondary reference
+- **Parameters** — free symbols besides `x,y,z` (e.g. `a` in `\exp(-(x^2+y^2+z^2)/a^2)`) get sliders; ▶ animates between min/max (cosine), **Hz** is cycles/sec. Changing a param refits the Chebyshev approximant.
 - **Dens tile** — auto shrinks with projected box size; `exact` skips interpolation
 - **steps** — raymarch samples along the ray (Beer in clip-grid and LOS)
