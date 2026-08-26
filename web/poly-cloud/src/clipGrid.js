@@ -11,7 +11,8 @@ import { evalMonomial3D } from "./fit.js";
  * March (GPU/WebGL): bilinear (x,y) on nodal layers → u-DCT → Clenshaw → Beer.
  */
 
-export const MAX_DEG = 16;
+/** Soft cap for fit / UI / LOS coeff texture. Volume grid is M = deg+1. */
+export const MAX_DEG = 128;
 /** Default tile width for middle-out coarse lattice (pixels). */
 const BABBAGE_TILE = 256;
 
