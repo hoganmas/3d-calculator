@@ -71,12 +71,12 @@ export function createExprItem(init = {}) {
     ? init.sliderMin
     : Number.isFinite(init.min)
       ? init.min
-      : 0;
+      : -10;
   let sliderMax = Number.isFinite(init.sliderMax)
     ? init.sliderMax
     : Number.isFinite(init.max)
       ? init.max
-      : 2;
+      : 10;
   if (sliderMax < sliderMin) [sliderMin, sliderMax] = [sliderMax, sliderMin];
   return {
     id,

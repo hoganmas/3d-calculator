@@ -34,6 +34,7 @@ struct VSOut { @builtin(position) pos: vec4f, }
 struct FSOut {
   @location(0) color: vec4f,
   @location(1) occl: vec4f,
+  @builtin(frag_depth) depth: f32,
 }
 
 @vertex
@@ -110,13 +111,11 @@ fn shadeIso(p: vec3f, rd: vec3f) -> vec4f {
   var n = select(vec3f(0.0, 1.0, 0.0), g / gl, gl > 1e-8);
   if (dot(n, -rd) < 0.0) { n = -n; }
   let L = normalize(vec3f(0.35, 0.85, 0.45));
-  let H = normalize(L - normalize(rd));
   let ndotl = max(dot(n, L), 0.0);
-  let spec = pow(max(dot(n, H), 0.0), 32.0);
-  let ambient = 0.18;
+  let ambient = 0.42;
   let lambert = ambient + (1.0 - ambient) * ndotl;
   let base = mix(draw.absorb.xyz, draw.emit.xyz, 0.65);
-  let rgb = base * lambert + vec3f(spec) * 0.35;
+  let rgb = base * lambert;
   return vec4f(rgb, 1.0);
 }
 
@@ -124,6 +123,7 @@ fn marchIso(ro: vec3f, rd: vec3f, tEnter: f32, tExit: f32) -> FSOut {
   var out: FSOut;
   out.color = vec4f(0.0);
   out.occl = vec4f(1.0, 0.0, 0.0, 1.0);
+  out.depth = 1.0;
 
   var steps = draw.steps;
   if (steps < 16u) { steps = 16u; }
@@ -145,8 +145,10 @@ fn marchIso(ro: vec3f, rd: vec3f, tEnter: f32, tExit: f32) -> FSOut {
         if (flo * fm <= 0.0) { hi = mid; } else { lo = mid; flo = fm; }
       }
       let hit = 0.5 * (lo + hi);
+      let d = clamp(hit / far, 0.0, 0.999);
       out.color = shadeIso(ro + rd * hit, rd);
-      out.occl = vec4f(clamp(hit / far, 0.0, 0.999), 0.0, 0.0, 1.0);
+      out.occl = vec4f(d, 0.0, 0.0, 1.0);
+      out.depth = d;
       return out;
     }
     s0 = s1; f0 = f1;
@@ -157,10 +159,6 @@ fn marchIso(ro: vec3f, rd: vec3f, tEnter: f32, tExit: f32) -> FSOut {
 
 @fragment
 fn fsMain(in: VSOut) -> FSOut {
-  var out: FSOut;
-  out.color = vec4f(0.0);
-  out.occl = vec4f(1.0, 0.0, 0.0, 1.0);
-
   let fbW = f32(draw.fbW); let fbH = f32(draw.fbH);
   let ndcX = -1.0 + 2.0 * in.pos.x / fbW;
   let ndcY = 1.0 - 2.0 * in.pos.y / fbH;
@@ -177,8 +175,11 @@ fn fsMain(in: VSOut) -> FSOut {
   let tmin = min(tA, tB); let tmax = max(tA, tB);
   var tEnter = max(max(max(tmin.x, tmin.y), tmin.z), 0.0);
   let tExit = min(min(tmax.x, tmax.y), tmax.z);
-  if (!(tExit > tEnter + 1e-6)) { return out; }
-  return marchIso(ro, rd, tEnter, tExit);
+  if (!(tExit > tEnter + 1e-6)) { discard; }
+  let hit = marchIso(ro, rd, tEnter, tExit);
+  // Miss: discard so we don't overwrite a closer prior iso's color/depth.
+  if (hit.color.a < 0.5) { discard; }
+  return hit;
 }
 `;
 }
@@ -313,6 +314,83 @@ fn fsMain(in: VSOut) -> @location(0) vec4f {
 }
 
 /**
+ * World reference grid / axes / fit-box edges.
+ * Rasterized with a real viewProj, but frag_depth uses the same ray-t / far
+ * encoding as the iso pass so we depth-test against isoDepth in-place (no copy).
+ */
+function makeGridWgsl() {
+  return /* wgsl */ `
+struct GridParams {
+  viewProj: mat4x4f,
+  ro: vec3f,
+  half: f32,
+  m0: vec4f,
+  m1: vec4f,
+  m2: vec4f,
+  fbW: f32,
+  fbH: f32,
+  _pad0: f32,
+  _pad1: f32,
+}
+
+@group(0) @binding(0) var<uniform> u: GridParams;
+
+struct VSIn {
+  @location(0) pos: vec3f,
+  @location(1) color: vec4f,
+}
+
+struct VSOut {
+  @builtin(position) clip: vec4f,
+  @location(0) world: vec3f,
+  @location(1) color: vec4f,
+}
+
+struct FSOut {
+  @location(0) color: vec4f,
+  @builtin(frag_depth) depth: f32,
+}
+
+@vertex
+fn vsMain(v: VSIn) -> VSOut {
+  var o: VSOut;
+  o.clip = u.viewProj * vec4f(v.pos, 1.0);
+  o.world = v.pos;
+  o.color = v.color;
+  return o;
+}
+
+@fragment
+fn fsMain(in: VSOut) -> FSOut {
+  var out: FSOut;
+  let fbW = u.fbW; let fbH = u.fbH;
+  let ndcX = -1.0 + 2.0 * in.clip.x / fbW;
+  let ndcY = 1.0 - 2.0 * in.clip.y / fbH;
+  let xy1 = vec3f(ndcX, ndcY, 1.0);
+  let rd = vec3f(dot(u.m0.xyz, xy1), dot(u.m1.xyz, xy1), dot(u.m2.xyz, xy1));
+  let ro = u.ro; let half = u.half;
+  let invRd = vec3f(
+    select(1e15, 1.0 / rd.x, abs(rd.x) >= 1e-15),
+    select(1e15, 1.0 / rd.y, abs(rd.y) >= 1e-15),
+    select(1e15, 1.0 / rd.z, abs(rd.z) >= 1e-15),
+  );
+  let tA = (-vec3f(half) - ro) * invRd;
+  let tB = (vec3f(half) - ro) * invRd;
+  let tmin = min(tA, tB); let tmax = max(tA, tB);
+  let tExit = min(min(tmax.x, tmax.y), tmax.z);
+  let far = max(tExit, half * 4.0);
+  let rd2 = max(dot(rd, rd), 1e-20);
+  let t = dot(in.world - ro, rd) / rd2;
+  if (!(t > 0.0)) { discard; }
+  out.depth = clamp(t / far, 0.0, 0.999);
+  // Premultiplied
+  out.color = vec4f(in.color.rgb * in.color.a, in.color.a);
+  return out;
+}
+`;
+}
+
+/**
  * Compact FXAA 3.11-style post (luma edge detect + blend).
  * Input is premultiplied overlay; we un-premultiply for luma, then re-premultiply.
  */
@@ -421,6 +499,12 @@ let canvasFormat = "bgra8unorm";
 let isoPipeline = null;
 let beerPipeline = null;
 let fxaaPipeline = null;
+let gridPipeline = null;
+let gridParamBuf = null;
+let gridVertexBuf = null;
+let gridVertexCapacity = 0;
+let gridVertexCount = 0;
+let gridHalf = NaN;
 
 let drawParamBuf = null;
 let drawParamBufBeer = null;
@@ -432,6 +516,10 @@ let colorBuf = null;
 let occlTex = null;
 let occlW = 0;
 let occlH = 0;
+/** Hardware depth for iso-vs-iso (frag_depth = hit/far, compare less). */
+let depthTex = null;
+let depthW = 0;
+let depthH = 0;
 /** Intermediate color (iso+beer) before FXAA → swapchain. */
 let sceneColorTex = null;
 let sceneColorW = 0;
@@ -468,7 +556,7 @@ let lastPresentAt = 0;
 let profileMethod = "";
 let profileGridM = 0;
 
-const PIPELINE_EPOCH = 11;
+const PIPELINE_EPOCH = 14;
 let builtEpoch = -1;
 
 /** Classic 256-byte pack; volBase lives in the f32 pad after ro (index 11). */
@@ -520,8 +608,123 @@ function writeLayerColors(colors) {
   device.queue.writeBuffer(colorBuf, 0, data);
 }
 
+function pushGridVert(dst, i, x, y, z, r, g, b, a) {
+  const o = i * 8;
+  dst[o] = x; dst[o + 1] = y; dst[o + 2] = z; dst[o + 3] = 0;
+  dst[o + 4] = r; dst[o + 5] = g; dst[o + 6] = b; dst[o + 7] = a;
+}
+
+function pushGridLine(dst, i, ax, ay, az, bx, by, bz, r, g, b, a) {
+  pushGridVert(dst, i, ax, ay, az, r, g, b, a);
+  pushGridVert(dst, i + 1, bx, by, bz, r, g, b, a);
+  return i + 2;
+}
+
+function hexToRgb(hex) {
+  return [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255];
+}
+
+/**
+ * Build / upload world grid + axes + fit-box edges for the WebGPU path.
+ * Matches main.js rebuildWorldGrid extents.
+ * @param {number} half
+ */
+export function syncClipGpuWorldGrid(half) {
+  const h = Math.max(0.5, half);
+  if (!device) {
+    gridHalf = h;
+    return;
+  }
+  if (gridVertexBuf && Math.abs(gridHalf - h) < 1e-9) return;
+  gridHalf = h;
+
+  const extent = Math.ceil(h + 0.5);
+  const size = extent * 2;
+  const divisions = Math.max(2, size);
+  const step = size / divisions;
+  const lo = -size / 2;
+  const hi = size / 2;
+  const [majR, majG, majB] = hexToRgb(0x4a5568);
+  const [minR, minG, minB] = hexToRgb(0x2a3140);
+  const maxVerts = 3 * (divisions + 1) * 2 * 2 + 6 + 24 + 16;
+  const data = new Float32Array(maxVerts * 8);
+  let n = 0;
+
+  const emitPlane = (axis, alpha) => {
+    for (let i = 0; i <= divisions; i++) {
+      const t = lo + i * step;
+      const major = i === 0 || i === divisions || Math.abs(t) < 1e-6;
+      const r = major ? majR : minR;
+      const g = major ? majG : minG;
+      const b = major ? majB : minB;
+      const a = alpha;
+      if (axis === "xz") {
+        n = pushGridLine(data, n, lo, 0, t, hi, 0, t, r, g, b, a);
+        n = pushGridLine(data, n, t, 0, lo, t, 0, hi, r, g, b, a);
+      } else if (axis === "xy") {
+        n = pushGridLine(data, n, lo, t, 0, hi, t, 0, r, g, b, a);
+        n = pushGridLine(data, n, t, lo, 0, t, hi, 0, r, g, b, a);
+      } else {
+        n = pushGridLine(data, n, 0, lo, t, 0, hi, t, r, g, b, a);
+        n = pushGridLine(data, n, 0, t, lo, 0, t, hi, r, g, b, a);
+      }
+    }
+  };
+  emitPlane("xz", 0.55);
+  emitPlane("xy", 0.35);
+  emitPlane("yz", 0.35);
+
+  // RGB axes
+  const axisLen = extent + 0.25;
+  n = pushGridLine(data, n, 0, 0, 0, axisLen, 0, 0, 0.9, 0.35, 0.38, 0.95);
+  n = pushGridLine(data, n, 0, 0, 0, 0, axisLen, 0, 0.35, 0.75, 0.48, 0.95);
+  n = pushGridLine(data, n, 0, 0, 0, 0, 0, axisLen, 0.4, 0.65, 0.95, 0.95);
+
+  // Fit-box wireframe
+  const bh = h;
+  const br = 0.23; const bg = 0.27; const bb = 0.35; const ba = 0.85;
+  const corners = [
+    [-bh, -bh, -bh], [bh, -bh, -bh], [bh, bh, -bh], [-bh, bh, -bh],
+    [-bh, -bh, bh], [bh, -bh, bh], [bh, bh, bh], [-bh, bh, bh],
+  ];
+  const edges = [
+    [0, 1], [1, 2], [2, 3], [3, 0],
+    [4, 5], [5, 6], [6, 7], [7, 4],
+    [0, 4], [1, 5], [2, 6], [3, 7],
+  ];
+  for (const [i0, i1] of edges) {
+    const a = corners[i0]; const b = corners[i1];
+    n = pushGridLine(data, n, a[0], a[1], a[2], b[0], b[1], b[2], br, bg, bb, ba);
+  }
+
+  gridVertexCount = n;
+  const bytes = n * 8 * 4;
+  if (!gridVertexBuf || gridVertexCapacity < bytes) {
+    if (gridVertexBuf) { try { gridVertexBuf.destroy(); } catch (_) {} }
+    gridVertexCapacity = Math.max(bytes, 4096);
+    gridVertexBuf = device.createBuffer({
+      size: gridVertexCapacity,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    });
+  }
+  device.queue.writeBuffer(gridVertexBuf, 0, data.subarray(0, n * 8));
+}
+
+function packGridParams(viewProj, ro, half, M, fbW, fbH) {
+  const buf = new ArrayBuffer(160);
+  const f32 = new Float32Array(buf);
+  // Column-major mat4
+  for (let i = 0; i < 16; i++) f32[i] = viewProj[i];
+  f32[16] = ro[0]; f32[17] = ro[1]; f32[18] = ro[2]; f32[19] = half;
+  f32[20] = M[0]; f32[21] = M[1]; f32[22] = M[2]; f32[23] = 0;
+  f32[24] = M[3]; f32[25] = M[4]; f32[26] = M[5]; f32[27] = 0;
+  f32[28] = M[6]; f32[29] = M[7]; f32[30] = M[8]; f32[31] = 0;
+  f32[32] = fbW; f32[33] = fbH; f32[34] = 0; f32[35] = 0;
+  return buf;
+}
+
 export function isClipBakeGpuReady() {
-  return Boolean(device && isoPipeline && beerPipeline && fxaaPipeline);
+  return Boolean(device && isoPipeline && beerPipeline && fxaaPipeline && gridPipeline);
 }
 export function isClipMarchReady() {
   return Boolean(
@@ -586,6 +789,18 @@ function ensureOcclTex(w, h) {
   occlH = h;
 }
 
+function ensureDepthTex(w, h) {
+  if (depthTex && depthW === w && depthH === h) return;
+  if (depthTex) { try { depthTex.destroy(); } catch (_) {} }
+  depthTex = device.createTexture({
+    size: [w, h],
+    format: "depth32float",
+    usage: GPUTextureUsage.RENDER_ATTACHMENT,
+  });
+  depthW = w;
+  depthH = h;
+}
+
 function ensureSceneColorTex(w, h) {
   if (sceneColorTex && sceneColorW === w && sceneColorH === h) return;
   if (sceneColorTex) { try { sceneColorTex.destroy(); } catch (_) {} }
@@ -624,6 +839,7 @@ export function resizeClipGpuCanvas(pixelW, pixelH) {
     canvas._clipConfigured = true;
   }
   ensureOcclTex(w, h);
+  ensureDepthTex(w, h);
   ensureSceneColorTex(w, h);
   return { w: canvas.width, h: canvas.height };
 }
@@ -748,7 +964,7 @@ export async function initClipBakeGpu(viewportEl) {
       device = await adapter.requestDevice({ requiredFeatures });
       device.lost.then(() => {
         device = null;
-        isoPipeline = beerPipeline = fxaaPipeline = null;
+        isoPipeline = beerPipeline = fxaaPipeline = gridPipeline = null;
         initFailed = true;
       });
       if (timestampsSupported) {
@@ -774,6 +990,10 @@ export async function initClipBakeGpu(viewportEl) {
         size: 16,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
+      gridParamBuf = device.createBuffer({
+        size: 256,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      });
       fxaaSampler = device.createSampler({
         magFilter: "linear",
         minFilter: "linear",
@@ -794,7 +1014,7 @@ export async function initClipBakeGpu(viewportEl) {
       console.warn("[clipBakeGpu] init failed", e);
       initFailed = true;
       device = null;
-      isoPipeline = beerPipeline = fxaaPipeline = null;
+      isoPipeline = beerPipeline = fxaaPipeline = gridPipeline = null;
       return false;
     }
   })();
@@ -812,13 +1032,17 @@ async function compileChecked(label, code) {
 
 export async function ensurePipelinesForDegree(_deg) {
   if (!device) return false;
-  if (isoPipeline && beerPipeline && fxaaPipeline && builtEpoch === PIPELINE_EPOCH) {
+  if (
+    isoPipeline && beerPipeline && fxaaPipeline && gridPipeline &&
+    builtEpoch === PIPELINE_EPOCH
+  ) {
     return true;
   }
 
   canvasFormat = navigator.gpu.getPreferredCanvasFormat();
   const isoMod = await compileChecked("iso", makeIsoWgsl());
   const beerMod = await compileChecked("beer", makeBeerMultiWgsl());
+  const gridMod = await compileChecked("grid", makeGridWgsl());
   const fxaaMod = await compileChecked("fxaa", makeFxaaWgsl());
 
   const blendPremul = {
@@ -843,6 +1067,11 @@ export async function ensurePipelinesForDegree(_deg) {
       ],
     },
     primitive: { topology: "triangle-list" },
+    depthStencil: {
+      format: "depth32float",
+      depthWriteEnabled: true,
+      depthCompare: "less",
+    },
   });
   {
     const err = await device.popErrorScope();
@@ -866,6 +1095,37 @@ export async function ensurePipelinesForDegree(_deg) {
   }
 
   device.pushErrorScope("validation");
+  const nextGrid = device.createRenderPipeline({
+    layout: "auto",
+    vertex: {
+      module: gridMod,
+      entryPoint: "vsMain",
+      buffers: [{
+        arrayStride: 32,
+        attributes: [
+          { shaderLocation: 0, offset: 0, format: "float32x3" },
+          { shaderLocation: 1, offset: 16, format: "float32x4" },
+        ],
+      }],
+    },
+    fragment: {
+      module: gridMod,
+      entryPoint: "fsMain",
+      targets: [{ format: canvasFormat, blend: blendPremul }],
+    },
+    primitive: { topology: "line-list" },
+    depthStencil: {
+      format: "depth32float",
+      depthWriteEnabled: false,
+      depthCompare: "less",
+    },
+  });
+  {
+    const err = await device.popErrorScope();
+    if (err) throw new Error(`grid: ${err.message}`);
+  }
+
+  device.pushErrorScope("validation");
   const nextFxaa = device.createRenderPipeline({
     layout: "auto",
     vertex: { module: fxaaMod, entryPoint: "vsMain" },
@@ -883,8 +1143,14 @@ export async function ensurePipelinesForDegree(_deg) {
 
   isoPipeline = nextIso;
   beerPipeline = nextBeer;
+  gridPipeline = nextGrid;
   fxaaPipeline = nextFxaa;
   builtEpoch = PIPELINE_EPOCH;
+  if (Number.isFinite(gridHalf)) {
+    const h = gridHalf;
+    gridHalf = NaN; // force rebuild into new device buffers
+    syncClipGpuWorldGrid(h);
+  }
   return true;
 }
 
@@ -906,7 +1172,10 @@ function darken(c, t) {
 }
 
 export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps }) {
-  if (!isClipBakeGpuReady() || !ctx || !volumeBuf || !colorBuf || !fxaaParamBuf || !fxaaSampler) {
+  if (
+    !isClipBakeGpuReady() || !ctx || !volumeBuf || !colorBuf ||
+    !fxaaParamBuf || !fxaaSampler || !gridParamBuf
+  ) {
     return false;
   }
   if (densLayerCount < 1 && sceneConstraints.length < 1) return false;
@@ -920,11 +1189,13 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps }) {
 
   const { w: marchW, h: marchH } = resizeClipGpuCanvas(fbW, fbH);
   if (!occlTex) ensureOcclTex(marchW, marchH);
+  if (!depthTex) ensureDepthTex(marchW, marchH);
   if (!sceneColorTex) ensureSceneColorTex(marchW, marchH);
+  syncClipGpuWorldGrid(h);
 
   profileMarchFbW = marchW;
   profileMarchFbH = marchH;
-  profileMethod = "gpu-iso+beer+fxaa";
+  profileMethod = "gpu-iso+beer+grid+fxaa";
   profileGridM = Mgrid;
 
   if (scenePacked) device.queue.writeBuffer(volumeBuf, 0, scenePacked);
@@ -933,8 +1204,9 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps }) {
   const sceneView = sceneColorTex.createView();
   const swapView = ctx.getCurrentTexture().createView();
   const occlView = occlTex.createView();
+  const depthView = depthTex.createView();
 
-  // Clear scene color + occl (far = 1)
+  // Clear scene color + occl (far = 1) + depth (far = 1)
   {
     const enc = device.createCommandEncoder();
     const pass = enc.beginRenderPass({
@@ -952,6 +1224,12 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps }) {
           storeOp: "store",
         },
       ],
+      depthStencilAttachment: {
+        view: depthView,
+        depthClearValue: 1,
+        depthLoadOp: "clear",
+        depthStoreOp: "store",
+      },
     });
     pass.end();
     device.queue.submit([enc.finish()]);
@@ -979,10 +1257,60 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps }) {
         { view: sceneView, loadOp: "load", storeOp: "store" },
         { view: occlView, loadOp: "load", storeOp: "store" },
       ],
+      depthStencilAttachment: {
+        view: depthView,
+        depthLoadOp: "load",
+        depthStoreOp: "store",
+      },
     });
     pass.setPipeline(isoPipeline);
     pass.setBindGroup(0, bg);
     pass.draw(3);
+    pass.end();
+    device.queue.submit([enc.finish()]);
+  }
+
+  // World grid / axes / box — depth-test against iso depth in-place (no copy).
+  if (gridVertexBuf && gridVertexCount > 0 && gridPipeline) {
+    camera.updateMatrixWorld(true);
+    const viewProj = new Float32Array(16);
+    // Column-major: projection * view (Three stores column-major too).
+    const e = camera.projectionMatrix.elements;
+    const v = camera.matrixWorldInverse.elements;
+    // viewProj = proj * view
+    for (let c = 0; c < 4; c++) {
+      for (let r = 0; r < 4; r++) {
+        viewProj[c * 4 + r] =
+          e[0 * 4 + r] * v[c * 4 + 0] +
+          e[1 * 4 + r] * v[c * 4 + 1] +
+          e[2 * 4 + r] * v[c * 4 + 2] +
+          e[3 * 4 + r] * v[c * 4 + 3];
+      }
+    }
+    device.queue.writeBuffer(
+      gridParamBuf,
+      0,
+      packGridParams(viewProj, ro, h, Mat, marchW, marchH),
+    );
+    const bg = device.createBindGroup({
+      layout: gridPipeline.getBindGroupLayout(0),
+      entries: [{ binding: 0, resource: { buffer: gridParamBuf } }],
+    });
+    const enc = device.createCommandEncoder();
+    const pass = enc.beginRenderPass({
+      colorAttachments: [
+        { view: sceneView, loadOp: "load", storeOp: "store" },
+      ],
+      depthStencilAttachment: {
+        view: depthView,
+        depthLoadOp: "load",
+        depthStoreOp: "store",
+      },
+    });
+    pass.setPipeline(gridPipeline);
+    pass.setBindGroup(0, bg);
+    pass.setVertexBuffer(0, gridVertexBuf);
+    pass.draw(gridVertexCount);
     pass.end();
     device.queue.submit([enc.finish()]);
   }

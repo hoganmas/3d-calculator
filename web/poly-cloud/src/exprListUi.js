@@ -21,6 +21,7 @@ import {
   setParamValue,
   updateParam,
   toggleParamAnimate,
+  setParamUiEditing,
 } from "./params.js";
 
 function readFieldLatex(mf) {
@@ -164,6 +165,8 @@ export function mountExprList(opts) {
     if (!p || !row) return;
     const block = row.querySelector(`[data-param-block="${CSS.escape(name)}"]`) || row;
     const slider = block.querySelector(".expr-param-slider");
+    const minEl = block.querySelector(".expr-param-min");
+    const maxEl = block.querySelector(".expr-param-max");
     const play = block.querySelector(".expr-param-play");
     const mf = row.querySelector("math-field");
     if (slider instanceof HTMLInputElement) {
@@ -173,13 +176,20 @@ export function mountExprList(opts) {
       slider.disabled = !!p.driven;
       slider.title = p.driven ? `value ${fmtNum(p.value)} (driven)` : `${name} = ${fmtNum(p.value)}`;
       if (document.activeElement !== slider) slider.value = String(p.value);
-    }
-    if (!p.hosted && mf && document.activeElement !== mf && !p.driven) {
-      const cur = readFieldLatex(mf);
-      if (cur !== p.latex) {
-        if (typeof mf.setValue === "function") mf.setValue(p.latex, { silenceNotifications: true });
-        else mf.value = p.latex;
+      const span = p.max - p.min;
+      const zeroPct = span > 1e-12 ? ((0 - p.min) / span) * 100 : 50;
+      const mark = block.querySelector(".expr-param-zero");
+      if (mark instanceof HTMLElement) {
+        const show = p.min < 0 && p.max > 0;
+        mark.hidden = !show;
+        if (show) mark.style.left = `${Math.min(100, Math.max(0, zeroPct))}%`;
       }
+    }
+    if (minEl instanceof HTMLInputElement && document.activeElement !== minEl) {
+      minEl.value = fmtNum(p.min);
+    }
+    if (maxEl instanceof HTMLInputElement && document.activeElement !== maxEl) {
+      maxEl.value = fmtNum(p.max);
     }
     if (play instanceof HTMLButtonElement) {
       play.disabled = !!p.driven;
@@ -190,6 +200,13 @@ export function mountExprList(opts) {
         : p.animating
           ? "Pause animation"
           : "Animate between min and max";
+    }
+    if (!p.hosted && mf && document.activeElement !== mf && !p.driven) {
+      const cur = readFieldLatex(mf);
+      if (cur !== p.latex) {
+        if (typeof mf.setValue === "function") mf.setValue(p.latex, { silenceNotifications: true });
+        else mf.value = p.latex;
+      }
     }
     row.classList.toggle("has-error", !!p.error);
     if (!p.hosted) mf?.classList.toggle("invalid", !!p.error);
@@ -205,6 +222,7 @@ export function mountExprList(opts) {
   }
 
   /**
+   * Compact slider: min — track — max ▶
    * @param {HTMLElement} mid
    * @param {HTMLElement} row
    * @param {any} item
@@ -215,46 +233,55 @@ export function mountExprList(opts) {
   function appendParamControls(mid, row, item, paramName, mf, opts) {
     const hosted = !!opts.hosted;
     const p = getParam(paramName);
+    const min = p?.min ?? item.sliderMin;
+    const max = p?.max ?? item.sliderMax;
+
     const block = document.createElement("div");
     block.className = "expr-param-block" + (hosted ? " is-hosted" : "");
     block.dataset.paramBlock = paramName;
 
-    const head = document.createElement("div");
-    head.className = "expr-param-head";
     if (hosted) {
       const lab = document.createElement("span");
       lab.className = "expr-param-name";
       lab.textContent = paramName;
-      head.appendChild(lab);
+      block.appendChild(lab);
     }
 
-    const play = document.createElement("button");
-    play.type = "button";
-    play.className = "expr-param-play";
-    play.textContent = "▶";
-    play.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      const next = toggleParamAnimate(paramName);
-      if (next) {
-        if (!hosted) {
-          updateExprSilent(item.id, { sliderAnimating: next.animating, sliderPhase: next.phase });
-        } else {
-          updateExprSilent(item.id, { sliderAnimating: next.animating, sliderPhase: next.phase });
-        }
+    const rail = document.createElement("div");
+    rail.className = "expr-param-rail";
+
+    const minEl = document.createElement("input");
+    minEl.type = "text";
+    minEl.inputMode = "decimal";
+    minEl.className = "expr-param-min";
+    minEl.value = fmtNum(min);
+    minEl.title = "Minimum";
+    minEl.addEventListener("change", () => {
+      const n = Number(minEl.value);
+      if (!Number.isFinite(n)) {
         syncParamSlider(row, paramName);
-        paramNotify();
+        return;
       }
+      updateParam(paramName, { min: n });
+      updateExprSilent(item.id, { sliderMin: n });
+      syncParamSlider(row, paramName);
+      paramNotify();
     });
-    head.appendChild(play);
-    block.appendChild(head);
+
+    const trackWrap = document.createElement("div");
+    trackWrap.className = "expr-param-track";
+
+    const zero = document.createElement("span");
+    zero.className = "expr-param-zero";
+    zero.setAttribute("aria-hidden", "true");
 
     const slider = document.createElement("input");
     slider.type = "range";
     slider.className = "expr-param-slider";
-    slider.min = String(p?.min ?? item.sliderMin);
-    slider.max = String(p?.max ?? item.sliderMax);
+    slider.min = String(min);
+    slider.max = String(max);
     slider.step = String(p?.step ?? 0.01);
-    slider.value = String(p?.value ?? item.sliderMin);
+    slider.value = String(p?.value ?? min);
     slider.disabled = !!p?.driven;
     slider.addEventListener("input", () => {
       const next = setParamValue(paramName, Number(slider.value), {
@@ -276,40 +303,42 @@ export function mountExprList(opts) {
       }
     });
 
-    const bounds = document.createElement("div");
-    bounds.className = "expr-param-bounds";
-    const mkBound = (key, label, val) => {
-      const lab = document.createElement("label");
-      lab.textContent = label;
-      const inp = document.createElement("input");
-      inp.type = "number";
-      inp.step = "any";
-      inp.value = String(val);
-      inp.addEventListener("change", () => {
-        const n = Number(inp.value);
-        if (key === "min") {
-          updateParam(paramName, { min: n });
-          updateExprSilent(item.id, { sliderMin: n });
-        } else if (key === "max") {
-          updateParam(paramName, { max: n });
-          updateExprSilent(item.id, { sliderMax: n });
-        } else if (key === "speed") {
-          updateParam(paramName, { speed: n });
-          updateExprSilent(item.id, { sliderSpeed: n });
-        }
+    trackWrap.append(zero, slider);
+
+    const maxEl = document.createElement("input");
+    maxEl.type = "text";
+    maxEl.inputMode = "decimal";
+    maxEl.className = "expr-param-max";
+    maxEl.value = fmtNum(max);
+    maxEl.title = "Maximum";
+    maxEl.addEventListener("change", () => {
+      const n = Number(maxEl.value);
+      if (!Number.isFinite(n)) {
+        syncParamSlider(row, paramName);
+        return;
+      }
+      updateParam(paramName, { max: n });
+      updateExprSilent(item.id, { sliderMax: n });
+      syncParamSlider(row, paramName);
+      paramNotify();
+    });
+
+    const play = document.createElement("button");
+    play.type = "button";
+    play.className = "expr-param-play";
+    play.textContent = "▶";
+    play.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const next = toggleParamAnimate(paramName);
+      if (next) {
+        updateExprSilent(item.id, { sliderAnimating: next.animating, sliderPhase: next.phase });
         syncParamSlider(row, paramName);
         paramNotify();
-      });
-      lab.appendChild(inp);
-      return lab;
-    };
-    bounds.append(
-      mkBound("min", "min", p?.min ?? item.sliderMin),
-      mkBound("max", "max", p?.max ?? item.sliderMax),
-      mkBound("speed", "Hz", p?.speed ?? item.sliderSpeed),
-    );
+      }
+    });
 
-    block.append(slider, bounds);
+    rail.append(minEl, trackWrap, maxEl, play);
+    block.appendChild(rail);
     mid.appendChild(block);
     queueMicrotask(() => syncParamSlider(row, paramName));
   }
@@ -351,6 +380,25 @@ export function mountExprList(opts) {
     requestAnimationFrame(() => requestAnimationFrame(apply));
   }
 
+  function isMathFieldFocused(mf) {
+    if (!mf) return false;
+    const active = document.activeElement;
+    if (!active) return false;
+    if (active === mf || (typeof mf.contains === "function" && mf.contains(active))) return true;
+    try {
+      if (mf.shadowRoot && mf.shadowRoot.contains(active)) return true;
+    } catch (_) {
+      /* ignore */
+    }
+    try {
+      const path = typeof active.composedPath === "function" ? active.composedPath() : [];
+      if (path.includes(mf)) return true;
+    } catch (_) {
+      /* ignore */
+    }
+    return false;
+  }
+
   /** Params needed under a row: explicit `a=…` and/or hosted free symbols. */
   function neededParamsForItem(item) {
     /** @type {{ name: string, hosted: boolean }[]} */
@@ -368,7 +416,7 @@ export function mountExprList(opts) {
 
   /**
    * Update slider chrome in place without recreating math-fields (keeps caret).
-   * @returns {boolean} false if a full render is required
+   * Returns false when a full render is required.
    */
   function syncParamChrome() {
     const items = listExpressions();
@@ -378,6 +426,8 @@ export function mountExprList(opts) {
       const item = items[i];
       const row = rows[i];
       if (!(row instanceof HTMLElement) || row.dataset.id !== item.id) return false;
+      // Unified DOM: always color | mid | vis | del
+      if (row.children.length !== 4) return false;
       const mid = row.querySelector(".expr-mid");
       const mf = row.querySelector("math-field");
       if (!(mid instanceof HTMLElement)) return false;
@@ -395,11 +445,27 @@ export function mountExprList(opts) {
       }
 
       const explicit = needed.find((n) => !n.hosted);
+      const isParamDef = !!explicit;
       row.classList.toggle("is-param", needed.length > 0);
+      row.classList.toggle("is-param-def", isParamDef);
       row.classList.toggle("is-hidden", !item.enabled);
       row.classList.toggle("selected", item.id === getSelectedId());
-      if (explicit) row.dataset.param = explicit.name;
-      else delete row.dataset.param;
+      if (explicit) {
+        row.dataset.param = explicit.name;
+        if (isMathFieldFocused(mf)) setParamUiEditing(explicit.name, true);
+      } else {
+        delete row.dataset.param;
+        for (const n of listParamNames()) {
+          const p = getParam(n);
+          if (p?.exprId === item.id && !p.hosted) setParamUiEditing(n, false);
+        }
+      }
+
+      const swatch = row.querySelector(".expr-color");
+      if (swatch instanceof HTMLInputElement) {
+        swatch.disabled = isParamDef;
+        swatch.title = isParamDef ? "Parameters are not drawn" : "Color";
+      }
 
       for (const { name } of needed) syncParamSlider(row, name);
     }
@@ -426,7 +492,8 @@ export function mountExprList(opts) {
         "expr-row" +
         (item.id === selected ? " selected" : "") +
         (item.enabled ? "" : " is-hidden") +
-        (isParam || hostedNames.length ? " is-param" : "");
+        (isParam || hostedNames.length ? " is-param" : "") +
+        (isParam ? " is-param-def" : "");
       row.dataset.id = item.id;
       if (paramName) row.dataset.param = paramName;
 
@@ -459,6 +526,16 @@ export function mountExprList(opts) {
         root.querySelectorAll(".expr-row").forEach((r) => {
           r.classList.toggle("selected", r.dataset.id === item.id);
         });
+        const classified = classifyKind(readFieldLatex(mf));
+        if (classified?.kind === "parameter" && classified.paramName) {
+          setParamUiEditing(classified.paramName, true);
+        }
+      });
+      mf.addEventListener("blur", () => {
+        for (const n of listParamNames()) {
+          const p = getParam(n);
+          if (p?.exprId === item.id && !p.hosted) setParamUiEditing(n, false);
+        }
       });
       mf.addEventListener("input", () => {
         updateExpr(item.id, { latex: readFieldLatex(mf) });
@@ -560,6 +637,7 @@ export function mountExprList(opts) {
         mf.focus?.();
       });
 
+      // Always the same 4 children so CSS grid never crushes mid during kind flips.
       row.append(swatch, mid, vis, del);
       root.appendChild(row);
     }

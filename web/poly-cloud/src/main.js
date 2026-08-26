@@ -40,6 +40,7 @@ import {
   hasUploadedVolume,
   resizeClipGpuCanvas,
   clearClipGpuFrame,
+  syncClipGpuWorldGrid,
 } from "./clipBakeGpu.js";
 
 const els = {
@@ -268,8 +269,8 @@ function initMarchSliderUi() {
 }
 
 function readMarchDownscale() {
-  if (!els.marchDownscale) return 2;
-  const n = Math.round(Number(els.marchDownscale.value) || 2);
+  if (!els.marchDownscale) return 1;
+  const n = Math.round(Number(els.marchDownscale.value) || 1);
   return Math.min(MARCH_DOWNSCALE_MAX, Math.max(MARCH_DOWNSCALE_MIN, n));
 }
 
@@ -441,6 +442,9 @@ scene.add(boxHelper);
 const worldGrid = new THREE.Group();
 worldGrid.renderOrder = -1;
 scene.add(worldGrid);
+/** Axis letter sprites — stay on WebGL (billboards); lines depth-test on GPU. */
+const worldLabels = new THREE.Group();
+scene.add(worldLabels);
 
 function makeAxisLabel(text, color, position) {
   // High-res canvas so sprites stay sharp under orbit / retina.
@@ -505,6 +509,11 @@ function rebuildWorldGrid(half) {
       }
     }
   }
+  while (worldLabels.children.length) {
+    const child = worldLabels.children.pop();
+    child.material?.map?.dispose?.();
+    child.material?.dispose?.();
+  }
 
   const h = Math.max(0.5, half);
   // Grid a bit past the fit box; aim for ~1 world-unit cells.
@@ -554,9 +563,12 @@ function rebuildWorldGrid(half) {
   worldGrid.add(axes);
 
   const tip = extent + 0.45;
-  worldGrid.add(makeAxisLabel("x", "#e85d66", new THREE.Vector3(tip, 0, 0)));
-  worldGrid.add(makeAxisLabel("y", "#5ecf7a", new THREE.Vector3(0, tip, 0)));
-  worldGrid.add(makeAxisLabel("z", "#6ea8fe", new THREE.Vector3(0, 0, tip)));
+  worldLabels.add(makeAxisLabel("x", "#e85d66", new THREE.Vector3(tip, 0, 0)));
+  worldLabels.add(makeAxisLabel("y", "#5ecf7a", new THREE.Vector3(0, tip, 0)));
+  worldLabels.add(makeAxisLabel("z", "#6ea8fe", new THREE.Vector3(0, 0, tip)));
+
+  // WebGPU path draws the same grid against iso depth (no texture copy).
+  syncClipGpuWorldGrid(h);
 }
 
 /** Fit / march use half-extent h; UI “box size” is full edge length S = 2h. */
@@ -826,6 +838,10 @@ function syncClipPresentation() {
   );
   const gpu = useGpuClipPath() && hasVolume;
   clipQuad.visible = !gpu && hasVolume && Boolean(worldCheb);
+  // Grid/box/labels live on the WebGPU overlay when the volume path is active
+  // so they can depth-test against isosurfaces without a texture copy.
+  worldGrid.visible = !gpu;
+  boxHelper.visible = !gpu;
   setClipGpuCanvasVisible(isClipBakeGpuReady());
 }
 
