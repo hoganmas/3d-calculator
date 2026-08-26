@@ -40,6 +40,7 @@ import {
   getClipGpuProfile,
   resetClipGpuProfile,
   uploadSceneVolumes,
+  uploadSceneColors,
   hasUploadedVolume,
   MAX_COEFFS,
 } from "./clipBakeGpu.js";
@@ -348,6 +349,42 @@ exprListApi = mountExprList({
   onExprChange: () => {
     syncExprCompileState();
     scheduleUploadFit();
+  },
+  onColorChange: () => {
+    // Colors only — skip Chebyshev refit; push RGB to GPU dens layers + constraints.
+    if (lastSceneBake) {
+      const items = listExpressions().filter((e) => e.enabled && String(e.latex || "").trim());
+      const densCols = [];
+      const consCols = [];
+      for (const item of items) {
+        let kind = "bare";
+        try {
+          kind = compileExpr(item.latex).kind;
+        } catch {
+          /* ignore */
+        }
+        const role = resolveExprRole(item.role, kind);
+        const rgb = hexToRgb01(item.color);
+        if (role === "constraint") consCols.push(rgb);
+        else densCols.push(rgb);
+      }
+      for (let i = 0; i < lastSceneBake.densLayers.length; i++) {
+        if (densCols[i]) lastSceneBake.densLayers[i].color = densCols[i];
+      }
+      for (let i = 0; i < lastSceneBake.constraints.length; i++) {
+        if (consCols[i]) lastSceneBake.constraints[i].color = consCols[i];
+      }
+      uploadSceneColors(lastSceneBake.densLayers.map((d) => d.color));
+      // Constraint colors need a volume re-upload of metadata (bases unchanged).
+      if (isClipBakeGpuReady()) {
+        uploadSceneVolumes({
+          densLayers: lastSceneBake.densLayers,
+          constraints: lastSceneBake.constraints,
+          M: lastSceneBake.M,
+        });
+      }
+      clipDirty = true;
+    }
   },
   onStructuralChange: () => {
     scheduleUploadFit(0);
@@ -936,12 +973,13 @@ function applyVolumeTexture(dens, M) {
 }
 
 function syncClipFiberUniforms() {
-  const { mw, mh } = marchFramebufferSize();
+  // CPU/WebGL path draws into the full Three.js canvas — NDC must use that
+  // buffer size, not the march-downscale size (that is GPU-canvas only).
   camera.updateMatrixWorld(true);
   const { sx, sy } = perspectiveDirScale(camera);
   const M = ndcToDirMatrix(camera, sx, sy);
-  clipUniforms.uFbW.value = mw;
-  clipUniforms.uFbH.value = mh;
+  clipUniforms.uFbW.value = Math.max(1, renderer.domElement.width);
+  clipUniforms.uFbH.value = Math.max(1, renderer.domElement.height);
   clipUniforms.uDirM.value.set(M[0], M[1], M[2], M[3], M[4], M[5], M[6], M[7], M[8]);
   clipUniforms.uCameraPos.value.copy(camera.position);
 }
@@ -1001,10 +1039,11 @@ function syncClipCpuVolume() {
 }
 
 async function prepareClipGpuForDegree(deg) {
-  if (!isClipBakeGpuReady()) return false;
   try {
+    const ok = await initClipBakeGpu(els.viewport);
+    if (!ok) return false;
     await ensurePipelinesForDegree(deg);
-    if (worldCheb) bakeChebVolume();
+    if (lastSceneBake) bakeChebVolume();
     syncClipPresentation();
     return true;
   } catch (e) {
@@ -1062,7 +1101,8 @@ function uploadFit(opts = {}) {
       M = idct.M;
       const color = hexToRgb01(L.item.color);
       if (L.role === "constraint") {
-        constraints.push({ dens: idct.dens, color, isoLevel: L.compiled.isoLevel });
+        // Iso field only — never added to density Beer layers.
+        constraints.push({ dens: idct.dens, color, isoLevel: L.compiled.isoLevel ?? 0 });
       } else {
         densLayers.push({ dens: idct.dens, color });
       }
@@ -1076,15 +1116,13 @@ function uploadFit(opts = {}) {
       }
     }
 
-    // Preview texture: sum of density layers (manifolds omitted).
+    // Preview texture: sum of density layers only (never constraints).
     let densSum = null;
     if (densLayers.length) {
       densSum = new Float32Array(M * M * M);
       for (const d of densLayers) {
         for (let i = 0; i < densSum.length; i++) densSum[i] += d.dens[i] || 0;
       }
-    } else if (constraints.length) {
-      densSum = constraints[0].dens;
     }
 
     lastSceneBake = { densLayers, constraints, M, dens: densSum };
@@ -1133,6 +1171,7 @@ function uploadFit(opts = {}) {
     clipDirty = true;
     if (!fromAnim) settleHiRes = true;
     void prepareClipGpuForDegree(deg).then(() => {
+      if (lastSceneBake) bakeChebVolume();
       syncClipPresentation();
       if (clip && !useGpuClipPath()) {
         clipDirty = true;

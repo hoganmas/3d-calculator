@@ -18,10 +18,11 @@ import { classifyExpr } from "./fit.js";
  *   root: HTMLElement,
  *   onExprChange: () => void,
  *   onStructuralChange: () => void,
+ *   onColorChange?: () => void,
  * }} opts
  */
 export function mountExprList(opts) {
-  const { root, onExprChange, onStructuralChange } = opts;
+  const { root, onExprChange, onStructuralChange, onColorChange } = opts;
   /** @type {Map<string, HTMLElement>} */
   const rowEls = new Map();
 
@@ -58,7 +59,8 @@ export function mountExprList(opts) {
       swatch.title = "Color";
       swatch.addEventListener("input", () => {
         updateExpr(item.id, { color: swatch.value });
-        onExprChange();
+        if (onColorChange) onColorChange();
+        else onExprChange();
       });
 
       const mid = document.createElement("div");
