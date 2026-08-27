@@ -116,10 +116,15 @@ function bindVectorFromScalar(
 /** Normalize grad/nabla LaTeX for CE parsing. */
 export function normalizeVectorLatex(latex: string): string {
   let s = String(latex ?? "").trim();
+  // MathLive often emits \left( \right) — CE treats bare \grad as an unknown command.
+  s = s.replace(/\\left\s*/g, "");
+  s = s.replace(/\\right\s*/g, "");
   s = s.replace(/\\operatorname\s*\{\s*grad\s*\}/gi, "\\grad");
   s = s.replace(/\\grad\s*\{/g, "\\operatorname{grad}{");
   s = s.replace(/\\grad\s*\(/g, "\\operatorname{grad}(");
   s = s.replace(/\\nabla\s+/g, "\\operatorname{grad} ");
+  s = s.replace(/\\nabla\s*\(/g, "\\operatorname{grad}(");
+  s = s.replace(/\\nabla\s*\{/g, "\\operatorname{grad}{");
   return s;
 }
 
@@ -148,18 +153,42 @@ function extractTriple(json: unknown): string[] | null {
   return null;
 }
 
+function isGradErrorNode(node: unknown): boolean {
+  if (!Array.isArray(node) || node[0] !== "Error") return false;
+  const msg = String(node[1] ?? "").toLowerCase();
+  const lit = node[2];
+  const latexStr =
+    Array.isArray(lit) && lit[0] === "LatexString"
+      ? String(lit[1] ?? "").replace(/^'+|'+$/g, "").toLowerCase()
+      : "";
+  return msg.includes("unexpected-command") && /\\?(grad|nabla)/.test(latexStr);
+}
+
+function scalarFromGradJson(json: unknown): string | null {
+  if (!Array.isArray(json)) return null;
+  const head = String(json[0]);
+  if (head === "Multiply" && String(json[1]).toLowerCase() === "grad" && json[2] != null) {
+    return ce.box(json[2] as never).latex;
+  }
+  if (head === "grad" || head === "Gradient" || head === "nabla") {
+    if (json[1] != null) return ce.box(json[1] as never).latex;
+  }
+  if (head === "Tuple" && json.length >= 3 && isGradErrorNode(json[1]) && json[2] != null) {
+    return ce.box(json[2] as never).latex;
+  }
+  return null;
+}
+
 function looksLikeGrad(src: string, json: unknown): string | null {
+  const fromJson = scalarFromGradJson(json);
+  if (fromJson) return fromJson.trim();
+
   const lower = src.toLowerCase();
   if (/\\grad|\\nabla|\\operatorname\s*\{\s*grad/.test(lower)) {
-    const m = src.match(/\\(?:operatorname\s*\{\s*grad\s*\}|grad|nabla)\s*[\{\(]?\s*([\s\S]+?)\s*[\}\)]?\s*$/);
+    const m = src.match(
+      /\\(?:operatorname\s*\{\s*grad\s*\}|grad|nabla)\s*(?:\\left)?[\{\(]?\s*([\s\S]+?)\s*(?:\\right)?[\}\)]?\s*$/,
+    );
     if (m?.[1]) return m[1].trim();
-  }
-  if (Array.isArray(json)) {
-    const head = String(json[0]).toLowerCase();
-    if (head === "grad" || head === "gradient" || head === "nabla") {
-      const arg = json[1];
-      if (arg != null) return ce.box(arg as never).latex;
-    }
   }
   return null;
 }

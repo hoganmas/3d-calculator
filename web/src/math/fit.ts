@@ -433,7 +433,32 @@ export function formatParamLatexValue(v: number) {
  *   bind: (params?: Record<string, number>) => (x: number, y: number, z: number) => number,
  * }}
  */
+/**
+ * Flow-field syntax must use compileVectorExpr / flow role — not scalar compileExpr.
+ * Cheap pre-check avoids CE "Tuple + \\grad" console noise.
+ */
+function isLikelyFlowLatex(raw: string): boolean {
+  const s = String(raw ?? "").trim();
+  if (/\\grad|\\nabla/i.test(s)) return true;
+  const m = s.match(/^\(([\s\S]+)\)$/);
+  if (m) {
+    let depth = 0;
+    let parts = 0;
+    for (let i = 0; i < m[1]!.length; i++) {
+      const c = m[1]![i];
+      if (c === "(") depth++;
+      else if (c === ")") depth--;
+      else if (c === "," && depth === 0) parts++;
+    }
+    if (parts === 2) return true;
+  }
+  return false;
+}
+
 export function compileExpr(raw: string): CompiledExpr {
+  if (isLikelyFlowLatex(raw)) {
+    throw new Error("Vector field — use flow role (tuple or \\grad)");
+  }
   const classified = classifyExpr(raw);
   const src = classified.compileLatex;
 

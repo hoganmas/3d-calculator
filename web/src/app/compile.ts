@@ -62,7 +62,9 @@ export function collectParamReferences() {
         const compiled = compileParamLatex(item.latex, classified.paramName!);
         for (const p of compiled.freeParams) refs.add(p);
       } else {
-        const compiled = compileExpr(item.latex);
+        const role = resolveExprRole(item.role, classified.kind, item.latex);
+        const compiled =
+          role === "flow" ? compileVectorExpr(item.latex) : compileExpr(item.latex);
         for (const p of compiled.freeParams) refs.add(p);
       }
     } catch {

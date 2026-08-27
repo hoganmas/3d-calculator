@@ -113,6 +113,14 @@ export function configureMathField(mf: MathfieldElement) {
     /* ignore */
   }
   try {
+    mf.macros = {
+      ...mf.macros,
+      grad: "\\nabla",
+    };
+  } catch {
+    /* ignore */
+  }
+  try {
     mf.menuItems = [];
   } catch {
     /* ignore */

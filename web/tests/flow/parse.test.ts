@@ -41,6 +41,23 @@ export async function run() {
       },
     },
     {
+      name: "\\grad with \\left(\\right) parens (MathLive)",
+      fn: () => {
+        const latex = String.raw`\grad\left(x^2+y^2+z^2\right)`;
+        assert(classifyVectorExpr(latex).kind === "gradient");
+        const fn = compileVectorExpr(latex).bind({});
+        assert(fn(0.1, 0.2, 0.3).every(Number.isFinite), "non-finite eval");
+      },
+    },
+    {
+      name: "\\nabla with \\left(\\right) parens (MathLive)",
+      fn: () => {
+        const latex = String.raw`\nabla\left(x^2+y^2+z^2\right)`;
+        assert(classifyVectorExpr(latex).kind === "gradient");
+        compileVectorExpr(latex);
+      },
+    },
+    {
       name: "scalar sin(x) is not a vector field",
       fn: () => {
         assert(!isVectorFieldLatex("sin(x)"), "sin(x) wrongly detected as vector");
