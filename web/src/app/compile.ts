@@ -20,24 +20,22 @@ import {
 } from "../model/expressions.js";
 import { els } from "./dom.js";
 import { state } from "./state.js";
+import type { CompileAllResult, CompileLayerResult, ExprItem } from "../types/models.js";
 
-export function fmtParamNum(v) {
+export function fmtParamNum(v: number) {
   if (!Number.isFinite(v)) return "—";
   const a = Math.abs(v);
   if (a !== 0 && (a >= 1000 || a < 0.01)) return v.toPrecision(3);
   return String(Math.round(v * 1000) / 1000);
 }
 
-/**
- * Insert missing `name=value` expression rows at the bottom (sorted) without UI notify.
- * @param {string[]} names
- */
-export function ensureParamExprRows(names) {
+/** Insert missing `name=value` expression rows at the bottom (sorted) without UI notify. */
+export function ensureParamExprRows(names: string[]) {
   const missing = [...new Set(names)].filter(Boolean).sort();
   if (!missing.length) return false;
   for (const name of missing) {
     const seed = state.pendingParamSeed[name] ?? {};
-    const value = Number.isFinite(seed.value) ? seed.value : 1;
+    const value = Number.isFinite(seed.value) ? seed.value! : 1;
     insertExprAt(listExpressions().length, {
       latex: `${name}=${formatParamLatexValue(value)}`,
       sliderMin: seed.min,
@@ -54,14 +52,13 @@ export function ensureParamExprRows(names) {
 
 /** Names referenced by field free-symbols or parameter RHS deps. */
 export function collectParamReferences() {
-  /** @type {Set<string>} */
-  const refs = new Set();
+  const refs = new Set<string>();
   for (const item of listExpressions()) {
     if (!item.enabled || !String(item.latex || "").trim()) continue;
     try {
       const classified = classifyExpr(item.latex);
       if (classified.kind === "parameter") {
-        const compiled = compileParamLatex(item.latex, classified.paramName);
+        const compiled = compileParamLatex(item.latex, classified.paramName!);
         for (const p of compiled.freeParams) refs.add(p);
       } else {
         const compiled = compileExpr(item.latex);
@@ -74,19 +71,16 @@ export function collectParamReferences() {
   return refs;
 }
 
-/**
- * Drop ephemeral auto-param rows that are no longer referenced (typing undo).
- * Committed rows (after blur) are kept.
- */
+/** Drop ephemeral auto-param rows that are no longer referenced (typing undo). */
 export function pruneUnusedAutoParams() {
   const refs = collectParamReferences();
   let removed = false;
   for (const item of listExpressions()) {
     if (!item.autoParam) continue;
-    let name = null;
+    let name: string | null = null;
     try {
       const classified = classifyExpr(item.latex);
-      if (classified.kind === "parameter") name = classified.paramName;
+      if (classified.kind === "parameter") name = classified.paramName ?? null;
     } catch {
       continue;
     }
@@ -96,11 +90,6 @@ export function pruneUnusedAutoParams() {
   return removed;
 }
 
-/**
- * While typing in a field expression, skip inserting/pruning auto-param rows.
- * Otherwise each letter (`c`→`co`→`cos`) recreates the math-field and kills
- * MathLive's inline shortcuts (`cos` → `\cos`).
- */
 export function shouldDeferAutoParamRows() {
   const ae = document.activeElement;
   if (!ae) return false;
@@ -113,23 +102,23 @@ export function shouldDeferAutoParamRows() {
   return true;
 }
 
+interface CompileOpts {
+  rebuildUi?: boolean;
+  _afterEnsure?: boolean;
+}
+
 /**
  * Compile all expressions: parameter rows feed shared values; field rows become layers.
- * Free symbols without a dedicated `a=…` row get an auto-created parameter line.
- * @param {{ rebuildUi?: boolean, _afterEnsure?: boolean }} [opts]
  */
-export function compileAllExprs(opts = {}) {
+export function compileAllExprs(opts: CompileOpts = {}): CompileAllResult {
   const rebuildUi = opts.rebuildUi !== false;
   const items = listExpressions().filter((e) => e.enabled && String(e.latex || "").trim());
 
-  /** @type {{ item: any, name: string }[]} */
-  const paramRows = [];
-  /** @type {{ item: any, compiled: any, fn: Function, role: string }[]} */
-  const layers = [];
-  const freeSet = new Set();
-  const definedParams = new Set();
-  /** @type {[string, string][]} */
-  const warnings = [];
+  const paramRows: { item: ExprItem; name: string }[] = [];
+  const layers: CompileLayerResult[] = [];
+  const freeSet = new Set<string>();
+  const definedParams = new Set<string>();
+  const warnings: [string, string][] = [];
   replaceExprWarnings([]);
 
   for (const item of items) {
@@ -152,7 +141,6 @@ export function compileAllExprs(opts = {}) {
     }
     const compiled = compileExpr(item.latex);
     for (const p of compiled.freeParams) freeSet.add(p);
-    // Spatially constant (0th-order) fields: do not graph.
     if (!compiled.usesSpace || compiled.shade === "none") continue;
     const role = resolveExprRole(item.role, compiled.kind);
     layers.push({
@@ -165,7 +153,6 @@ export function compileAllExprs(opts = {}) {
 
   replaceExprWarnings(warnings);
 
-  /** @type {Parameters<typeof syncParamsFromDefinitions>[0]} */
   const defs = paramRows.map(({ item, name }) => ({
     name,
     latex: item.latex,
@@ -180,7 +167,6 @@ export function compileAllExprs(opts = {}) {
 
   syncParamsFromDefinitions(defs, state.pendingParamSeed);
 
-  // Param-equation deps (a=b+1) without their own row.
   const depNames = recompileAllParams();
   const known = new Set(defs.map((d) => d.name));
   const needRows = [
@@ -219,7 +205,6 @@ export function compileAllExprs(opts = {}) {
   for (const L of layers) L.fn = L.compiled.bind(params);
 
   if (rebuildUi) {
-    // Row inserts or kind flips: prefer full render when chrome can't sync in place.
     if (!state.exprListApi?.syncParamChrome?.()) {
       state.exprListApi?.render();
     }
@@ -241,19 +226,19 @@ export function compileAllExprs(opts = {}) {
   };
 }
 
-export function applyPreset(key) {
+export function applyPreset(key: string) {
   const p = PRESETS[key] ?? PRESETS.sincos;
   els.preset.value = key in PRESETS ? key : "sincos";
   state.pendingParamSeed = p.params ?? {};
   if (Array.isArray(p.expressions) && p.expressions.length) {
     setExpressions(p.expressions);
   } else {
-    setExpressions([{ latex: p.latex }]);
+    setExpressions([{ latex: p.latex ?? "" }]);
   }
   state.exprListApi?.render();
 }
 
-export function layerRgbFromItem(item) {
+export function layerRgbFromItem(item: ExprItem) {
   const grad = resolveExprGradient(item);
   const colors = grad.colors.map((hex) => hexToRgb01(hex));
   return {
@@ -266,6 +251,6 @@ export function layerRgbFromItem(item) {
 export function initCompile() {
   applyPreset("sincos");
   if (!listExpressions().length) {
-    setExpressions([{ latex: PRESETS.sincos.latex }]);
+    setExpressions([{ latex: PRESETS.sincos.latex ?? "" }]);
   }
 }

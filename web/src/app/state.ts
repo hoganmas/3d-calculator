@@ -1,10 +1,10 @@
 /** Shared mutable app state — no imports from app/. */
 
-import type { ExprListApi, ExprMeta, FitTiming, SceneBake } from "../types/models.js";
+import type { ExprListApi, ExprMeta, FitTiming, PresetParamSeed, SceneBake } from "../types/models.js";
 
 export const state = {
   /** Preset param defaults applied on next successful compile/sync. */
-  pendingParamSeed: {} as Record<string, unknown>,
+  pendingParamSeed: {} as Record<string, PresetParamSeed>,
 
   exprListApi: null as ExprListApi | null,
 

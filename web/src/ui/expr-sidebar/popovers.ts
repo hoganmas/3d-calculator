@@ -14,14 +14,14 @@ import {
   phaseForValue,
   normalizeAnimMode,
 } from "../../model/params.js";
-import { mountFloatingPopover, type PopoverHandle } from "../popover.ts";
+import { mountFloatingPopover, type PopoverHandle } from "../popover.js";
 import type { ExprItem } from "../../types/models.js";
 import {
   ANIM_SPEED_MAX,
   ANIM_SPEED_MIN,
   ANIM_SPEED_STEP,
   fmtAnimSpeed,
-} from "./helpers.ts";
+} from "./helpers.js";
 import { mountLiquidThumb, syncLiquidThumb } from "../liquidSlider.js";
 
 let openGrad: PopoverHandle | null = null;

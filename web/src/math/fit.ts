@@ -2,6 +2,28 @@
 
 import { compile, ComputeEngine } from "@cortex-js/compute-engine";
 import { MAX_DEG } from "./limits.js";
+import type {
+  ChebFitResult,
+  ClassifiedExpr,
+  CompiledExpr,
+  CompiledParam,
+  FieldKind,
+  PresetDef,
+} from "../types/models.js";
+
+type MathJsonArray = unknown[];
+type CeRun = (scope: Record<string, unknown>) => unknown;
+
+interface CeCompileResult {
+  success: boolean;
+  unsupported?: string[];
+  run: CeRun | null;
+  freeSymbols?: Iterable<unknown>;
+}
+
+function jsonArr(j: unknown): MathJsonArray {
+  return Array.isArray(j) ? j : [];
+}
 
 const ce = new ComputeEngine();
 
@@ -54,7 +76,7 @@ const LATEX_FN_REWRITE = [
  * so users need not type `\`. Skips names already introduced by `\`.
  * @param {string} latex
  */
-function normalizeLatexFunctions(latex) {
+function normalizeLatexFunctions(latex: string) {
   let s = String(latex ?? "");
   for (const name of LATEX_FN_REWRITE) {
     const re = new RegExp(`(^|[^\\\\A-Za-z])(${name})(?![A-Za-z])`, "gi");
@@ -68,7 +90,7 @@ function normalizeLatexFunctions(latex) {
  * treats `cos` as a JS identifier (`_.cos`) instead of letter juxtaposition.
  * @param {string} latex
  */
-function compileLatex(latex) {
+function compileLatex(latex: string): CeCompileResult {
   const src = normalizeLatexFunctions(String(latex ?? "").trim());
   if (!src) {
     return { success: false, unsupported: ["empty"], run: null, freeSymbols: [] };
@@ -79,7 +101,7 @@ function compileLatex(latex) {
   } catch {
     return { success: false, unsupported: ["parse"], run: null, freeSymbols: [] };
   }
-  return compile(box);
+  return compile(box) as CeCompileResult;
 }
 
 /**
@@ -90,7 +112,11 @@ function compileLatex(latex) {
  * @param {{ skipName?: string | null }} [opts]
  * @returns {{ freeParams: string[], usesSpace: boolean }}
  */
-function collectFreeParams(freeSymbols, latex, opts = {}) {
+function collectFreeParams(
+  freeSymbols: Iterable<unknown> | null | undefined,
+  latex: string,
+  opts: { skipName?: string | null } = {},
+) {
   /** @type {string[]} */
   const ids = [];
   let usesSpace = false;
@@ -118,20 +144,20 @@ function collectFreeParams(freeSymbols, latex, opts = {}) {
 }
 
 /** @param {unknown} json MathJSON node */
-function symbolId(json) {
+function symbolId(json: unknown): string | null {
   if (typeof json === "string" && /^[A-Za-z][A-Za-z0-9_]*$/.test(json)) return json;
   if (Array.isArray(json) && json[0] === "Symbol" && typeof json[1] === "string") return json[1];
   return null;
 }
 
-function coerceNumber(v) {
+function coerceNumber(v: unknown): number {
   if (typeof v === "number") return v;
   if (v && typeof v.valueOf === "function") return Number(v.valueOf());
   return Number(v);
 }
 
 /** World (x,y,z) → spherical / cylindrical auxiliaries for the expr scope. */
-function polarFromCartesian(x, y, z) {
+function polarFromCartesian(x: number, y: number, z: number) {
   const rho = Math.hypot(x, y);
   const r = Math.hypot(rho, z);
   const phi = Math.atan2(y, x);
@@ -182,14 +208,14 @@ const MATH_OPERATORS = new Set([
  * LaTeX left of `=` looks like `f(...)` / `f\left(...\right)`.
  * Catches CE's `f(r)` → Multiply(f,r) misparse for single-arg defs.
  */
-function latexLooksLikeFunctionDef(src) {
+function latexLooksLikeFunctionDef(src: string) {
   const eq = String(src).search(/=/);
   if (eq < 0) return false;
   const left = String(src).slice(0, eq).trim();
   return /^[A-Za-z][A-Za-z0-9]*\s*(\\left\s*)?\(/.test(left);
 }
 
-function isUserFunctionCall(json) {
+function isUserFunctionCall(json: unknown) {
   if (!Array.isArray(json) || typeof json[0] !== "string") return false;
   const head = json[0];
   if (MATH_OPERATORS.has(head)) return false;
@@ -215,7 +241,7 @@ function isUserFunctionCall(json) {
  *   paramName?: string,
  * }}
  */
-export function classifyExpr(raw) {
+export function classifyExpr(raw: string): ClassifiedExpr {
   const src = normalizeLatexFunctions(String(raw ?? "").trim());
   if (!src) throw new Error("Empty expression");
 
@@ -237,13 +263,14 @@ export function classifyExpr(raw) {
   const head = typeof headRaw === "string" ? headRaw.toLowerCase() : null;
 
   if (head === "equal" || head === "assign") {
-    const lhs = j[1];
-    const rhs = j[2];
+    const ja = jsonArr(j);
+    const lhs = ja[1];
+    const rhs = ja[2];
     const asDef =
       latexLooksLikeFunctionDef(src) || isUserFunctionCall(lhs);
 
     if (asDef) {
-      const rhsBox = ce.box(rhs);
+      const rhsBox = ce.box(rhs as never);
       const compileLatex = rhsBox.latex || src.split("=").slice(1).join("=").trim();
       if (!compileLatex) throw new Error("Empty right-hand side");
       return {
@@ -262,7 +289,7 @@ export function classifyExpr(raw) {
       !RESERVED_SYMBOLS.has(lhsName) &&
       /^[A-Za-z][A-Za-z0-9_]*$/.test(lhsName)
     ) {
-      const rhsBox = ce.box(rhs);
+      const rhsBox = ce.box(rhs as never);
       const compileLatex = rhsBox.latex || src.split("=").slice(1).join("=").trim();
       if (!compileLatex) throw new Error("Empty parameter right-hand side");
       return {
@@ -275,7 +302,7 @@ export function classifyExpr(raw) {
       };
     }
 
-    const diff = ce.box(["Subtract", lhs, rhs]);
+    const diff = ce.box(["Subtract", lhs, rhs] as never);
     const compileLatex = diff.latex;
     if (!compileLatex) throw new Error("Could not form constraint residual");
     return {
@@ -311,7 +338,7 @@ export function classifyExpr(raw) {
  *   eval: (scope?: Record<string, number>) => number,
  * }}
  */
-export function compileParamLatex(raw, expectedName) {
+export function compileParamLatex(raw: string, expectedName: string): CompiledParam {
   const src = normalizeLatexFunctions(String(raw ?? "").trim());
   if (!src) throw new Error("Empty parameter");
 
@@ -329,7 +356,8 @@ export function compileParamLatex(raw, expectedName) {
   const headRaw = Array.isArray(j) ? j[0] : box?.operator;
   const head = typeof headRaw === "string" ? headRaw.toLowerCase() : null;
   if (head === "equal" || head === "assign") {
-    const rhsBox = ce.box(j[2]);
+    const ja = jsonArr(j);
+    const rhsBox = ce.box(ja[2] as never);
     rhsLatex = rhsBox?.latex || src.split("=").slice(1).join("=").trim();
   } else if (expectedName) {
     // Bare number / expr → treat as RHS for expectedName.
@@ -381,7 +409,7 @@ export function compileParamLatex(raw, expectedName) {
 }
 
 /** Format a number for embedding in `name=<value>` LaTeX. */
-export function formatParamLatexValue(v) {
+export function formatParamLatexValue(v: number) {
   if (!Number.isFinite(v)) return "0";
   const a = Math.abs(v);
   if (a !== 0 && (a >= 1e6 || a < 1e-4)) return v.toExponential(6).replace(/e\+?/, "e");
@@ -405,7 +433,7 @@ export function formatParamLatexValue(v) {
  *   bind: (params?: Record<string, number>) => (x: number, y: number, z: number) => number,
  * }}
  */
-export function compileExpr(raw) {
+export function compileExpr(raw: string): CompiledExpr {
   const classified = classifyExpr(raw);
   const src = classified.compileLatex;
 
@@ -425,15 +453,15 @@ export function compileExpr(raw) {
   return {
     freeParams,
     usesSpace,
-    kind: classified.kind,
+    kind: classified.kind as FieldKind,
     shade,
     isoLevel: classified.isoLevel,
     classifyLabel: usesSpace ? classified.label : "constant (not graphed)",
     /** Bind current parameter values → f(x,y,z); injects r,θ,φ,ρ. */
-    bind(params = {}) {
-      return (x, y, z) => {
+    bind(params: Record<string, number> = {}) {
+      return (x: number, y: number, z: number) => {
         const { r, theta, phi, rho } = polarFromCartesian(x, y, z);
-        const scope = { x, y, z, r, theta, phi, rho };
+        const scope: Record<string, number> = { x, y, z, r, theta, phi, rho };
         for (const name of freeParams) {
           const v = params[name];
           scope[name] = Number.isFinite(v) ? v : 1;
@@ -445,7 +473,7 @@ export function compileExpr(raw) {
 }
 
 /** Preset densities as LaTeX (shown in the MathLive field). */
-export const PRESETS = {
+export const PRESETS: Record<string, PresetDef> = {
   sincos: {
     label: "y = sin(x) cos(x)",
     latex: String.raw`y=\sin(x)\cos(z)`,
@@ -498,7 +526,7 @@ export const PRESETS = {
   },
 };
 
-function fromUnit(u, a, b) {
+function fromUnit(u: number, a: number, b: number) {
   return 0.5 * (a + b) + 0.5 * (b - a) * u;
 }
 
@@ -506,7 +534,7 @@ function fromUnit(u, a, b) {
  * DCT matrix W[i,a] = T_i(u_a) for Gauss–Chebyshev nodes.
  * Built via recurrence in O(n²).
  */
-function chebWeightMatrix(n, uNodes) {
+function chebWeightMatrix(n: number, uNodes: number[]) {
   const W = new Float64Array(n * n);
   for (let a = 0; a < n; a++) {
     const u = uNodes[a];
@@ -528,7 +556,7 @@ function chebWeightMatrix(n, uNodes) {
  *
  * Packing: idx = x + y*n + z*n*n (same as vals / cheb elsewhere).
  */
-function chebDCT3DSeparable(vals, n, uNodes) {
+function chebDCT3DSeparable(vals: Float64Array, n: number, uNodes: number[]) {
   const W = chebWeightMatrix(n, uNodes);
   const scale = new Float64Array(n);
   for (let i = 0; i < n; i++) scale[i] = (i === 0 ? 1 : 2) / n;
@@ -580,8 +608,8 @@ function chebDCT3DSeparable(vals, n, uNodes) {
 }
 
 /** T_0..T_deg as monomial coeffs in u (length deg+1 arrays). */
-function chebToMonoTable(deg) {
-  const T = [[1], [0, 1]];
+function chebToMonoTable(deg: number) {
+  const T: number[][] = [[1], [0, 1]];
   for (let n = 2; n <= deg; n++) {
     const prev = T[n - 1];
     const prev2 = T[n - 2];
@@ -597,7 +625,7 @@ function chebToMonoTable(deg) {
  * Chebyshev tensor c_ijk T_i(x/h)T_j(y/h)T_k(z/h)
  * → monomials m_abc for x^a y^b z^c (same packing).
  */
-function chebToMonomial3D(chebCoeffs, deg, half) {
+function chebToMonomial3D(chebCoeffs: ArrayLike<number>, deg: number, half: number) {
   const N = deg;
   const n = N + 1;
   const T = chebToMonoTable(N);
@@ -629,7 +657,7 @@ function chebToMonomial3D(chebCoeffs, deg, half) {
   return Float32Array.from(mono);
 }
 
-function evalMonomial3D(mono, deg, x, y, z) {
+function evalMonomial3D(mono: ArrayLike<number>, deg: number, x: number, y: number, z: number) {
   const n = deg + 1;
   let s = 0;
   let xp = 1;
@@ -652,7 +680,12 @@ function evalMonomial3D(mono, deg, x, y, z) {
  * Fit f on [-half,half]^3 with tensor Chebyshev, convert to world monomials.
  * @param {{ skipL2?: boolean, skipMono?: boolean }} [opts]
  */
-export function fitChebyshev3D(fn, half, deg, opts = {}) {
+export function fitChebyshev3D(
+  fn: (x: number, y: number, z: number) => number,
+  half: number,
+  deg: number,
+  opts: { skipL2?: boolean; skipMono?: boolean } = {},
+): ChebFitResult {
   const tAll = performance.now();
   const N = Math.max(0, Math.min(MAX_DEG, deg | 0));
   const n = N + 1;

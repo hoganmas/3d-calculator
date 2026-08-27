@@ -1,26 +1,52 @@
 import { PRESETS } from "../math/fit.js";
 import { getThemePref, setThemePref } from "../ui/theme.js";
 
-export const els = {
-  preset: document.getElementById("preset"),
-  exprList: document.getElementById("exprList"),
-  deg: document.getElementById("deg"),
-  scale: document.getElementById("scale"),
-  steps: document.getElementById("steps"),
-  boxSize: document.getElementById("boxSize"),
-  isoInterp: document.getElementById("isoInterp"),
-  marchDownscale: document.getElementById("marchDownscale"),
+function el<T extends HTMLElement>(id: string): T {
+  return document.getElementById(id) as T;
+}
+
+export interface DomElements {
+  preset: HTMLSelectElement;
+  exprList: HTMLElement;
+  deg: HTMLInputElement;
+  scale: HTMLInputElement;
+  steps: HTMLInputElement;
+  boxSize: HTMLInputElement;
+  isoInterp: HTMLSelectElement;
+  marchDownscale: HTMLInputElement;
+  marchScaleLabel: HTMLElement | null;
+  reset: HTMLButtonElement;
+  err: HTMLElement;
+  viewport: HTMLElement;
+  hud: HTMLElement;
+  metricsDump: HTMLElement | null;
+  copyMetrics: HTMLButtonElement | null;
+  openSettings: HTMLButtonElement | null;
+  closeSettings: HTMLButtonElement | null;
+  settingsDialog: HTMLDialogElement | null;
+  themePref: HTMLSelectElement | null;
+}
+
+export const els: DomElements = {
+  preset: el("preset"),
+  exprList: el("exprList"),
+  deg: el("deg"),
+  scale: el("scale"),
+  steps: el("steps"),
+  boxSize: el("boxSize"),
+  isoInterp: el("isoInterp"),
+  marchDownscale: el("marchDownscale"),
   marchScaleLabel: document.getElementById("marchScaleLabel"),
-  reset: document.getElementById("reset"),
-  err: document.getElementById("err"),
-  viewport: document.getElementById("viewport"),
-  hud: document.getElementById("hud"),
+  reset: el("reset"),
+  err: el("err"),
+  viewport: el("viewport"),
+  hud: el("hud"),
   metricsDump: document.getElementById("metricsDump"),
-  copyMetrics: document.getElementById("copyMetrics"),
-  openSettings: document.getElementById("openSettings"),
-  closeSettings: document.getElementById("closeSettings"),
-  settingsDialog: document.getElementById("settingsDialog"),
-  themePref: document.getElementById("themePref"),
+  copyMetrics: document.getElementById("copyMetrics") as HTMLButtonElement | null,
+  openSettings: document.getElementById("openSettings") as HTMLButtonElement | null,
+  closeSettings: document.getElementById("closeSettings") as HTMLButtonElement | null,
+  settingsDialog: document.getElementById("settingsDialog") as HTMLDialogElement | null,
+  themePref: document.getElementById("themePref") as HTMLSelectElement | null,
 };
 
 export function viewportSize() {
@@ -40,7 +66,7 @@ export function initDom() {
   if (els.themePref) {
     els.themePref.value = getThemePref();
     els.themePref.addEventListener("change", () => {
-      setThemePref(/** @type {import("../ui/theme.js").ThemePref} */ (els.themePref.value));
+      setThemePref(els.themePref!.value as "dark" | "light" | "system");
     });
   }
 
@@ -62,45 +88,48 @@ export function closeSettingsDialog() {
 }
 
 /** Drag the sidebar edge to change --panel-w; persists in localStorage. */
-export function initPanelResize(onResize) {
-  const handle = document.getElementById("panelResize");
-  if (!handle) return;
+export function initPanelResize(onResize: () => void) {
+  const el = document.getElementById("panelResize");
+  if (!el) return;
+  const grip: HTMLElement = el;
   const PANEL_MIN = 240;
   const PANEL_MAX = 720;
   const STORAGE_KEY = "poly-cloud-panel-w";
 
   function panelInset() {
-    const raw = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--panel-inset"));
+    const raw = parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue("--panel-inset"),
+    );
     return Number.isFinite(raw) ? raw : 12;
   }
 
-  function clampW(w) {
+  function clampW(w: number) {
     const max = Math.min(PANEL_MAX, Math.max(PANEL_MIN, window.innerWidth - 2 * panelInset() - 160));
     return Math.round(Math.min(max, Math.max(PANEL_MIN, w)));
   }
 
-  function applyW(w) {
+  function applyW(w: number) {
     const px = clampW(w);
     document.documentElement.style.setProperty("--panel-w", `${px}px`);
-    handle.setAttribute("aria-valuenow", String(px));
+    grip.setAttribute("aria-valuenow", String(px));
     return px;
   }
 
   try {
     const saved = Number(localStorage.getItem(STORAGE_KEY));
     if (Number.isFinite(saved) && saved > 0) applyW(saved);
-  } catch (_) {
+  } catch {
     /* ignore */
   }
 
-  handle.setAttribute("aria-valuemin", String(PANEL_MIN));
-  handle.setAttribute("aria-valuemax", String(PANEL_MAX));
+  grip.setAttribute("aria-valuemin", String(PANEL_MIN));
+  grip.setAttribute("aria-valuemax", String(PANEL_MAX));
 
   let dragging = false;
 
-  function onMove(ev) {
+  function onMove(ev: PointerEvent | TouchEvent) {
     if (!dragging) return;
-    const x = ev.touches ? ev.touches[0].clientX : ev.clientX;
+    const x = "touches" in ev ? ev.touches[0].clientX : ev.clientX;
     applyW(x - panelInset());
     onResize();
   }
@@ -108,34 +137,37 @@ export function initPanelResize(onResize) {
   function onUp() {
     if (!dragging) return;
     dragging = false;
-    handle.classList.remove("dragging");
+    grip.classList.remove("dragging");
     document.body.classList.remove("panel-resizing");
     window.removeEventListener("pointermove", onMove);
     window.removeEventListener("pointerup", onUp);
     window.removeEventListener("pointercancel", onUp);
     try {
-      const cur = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--panel-w"));
+      const cur = parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue("--panel-w"),
+      );
       if (Number.isFinite(cur)) localStorage.setItem(STORAGE_KEY, String(cur));
-    } catch (_) {
+    } catch {
       /* ignore */
     }
     onResize();
   }
 
-  handle.addEventListener("pointerdown", (ev) => {
+  grip.addEventListener("pointerdown", (ev) => {
     if (window.matchMedia("(max-width: 800px)").matches) return;
     ev.preventDefault();
     dragging = true;
-    handle.classList.add("dragging");
+    grip.classList.add("dragging");
     document.body.classList.add("panel-resizing");
-    handle.setPointerCapture?.(ev.pointerId);
+    grip.setPointerCapture?.(ev.pointerId);
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
   });
 
-  handle.addEventListener("keydown", (ev) => {
-    const cur = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--panel-w")) || 360;
+  grip.addEventListener("keydown", (ev) => {
+    const cur =
+      parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--panel-w")) || 360;
     const step = ev.shiftKey ? 40 : 16;
     if (ev.key === "ArrowLeft") {
       ev.preventDefault();

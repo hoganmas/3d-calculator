@@ -4,8 +4,10 @@
  * See research/poly/notes/cheb-idct-volume.md.
  */
 
+import type { Idct3DResult, IdctGrad3DResult } from "../types/models.js";
+
 /** Univariate IDCT at M Chebyshev roots: v_m = Σ_{i=0}^{n-1} c_i T_i(ξ_m). */
-function idctCheb1D(coeff, M) {
+function idctCheb1D(coeff: ArrayLike<number>, M: number): Float64Array {
   const n = coeff.length;
   const out = new Float64Array(M);
   const invM = Math.PI / M;
@@ -25,7 +27,7 @@ function idctCheb1D(coeff, M) {
  * Chebyshev → derivative Chebyshev (same length, last mode 0).
  * If s = Σ_{k=0}^{n-1} c_k T_k, returns d with s' = Σ d_k T_k.
  */
-function chebDiff1D(c) {
+function chebDiff1D(c: ArrayLike<number>): Float64Array {
   const n = c.length;
   const d = new Float64Array(n);
   if (n < 2) return d;
@@ -41,17 +43,17 @@ function chebDiff1D(c) {
 /**
  * 3D separable IDCT. Input cheb packed i + j*n + k*n*n, length n³ (n = N+1).
  * Output dens packed ix + iy*M + iz*M*M at Chebyshev roots in [-1,1]³.
- * @param {Float32Array|Float64Array} cheb
- * @param {number} deg
- * @param {number} [gridM]  default deg+1; may be larger (zero-pad modes)
  */
-export function idctCheb3D(cheb, deg, gridM) {
+export function idctCheb3D(
+  cheb: Float32Array | Float64Array,
+  deg: number,
+  gridM?: number,
+): Idct3DResult {
   const n = deg + 1;
-  const M = Math.max(n, gridM | 0 || n);
+  const M = Math.max(n, (gridM ?? n) | 0 || n);
   const tmp1 = new Float64Array(M * n * n);
   const row = new Float64Array(n);
 
-  // Along i (x): n*n transforms of length n → M
   for (let j = 0; j < n; j++) {
     for (let k = 0; k < n; k++) {
       for (let i = 0; i < n; i++) row[i] = cheb[i + j * n + k * n * n] || 0;
@@ -62,7 +64,6 @@ export function idctCheb3D(cheb, deg, gridM) {
 
   const tmp2 = new Float64Array(M * M * n);
   const rowY = new Float64Array(n);
-  // Along j (y)
   for (let m = 0; m < M; m++) {
     for (let k = 0; k < n; k++) {
       for (let j = 0; j < n; j++) rowY[j] = tmp1[m + j * M + k * M * n];
@@ -73,7 +74,6 @@ export function idctCheb3D(cheb, deg, gridM) {
 
   const dens = new Float32Array(M * M * M);
   const rowZ = new Float64Array(n);
-  // Along k (z)
   for (let m = 0; m < M; m++) {
     for (let p = 0; p < M; p++) {
       for (let k = 0; k < n; k++) rowZ[k] = tmp2[m + p * M + k * M * M];
@@ -87,12 +87,14 @@ export function idctCheb3D(cheb, deg, gridM) {
 
 /**
  * ∂f/∂ξ, ∂f/∂η, ∂f/∂ζ on the same Chebyshev-root grid as idctCheb3D.
- * Differentiates the Chebyshev tensor (exact for the approximant), then IDCT.
- * World-space gradient is (1/half) · (gx, gy, gz).
  */
-export function idctChebGrad3D(cheb, deg, gridM) {
+export function idctChebGrad3D(
+  cheb: Float32Array | Float64Array,
+  deg: number,
+  gridM?: number,
+): IdctGrad3DResult {
   const n = deg + 1;
-  const M = Math.max(n, gridM | 0 || n);
+  const M = Math.max(n, (gridM ?? n) | 0 || n);
   const n3 = n * n * n;
   const cx = new Float64Array(n3);
   const cy = new Float64Array(n3);

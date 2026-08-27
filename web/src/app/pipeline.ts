@@ -1,4 +1,3 @@
-// @ts-nocheck — incremental TS migration; DOM refs and keyframe cache shapes still JS.
 import { MAX_DEG } from "../math/limits.js";
 import { fitChebyshev3D } from "../math/fit.js";
 import { idctCheb3D, idctChebGrad3D } from "../math/idct.js";
@@ -31,7 +30,13 @@ import { compileExpr, classifyExpr } from "../math/fit.js";
 import { listExpressions, resolveExprRole } from "../model/expressions.js";
 import { els, viewportSize } from "./dom.js";
 import { state, FIT_DEBOUNCE_MS } from "./state.js";
-import type { ConstraintLayer, DensLayer, SceneBake } from "../types/models.js";
+import type {
+  ChebFitTiming,
+  ConstraintLayer,
+  DensLayer,
+  KeyframeBlend,
+  KeyframeFrame,
+} from "../types/models.js";
 import { setBoxSize } from "./scene.js";
 import { compileAllExprs, layerRgbFromItem } from "./compile.js";
 import {
@@ -50,6 +55,19 @@ import {
   syncExprCompileState,
   refreshMetricsDump,
 } from "./hud.js";
+
+interface CachedLayer {
+  kind: "density" | "constraint";
+  dens?: Float32Array;
+  gx?: Float32Array;
+  gy?: Float32Array;
+  gz?: Float32Array;
+  keyframes?: KeyframeFrame[];
+  blend?: KeyframeBlend;
+  cheb?: Float32Array;
+  fitRel?: number;
+  isoLevel?: number;
+}
 
 export function tickGpuKeyframeBlends() {
   const cons = state.lastSceneBake?.constraints;
@@ -114,9 +132,9 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
 
     const densLayers: DensLayer[] = [];
     const constraints: ConstraintLayer[] = [];
-    let cheb = null;
+    let cheb: Float32Array | null = null;
     let fitRel = NaN;
-    let timingAcc = { sampleMs: 0, chebMs: 0, monoMs: 0, l2Ms: 0, totalMs: 0 };
+    let timingAcc: ChebFitTiming = { sampleMs: 0, chebMs: 0, monoMs: 0, l2Ms: 0, totalMs: 0 };
     let M = deg + 1;
     let fittedCount = 0;
     let keyframedCount = 0;
@@ -129,19 +147,19 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
     if (fromAnim) beginKeyframePass();
     else clearKeyframeCaches();
 
-    /** @type {Map<string, Record<string, unknown>>} */
-    const prevById = new Map<string, Record<string, unknown>>();
+    const prevById = new Map<string, CachedLayer>();
+    const lastBake = state.lastSceneBake;
     const canReuseCache =
       fromAnim &&
       dirty &&
-      state.lastSceneBake &&
-      state.lastSceneBake.deg === deg &&
-      Math.abs((state.lastSceneBake.half ?? NaN) - half) < 1e-12;
-    if (canReuseCache) {
-      for (const d of state.lastSceneBake.densLayers) {
+      lastBake &&
+      lastBake.deg === deg &&
+      Math.abs((lastBake.half ?? NaN) - half) < 1e-12;
+    if (canReuseCache && lastBake) {
+      for (const d of lastBake.densLayers) {
         if (d.id) prevById.set(d.id, { kind: "density", ...d });
       }
-      for (const c of state.lastSceneBake.constraints) {
+      for (const c of lastBake.constraints) {
         if (c.id) prevById.set(c.id, { kind: "constraint", ...c });
       }
     }
@@ -162,9 +180,9 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
         (prev.dens instanceof Float32Array || prevHasKf);
 
       if (reuseDens) {
-        if (prevHasKf) {
+        if (prevHasKf && prev.keyframes?.[0]) {
           M = Math.round(Math.cbrt(prev.keyframes[0].dens.length)) || M;
-        } else {
+        } else if (prev.dens) {
           M = Math.round(Math.cbrt(prev.dens.length)) || M;
         }
         if (L.role === "constraint") {
@@ -172,7 +190,7 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
             constraints.push({
               id: L.item.id,
               keyframes: prev.keyframes,
-              blend: prev.blend || { i0: 0, i1: 0, t: 0 },
+              blend: prev.blend ?? { i0: 0, i1: 0, t: 0 },
               color,
               color2,
               colors,
@@ -194,7 +212,7 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
             });
           }
         } else {
-          densLayers.push({ id: L.item.id, dens: prev.dens, color, color2 });
+          densLayers.push({ id: L.item.id, dens: prev.dens!, color, color2, colors });
         }
         if (!cheb && prev.cheb) {
           cheb = prev.cheb;
@@ -205,7 +223,7 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
 
       // Keyframe path: one dirty animated slider → GPU blend (iso) / CPU lerp (dens).
       const kfParam =
-        fromAnim && depends
+        fromAnim && depends && dirty
           ? keyframeAnimParam(L.compiled.freeParams, dirty)
           : null;
       if (kfParam) {
@@ -310,8 +328,8 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
         cheb = fit.cheb;
         fitRel = fit.fitRelL2;
       }
-      for (const k of Object.keys(timingAcc)) {
-        timingAcc[k] += fit.timing?.[k] || 0;
+      for (const k of Object.keys(timingAcc) as (keyof ChebFitTiming)[]) {
+        timingAcc[k] += fit.timing[k] || 0;
       }
     }
 
@@ -368,7 +386,12 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
       setConstraintKeyframeBlends(
         constraints
           .filter((c) => c.blend && c.id != null)
-          .map((c) => ({ id: c.id, i0: c.blend.i0, i1: c.blend.i1, t: c.blend.t })),
+          .map((c) => ({
+            id: c.id!,
+            i0: c.blend!.i0,
+            i1: c.blend!.i1,
+            t: c.blend!.t,
+          })),
       );
     }
 

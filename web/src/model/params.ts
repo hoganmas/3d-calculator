@@ -6,6 +6,21 @@
 import { compileParamLatex, formatParamLatexValue } from "../math/fit.js";
 import type { AnimMode, ParamState } from "../types/models.js";
 
+type ParamInit = Partial<ParamState> & { animate?: boolean };
+
+export interface ParamDefinition {
+  name: string;
+  latex: string;
+  exprId: string;
+  min?: number;
+  max?: number;
+  speed?: number;
+  animating?: boolean;
+  phase?: number;
+  animMode?: AnimMode;
+  value?: number;
+}
+
 /** @type {Map<string, ParamState>} */
 const params = new Map<string, ParamState>();
 
@@ -20,16 +35,14 @@ const DEFAULT_ANIM_MODE = "pingpong";
  * @param {unknown} mode
  * @returns {AnimMode}
  */
-export function normalizeAnimMode(mode) {
+export function normalizeAnimMode(mode: unknown): AnimMode {
   return mode === "loop" ? "loop" : "pingpong";
 }
 
-/**
- * Phase so `tickParamAnimation(timeSec)` yields the current value.
- * @param {Pick<ParamState, "value" | "min" | "max" | "speed" | "animMode">} p
- * @param {number} timeSec
- */
-export function phaseForValue(p, timeSec) {
+export function phaseForValue(
+  p: Pick<ParamState, "value" | "min" | "max" | "speed" | "animMode">,
+  timeSec: number,
+) {
   const span = Math.max(1e-9, p.max - p.min);
   const u = Math.min(1, Math.max(0, (p.value - p.min) / span));
   if (normalizeAnimMode(p.animMode) === "loop") {
@@ -44,16 +57,16 @@ export function phaseForValue(p, timeSec) {
  * @param {Partial<ParamState> & { animate?: boolean }} [init]
  * @returns {ParamState}
  */
-function makeParam(name, init = {}) {
-  let min = Number.isFinite(init.min) ? init.min : DEFAULT_MIN;
-  let max = Number.isFinite(init.max) ? init.max : DEFAULT_MAX;
+function makeParam(name: string, init: ParamInit = {}): ParamState {
+  let min = Number.isFinite(init.min) ? (init.min as number) : DEFAULT_MIN;
+  let max = Number.isFinite(init.max) ? (init.max as number) : DEFAULT_MAX;
   if (max < min) [min, max] = [max, min];
-  let value = Number.isFinite(init.value) ? init.value : DEFAULT_VALUE;
+  let value = Number.isFinite(init.value) ? (init.value as number) : DEFAULT_VALUE;
   value = Math.min(max, Math.max(min, value));
   const span = Math.max(1e-9, max - min);
   const step =
-    Number.isFinite(init.step) && init.step > 0
-      ? init.step
+    Number.isFinite(init.step) && (init.step as number) > 0
+      ? (init.step as number)
       : Math.max(0.01, Number((span / 200).toPrecision(2)));
   const latex =
     typeof init.latex === "string" && init.latex.trim()
@@ -65,8 +78,11 @@ function makeParam(name, init = {}) {
     max,
     step,
     animating: !!(init.animating ?? init.animate),
-    speed: Number.isFinite(init.speed) && init.speed > 0 ? init.speed : DEFAULT_SPEED,
-    phase: Number.isFinite(init.phase) ? init.phase : Math.random(),
+    speed:
+      Number.isFinite(init.speed) && (init.speed as number) > 0
+        ? (init.speed as number)
+        : DEFAULT_SPEED,
+    phase: Number.isFinite(init.phase) ? (init.phase as number) : Math.random(),
     animMode: normalizeAnimMode(init.animMode),
     latex,
     exprId: typeof init.exprId === "string" ? init.exprId : null,
@@ -82,15 +98,14 @@ export function listParamNames() {
 }
 
 /** @returns {Record<string, number>} */
-export function getParamValues() {
-  /** @type {Record<string, number>} */
-  const out = {};
+export function getParamValues(): Record<string, number> {
+  const out: Record<string, number> = {};
   for (const [name, p] of params) out[name] = p.value;
   return out;
 }
 
 /** @param {string} name */
-export function getParam(name) {
+export function getParam(name: string) {
   return params.get(name) ?? null;
 }
 
@@ -104,9 +119,8 @@ export function anyParamAnimating() {
  * transitively depends on them via `a = f(b,…)`.
  * @returns {Set<string>}
  */
-export function collectAnimDirtyParams() {
-  /** @type {Set<string>} */
-  const dirty = new Set();
+export function collectAnimDirtyParams(): Set<string> {
+  const dirty = new Set<string>();
   for (const [name, p] of params) {
     if (p.animating && !p.driven) dirty.add(name);
   }
@@ -143,7 +157,10 @@ export function collectAnimDirtyParams() {
  * }[]} defs
  * @param {Record<string, Partial<ParamState> & { animate?: boolean }>} [seed]
  */
-export function syncParamsFromDefinitions(defs, seed = {}) {
+export function syncParamsFromDefinitions(
+  defs: ParamDefinition[],
+  seed: Record<string, ParamInit> = {},
+) {
   const keep = new Set(defs.map((d) => d.name));
   for (const name of [...params.keys()]) {
     if (!keep.has(name)) params.delete(name);
@@ -173,11 +190,12 @@ export function syncParamsFromDefinitions(defs, seed = {}) {
       ...cur,
       latex: d.latex,
       exprId: d.exprId,
-      min: Number.isFinite(d.min) ? d.min : cur.min,
-      max: Number.isFinite(d.max) ? d.max : cur.max,
-      speed: Number.isFinite(d.speed) && d.speed > 0 ? d.speed : cur.speed,
+      min: Number.isFinite(d.min) ? (d.min as number) : cur.min,
+      max: Number.isFinite(d.max) ? (d.max as number) : cur.max,
+      speed:
+        Number.isFinite(d.speed) && (d.speed as number) > 0 ? (d.speed as number) : cur.speed,
       animating: typeof d.animating === "boolean" ? d.animating : cur.animating,
-      phase: Number.isFinite(d.phase) ? d.phase : cur.phase,
+      phase: Number.isFinite(d.phase) ? (d.phase as number) : cur.phase,
       animMode: d.animMode != null ? normalizeAnimMode(d.animMode) : cur.animMode,
     });
   }
@@ -186,14 +204,14 @@ export function syncParamsFromDefinitions(defs, seed = {}) {
 /**
  * @param {Record<string, Partial<ParamState> & { animate?: boolean }}>} seed
  */
-export function applyParamSeed(seed) {
+export function applyParamSeed(seed: Record<string, ParamInit>) {
   for (const [name, init] of Object.entries(seed ?? {})) {
     const cur = params.get(name);
     if (!cur) continue;
     const next = makeParam(name, { ...cur, ...init, latex: cur.latex, exprId: cur.exprId });
     if (Number.isFinite(init.value) && (typeof init.latex !== "string" || !init.latex.trim())) {
-      next.latex = `${name}=${formatParamLatexValue(init.value)}`;
-      next.value = Math.min(next.max, Math.max(next.min, init.value));
+      next.latex = `${name}=${formatParamLatexValue(init.value as number)}`;
+      next.value = Math.min(next.max, Math.max(next.min, init.value as number));
     }
     if (init.animating === undefined && init.animate === undefined) next.animating = cur.animating;
     if (!Number.isFinite(init.phase)) next.phase = cur.phase;
@@ -205,13 +223,13 @@ export function applyParamSeed(seed) {
  * @param {string} name
  * @param {Partial<ParamState>} patch
  */
-export function updateParam(name, patch) {
+export function updateParam(name: string, patch: Partial<ParamState>) {
   const cur = params.get(name);
   if (!cur) return null;
-  let min = Number.isFinite(patch.min) ? patch.min : cur.min;
-  let max = Number.isFinite(patch.max) ? patch.max : cur.max;
+  let min = Number.isFinite(patch.min) ? (patch.min as number) : cur.min;
+  let max = Number.isFinite(patch.max) ? (patch.max as number) : cur.max;
   if (max < min) [min, max] = [max, min];
-  let value = Number.isFinite(patch.value) ? patch.value : cur.value;
+  let value = Number.isFinite(patch.value) ? (patch.value as number) : cur.value;
   value = Math.min(max, Math.max(min, value));
   let latex = typeof patch.latex === "string" ? patch.latex : cur.latex;
   if (Number.isFinite(patch.value) && patch.latex === undefined) {
@@ -224,15 +242,25 @@ export function updateParam(name, patch) {
     max,
     value,
     latex,
-    step: Number.isFinite(patch.step) && patch.step > 0 ? patch.step : cur.step,
-    speed: Number.isFinite(patch.speed) && patch.speed > 0 ? patch.speed : cur.speed,
+    step:
+      Number.isFinite(patch.step) && (patch.step as number) > 0
+        ? (patch.step as number)
+        : cur.step,
+    speed:
+      Number.isFinite(patch.speed) && (patch.speed as number) > 0
+        ? (patch.speed as number)
+        : cur.speed,
     animMode: patch.animMode != null ? normalizeAnimMode(patch.animMode) : cur.animMode,
   };
   params.set(name, next);
   return next;
 }
 
-export function setParamValue(name, value, { stopAnim = true, rewriteLatex = true } = {}) {
+export function setParamValue(
+  name: string,
+  value: number,
+  { stopAnim = true, rewriteLatex = true }: { stopAnim?: boolean; rewriteLatex?: boolean } = {},
+) {
   const cur = params.get(name);
   if (!cur) return null;
   const v = Math.min(cur.max, Math.max(cur.min, Number(value)));
@@ -251,7 +279,7 @@ export function setParamValue(name, value, { stopAnim = true, rewriteLatex = tru
 }
 
 /** Recompile one param from its latex. */
-export function recompileParam(name) {
+export function recompileParam(name: string) {
   const cur = params.get(name);
   if (!cur) return false;
   try {
@@ -308,7 +336,7 @@ export function evalParamEquations() {
   if (!compiled.size) return false;
 
   /** @type {Record<string, number>} */
-  const scope = {};
+  const scope: Record<string, number> = {};
   for (const [n, p] of params) scope[n] = p.value;
 
   let changed = false;
@@ -336,7 +364,7 @@ export function evalParamEquations() {
   return changed;
 }
 
-export function toggleParamAnimate(name, timeSec = performance.now() / 1000) {
+export function toggleParamAnimate(name: string, timeSec = performance.now() / 1000) {
   const cur = params.get(name);
   if (!cur || cur.driven) return cur;
   const next = { ...cur, animating: !cur.animating };
@@ -352,7 +380,7 @@ export function toggleParamAnimate(name, timeSec = performance.now() / 1000) {
  * @param {string} name
  * @returns {ParamState | null}
  */
-export function stopParamAnimation(name) {
+export function stopParamAnimation(name: string) {
   const cur = params.get(name);
   if (!cur || !cur.animating) return cur;
   const next = { ...cur, animating: false };
@@ -364,7 +392,7 @@ export function stopParamAnimation(name) {
  * @param {number} timeSec
  * @returns {boolean}
  */
-export function tickParamAnimation(timeSec) {
+export function tickParamAnimation(timeSec: number) {
   let changed = false;
   for (const [name, p] of params) {
     if (!p.animating || p.driven) continue;

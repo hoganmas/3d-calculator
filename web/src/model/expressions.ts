@@ -24,12 +24,15 @@ export const EXPR_GRADIENTS = [
 
 export const DEFAULT_EXPR_COLOR = EXPR_GRADIENTS[0].color;
 
-function gradientForIndex(i) {
+function gradientForIndex(i: number) {
   return EXPR_GRADIENTS[i % EXPR_GRADIENTS.length];
 }
 
 /** Normalize a list of hex stops (clamp length, ensure ≥2). */
-export function normalizeGradColors(input, fallbackPrimary = DEFAULT_EXPR_COLOR) {
+export function normalizeGradColors(
+  input: string[] | unknown,
+  fallbackPrimary = DEFAULT_EXPR_COLOR,
+): string[] {
   let cols = Array.isArray(input)
     ? input.map((c) => String(c || "").trim()).filter(Boolean)
     : [];
@@ -47,7 +50,11 @@ export function normalizeGradColors(input, fallbackPrimary = DEFAULT_EXPR_COLOR)
  * @param {{ color?: string, color2?: string, colors?: string[] }} item
  * @returns {{ colors: string[], color: string, color2: string }}
  */
-export function resolveExprGradient(item) {
+export function resolveExprGradient(item: {
+  color?: string;
+  color2?: string;
+  colors?: string[];
+}) {
   const colors = normalizeGradColors(
     item.colors?.length
       ? item.colors
@@ -65,7 +72,7 @@ export function resolveExprGradient(item) {
 }
 
 /** Secondary endpoint when the user edits the primary swatch only. */
-export function color2ForPrimary(primary) {
+export function color2ForPrimary(primary: string) {
   const hit = EXPR_GRADIENTS.find(
     (g) => g.color.toLowerCase() === String(primary || "").toLowerCase(),
   );
@@ -73,7 +80,7 @@ export function color2ForPrimary(primary) {
 }
 
 /** CSS linear-gradient from stop list. */
-export function cssGradientFromColors(colors, angle = "145deg") {
+export function cssGradientFromColors(colors: string[] | unknown, angle = "145deg") {
   const cols = normalizeGradColors(colors);
   if (cols.length === 1) return cols[0];
   const stops = cols
@@ -82,7 +89,7 @@ export function cssGradientFromColors(colors, angle = "145deg") {
   return `linear-gradient(${angle}, ${stops})`;
 }
 
-function colorForIndex(i) {
+function colorForIndex(i: number) {
   return gradientForIndex(i).color;
 }
 
@@ -117,7 +124,7 @@ export function replaceExprWarnings(entries: Iterable<[string, string]>) {
 }
 
 /** @param {string} id */
-export function getExprWarning(id) {
+export function getExprWarning(id: string) {
   return exprWarnings.get(id) ?? null;
 }
 
@@ -126,7 +133,7 @@ function emit() {
   if (onChange) onChange();
 }
 
-function isEmptyLatex(latex) {
+function isEmptyLatex(latex: string | undefined | null) {
   return !String(latex ?? "").trim();
 }
 
@@ -142,7 +149,7 @@ function ensureTrailingEmptyExpr() {
  * @param {number} at
  * @param {Partial<ExprItem>} init
  */
-function clampInsertIndex(at, init) {
+function clampInsertIndex(at: number, init: Partial<ExprItem>) {
   let i = Math.max(0, Math.min(items.length, at | 0));
   if (
     items.length &&
@@ -169,15 +176,15 @@ export function createExprItem(
   } = {},
 ): ExprItem {
   const id = init.id ?? `e${nextId++}`;
-  let sliderMin = Number.isFinite(init.sliderMin)
-    ? init.sliderMin
+  let sliderMin: number = Number.isFinite(init.sliderMin)
+    ? (init.sliderMin as number)
     : Number.isFinite(init.min)
-      ? init.min
+      ? (init.min as number)
       : -10;
-  let sliderMax = Number.isFinite(init.sliderMax)
-    ? init.sliderMax
+  let sliderMax: number = Number.isFinite(init.sliderMax)
+    ? (init.sliderMax as number)
     : Number.isFinite(init.max)
-      ? init.max
+      ? (init.max as number)
       : 10;
   if (sliderMax < sliderMin) [sliderMin, sliderMax] = [sliderMax, sliderMin];
   const grad = resolveExprGradient(
@@ -196,13 +203,15 @@ export function createExprItem(
     sliderMin,
     sliderMax,
     sliderSpeed:
-      Number.isFinite(init.sliderSpeed) && init.sliderSpeed > 0
-        ? init.sliderSpeed
-        : Number.isFinite(init.speed) && init.speed > 0
-          ? init.speed
+      Number.isFinite(init.sliderSpeed) && (init.sliderSpeed as number) > 0
+        ? (init.sliderSpeed as number)
+        : Number.isFinite(init.speed) && (init.speed as number) > 0
+          ? (init.speed as number)
           : 0.35,
     sliderAnimating: !!(init.sliderAnimating ?? init.animate),
-    sliderPhase: Number.isFinite(init.sliderPhase) ? init.sliderPhase : Math.random(),
+    sliderPhase: Number.isFinite(init.sliderPhase)
+      ? (init.sliderPhase as number)
+      : Math.random(),
     sliderAnimMode: init.sliderAnimMode === "loop" ? "loop" : "pingpong",
     autoParam: !!init.autoParam,
   };
@@ -218,7 +227,7 @@ export function getSelectedId() {
 }
 
 /** @param {string | null} id */
-export function selectExpr(id) {
+export function selectExpr(id: string | null) {
   selectedId = id;
   emit();
 }
@@ -254,7 +263,7 @@ export function insertExprAt(index: number, init: Partial<ExprItem> = {}) {
 }
 
 /** @param {string} id */
-export function removeExpr(id) {
+export function removeExpr(id: string) {
   const idx = items.findIndex((e) => e.id === id);
   if (idx < 0) return;
   items.splice(idx, 1);
@@ -265,7 +274,7 @@ export function removeExpr(id) {
 }
 
 /** Remove without notifying listeners. */
-export function removeExprSilent(id) {
+export function removeExprSilent(id: string) {
   const idx = items.findIndex((e) => e.id === id);
   if (idx < 0) return false;
   items.splice(idx, 1);
@@ -308,7 +317,7 @@ export function moveExpr(id: string, beforeId: string | null) {
  * Merge row `id` into the one above (concat LaTeX). Keeps the upper row's color/role.
  * @returns {{ id: string, caretOffset: number } | null}
  */
-export function mergeExprIntoPrevious(id) {
+export function mergeExprIntoPrevious(id: string) {
   const idx = items.findIndex((e) => e.id === id);
   if (idx <= 0) return null;
   const prev = items[idx - 1];
@@ -386,7 +395,7 @@ export function updateExprSilent(id: string, patch: Partial<ExprItem>) {
 }
 
 /** Hex → [r,g,b] in 0..1 */
-export function hexToRgb01(hex) {
+export function hexToRgb01(hex: string) {
   const s = String(hex || "").replace("#", "");
   const n = s.length === 3
     ? s.split("").map((c) => parseInt(c + c, 16))

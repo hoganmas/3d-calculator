@@ -15,12 +15,16 @@ export function mountExprList(opts: MountExprListOpts): ExprListApi {
   const { root, ...props } = opts;
   root.replaceChildren();
 
-  type SidebarInst = InstanceType<typeof ExprSidebar> & ExprListApi;
+  type SidebarInst = InstanceType<typeof ExprSidebar> & {
+    render: (focus?: { id: string; pos?: number } | null) => void;
+    syncAllParamSliders: () => void;
+    syncParamChrome: () => boolean;
+  };
   const inst = mount(ExprSidebar, { target: root, props }) as SidebarInst;
 
   return {
     render: (focus) => inst.render(focus),
     syncAllParamSliders: () => inst.syncAllParamSliders(),
-    syncParamChrome: () => inst.syncParamChrome() ?? false,
+    syncParamChrome: () => inst.syncParamChrome(),
   };
 }

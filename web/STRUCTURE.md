@@ -7,22 +7,22 @@ src/
   main.js                 Wire modules, mount expression list, start loop
   app/
     state.ts              Shared mutable runtime state
-    dom.js                  DOM refs, settings dialog, panel resize
+    dom.ts                  DOM refs, settings dialog, panel resize
     scene.js                THREE scene, camera, grid, lava background
-    compile.js              Expression compile + preset helpers
+    compile.ts              Expression compile + preset helpers
     pipeline.ts             uploadFit, bakeChebVolume, keyframes
     webglFallback.js        WebGL Beer march (no WebGPU)
     presentation.js         Resize, march downscale, GPU/CPU presentation
     hud.js                  Metrics HUD + compile status
     loop.js                 requestAnimationFrame loop
   math/
-    fit.js                  LaTeX compile + Chebyshev least-squares fit
-    idct.js                 Separable Chebyshev IDCT → dens grid (+ grad)
-    limits.js               MAX_DEG and shared math constants
+    fit.ts                  LaTeX compile + Chebyshev least-squares fit
+    idct.ts                 Separable Chebyshev IDCT → dens grid (+ grad)
+    limits.ts               MAX_DEG and shared math constants
   model/
     expressions.ts          Expression list state, colors, roles
     params.ts               Free-parameter values + animation
-    keyframes.js            Animated-param keyframe cache + GPU blend
+    keyframes.ts            Animated-param keyframe cache + GPU blend
   render/
     camera.js               NDC → world ray helpers
     background.js           Three.js fullscreen backdrop shader

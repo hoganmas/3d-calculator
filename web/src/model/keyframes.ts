@@ -1,51 +1,93 @@
 /**
  * Dens/iso keyframe cache for animated free parameters.
- * Cold: progressive fit — sync the current blend pair, fill the rest async.
- * Hot: GPU blends adjacent frames (no DCT / no N³ upload).
  */
 
 import { fitChebyshev3D } from "../math/fit.js";
 import { idctCheb3D, idctChebGrad3D } from "../math/idct.js";
 import { getParam } from "./params.js";
+import type { CompiledExpr, KeyframeFrame } from "../types/models.js";
 
 export const DEFAULT_KEYFRAME_K = 8;
 
-/**
- * @typedef {{
- *   dens: Float32Array,
- *   gx?: Float32Array,
- *   gy?: Float32Array,
- *   gz?: Float32Array,
- *   cheb?: Float32Array,
- *   fitRel?: number,
- * }} KeyframeFrame
- *
- * @typedef {{
- *   paramName: string,
- *   min: number,
- *   max: number,
- *   K: number,
- *   deg: number,
- *   half: number,
- *   role: "density" | "constraint",
- *   isoLevel: number,
- *   latex: string,
- *   frames: (KeyframeFrame | null)[],
- *   scratch: KeyframeFrame,
- *   gen: number,
- *   readyCount: number,
- *   bakeOpts: object,
- * }} LayerKeyframeCache
- */
+interface BakeStages {
+  sampleMs: number;
+  chebMs: number;
+  idctMs: number;
+  gradMs: number;
+}
 
-/** @type {Map<string, LayerKeyframeCache>} */
-const caches = new Map();
+interface BakeFrameOpts {
+  layerId: string;
+  latex: string;
+  role: "density" | "constraint";
+  isoLevel: number;
+  paramName: string;
+  compiled: { bind: CompiledExpr["bind"] };
+  baseParams: Record<string, number>;
+  half: number;
+  deg: number;
+  K?: number;
+  min?: number;
+  max?: number;
+}
 
-/** @type {Map<string, { gen: number, timer: number, cancelled: boolean }>} */
-const asyncJobs = new Map();
+interface LayerKeyframeCache {
+  paramName: string;
+  min: number;
+  max: number;
+  K: number;
+  deg: number;
+  half: number;
+  role: "density" | "constraint";
+  isoLevel: number;
+  latex: string;
+  frames: (KeyframeFrame | null)[];
+  scratch: KeyframeFrame;
+  gen: number;
+  readyCount: number;
+  bakeOpts: BakeFrameOpts;
+}
 
-/** @type {((info: { layerId: string, index: number, frame: KeyframeFrame, readyCount: number, K: number, done: boolean }) => void) | null} */
-let onKeyframeProgress = null;
+interface KeyframeProgressInfo {
+  layerId: string;
+  index: number;
+  frame: KeyframeFrame;
+  readyCount: number;
+  K: number;
+  done: boolean;
+}
+
+interface EnsureKeyframesOpts {
+  layerId: string;
+  latex: string;
+  role: "density" | "constraint";
+  isoLevel: number;
+  paramName: string;
+  compiled: { bind: CompiledExpr["bind"] };
+  baseParams: Record<string, number>;
+  half: number;
+  deg: number;
+  K?: number;
+}
+
+interface BakeDetail extends BakeStages {
+  frames: number;
+  deg: number;
+  M: number;
+  role: string;
+  layerId: string;
+  paramName: string;
+  bakeMs: number;
+  async: boolean;
+  index?: number;
+  syncPair?: [number, number];
+}
+
+const caches = new Map<string, LayerKeyframeCache>();
+
+const asyncJobs = new Map<string, { gen: number; timer: number; cancelled: boolean }>();
+
+let onKeyframeProgress: ((info: KeyframeProgressInfo) => void) | null = null;
 
 let cacheGen = 0;
 let lastBakeMs = 0;
@@ -53,20 +95,14 @@ let lastLerpMs = 0;
 let lastKfLayers = 0;
 let bakeMsAcc = 0;
 let lerpMsAcc = 0;
-/** @type {object[]} */
-let lastBakeDetails = [];
+let lastBakeDetails: BakeDetail[] = [];
 
-/**
- * Register a callback when a background keyframe finishes (or the set completes).
- * @param {typeof onKeyframeProgress} cb
- */
-export function setKeyframeProgressHandler(cb) {
+export function setKeyframeProgressHandler(cb: typeof onKeyframeProgress) {
   onKeyframeProgress = cb;
 }
 
 export function getKeyframeMetrics() {
-  /** @type {{ sampleMs: number, chebMs: number, idctMs: number, gradMs: number }} */
-  const stages = { sampleMs: 0, chebMs: 0, idctMs: 0, gradMs: 0 };
+  const stages: BakeStages = { sampleMs: 0, chebMs: 0, idctMs: 0, gradMs: 0 };
   for (const d of lastBakeDetails) {
     stages.sampleMs += d.sampleMs || 0;
     stages.chebMs += d.chebMs || 0;
@@ -83,7 +119,7 @@ export function getKeyframeMetrics() {
   };
 }
 
-function cancelAsyncJob(layerId) {
+function cancelAsyncJob(layerId: string) {
   const job = asyncJobs.get(layerId);
   if (!job) return;
   job.cancelled = true;
@@ -109,7 +145,7 @@ export function clearKeyframeCaches() {
  * @param {Set<string>} dirty
  * @returns {string | null} param name or null
  */
-export function keyframeAnimParam(freeParams, dirty) {
+export function keyframeAnimParam(freeParams: string[], dirty: Set<string>) {
   if (!dirty?.size || !freeParams?.length) return null;
   /** @type {string[]} */
   const hit = [];
@@ -129,7 +165,7 @@ export function keyframeAnimParam(freeParams, dirty) {
  * @param {number} t
  * @param {Float32Array} out
  */
-function lerpFloat32(a, b, t, out) {
+function lerpFloat32(a: Float32Array, b: Float32Array, t: number, out: Float32Array) {
   const n = out.length;
   const u = 1 - t;
   for (let i = 0; i < n; i++) out[i] = u * a[i] + t * b[i];
@@ -141,7 +177,7 @@ function lerpFloat32(a, b, t, out) {
  * @param {number} value
  * @returns {{ i0: number, i1: number, t: number }}
  */
-function segmentForValue(cache, value) {
+function segmentForValue(cache: LayerKeyframeCache, value: number) {
   const span = Math.max(1e-12, cache.max - cache.min);
   const u = Math.min(1, Math.max(0, (value - cache.min) / span));
   const K = cache.K;
@@ -159,11 +195,10 @@ function segmentForValue(cache, value) {
  * @param {number} i1
  * @returns {number[]}
  */
-function bakeOrder(K, i0, i1) {
-  /** @type {number[]} */
-  const order = [];
-  const seen = new Set();
-  const push = (i) => {
+function bakeOrder(K: number, i0: number, i1: number) {
+  const order: number[] = [];
+  const seen = new Set<number>();
+  const push = (i: number) => {
     const k = i | 0;
     if (k < 0 || k >= K || seen.has(k)) return;
     seen.add(k);
@@ -185,18 +220,24 @@ function bakeOrder(K, i0, i1) {
  * @param {LayerKeyframeCache} cache
  * @returns {boolean}
  */
-function cacheMatches(cache, { paramName, min, max, K, deg, half, role, latex, isoLevel }) {
+function cacheMatches(
+  cache: LayerKeyframeCache,
+  meta: Pick<
+    LayerKeyframeCache,
+    "paramName" | "min" | "max" | "K" | "deg" | "half" | "role" | "latex" | "isoLevel"
+  >,
+) {
   return (
-    cache.paramName === paramName &&
-    cache.role === role &&
-    cache.K === K &&
-    cache.deg === deg &&
-    Math.abs(cache.half - half) < 1e-12 &&
-    Math.abs(cache.min - min) < 1e-12 &&
-    Math.abs(cache.max - max) < 1e-12 &&
-    Math.abs(cache.isoLevel - isoLevel) < 1e-12 &&
-    cache.latex === latex &&
-    cache.frames.length === K
+    cache.paramName === meta.paramName &&
+    cache.role === meta.role &&
+    cache.K === meta.K &&
+    cache.deg === meta.deg &&
+    Math.abs(cache.half - meta.half) < 1e-12 &&
+    Math.abs(cache.min - meta.min) < 1e-12 &&
+    Math.abs(cache.max - meta.max) < 1e-12 &&
+    Math.abs(cache.isoLevel - meta.isoLevel) < 1e-12 &&
+    cache.latex === meta.latex &&
+    cache.frames.length === meta.K
   );
 }
 
@@ -206,11 +247,11 @@ function cacheMatches(cache, { paramName, min, max, K, deg, half, role, latex, i
  * @param {{ sampleMs: number, chebMs: number, idctMs: number, gradMs: number }} stages
  * @returns {KeyframeFrame}
  */
-function bakeFrameAt(opts, k, stages) {
+function bakeFrameAt(opts: BakeFrameOpts, k: number, stages: BakeStages | null): KeyframeFrame {
   const st = getParam(opts.paramName);
-  const min = st?.min ?? opts.min;
-  const max = st?.max ?? opts.max;
-  const K = opts.K;
+  const min = st?.min ?? opts.min ?? 0;
+  const max = st?.max ?? opts.max ?? 1;
+  const K = opts.K ?? DEFAULT_KEYFRAME_K;
   const a = min + ((max - min) * k) / Math.max(1, K - 1);
   const params = { ...opts.baseParams, [opts.paramName]: a };
   const fn = opts.compiled.bind(params);
@@ -222,8 +263,7 @@ function bakeFrameAt(opts, k, stages) {
   let tStage = performance.now();
   const idct = idctCheb3D(fit.cheb, fit.deg, fit.deg + 1);
   if (stages) stages.idctMs += performance.now() - tStage;
-  /** @type {KeyframeFrame} */
-  const frame = { dens: idct.dens, cheb: fit.cheb, fitRel: fit.fitRelL2 };
+  const frame: KeyframeFrame = { dens: idct.dens, cheb: fit.cheb, fitRel: fit.fitRelL2 };
   if (opts.role === "constraint") {
     tStage = performance.now();
     const grad = idctChebGrad3D(fit.cheb, fit.deg, fit.deg + 1);
@@ -240,7 +280,7 @@ function bakeFrameAt(opts, k, stages) {
  * @param {number} k
  * @param {KeyframeFrame} frame
  */
-function storeFrame(cache, k, frame) {
+function storeFrame(cache: LayerKeyframeCache, k: number, frame: KeyframeFrame) {
   if (cache.frames[k]) return;
   cache.frames[k] = frame;
   cache.readyCount++;
@@ -251,9 +291,8 @@ function storeFrame(cache, k, frame) {
  * @param {(KeyframeFrame | null)[]} frames
  * @returns {KeyframeFrame[]}
  */
-function materializeKeyframeFrames(frames) {
-  /** @type {KeyframeFrame | null} */
-  let last = null;
+function materializeKeyframeFrames(frames: (KeyframeFrame | null)[]): KeyframeFrame[] {
+  let last: KeyframeFrame | null = null;
   for (const fr of frames) {
     if (fr) {
       last = fr;
@@ -261,12 +300,11 @@ function materializeKeyframeFrames(frames) {
     }
   }
   if (!last) throw new Error("no keyframes ready");
-  /** @type {KeyframeFrame[]} */
-  const out = new Array(frames.length);
+  const out: KeyframeFrame[] = new Array(frames.length);
   for (let i = 0; i < frames.length; i++) {
     if (frames[i]) {
       last = frames[i];
-      out[i] = /** @type {KeyframeFrame} */ (frames[i]);
+      out[i] = frames[i]!;
     } else {
       // Look ahead for a ready frame if we haven't seen one yet in this pass.
       let fwd = last;
@@ -276,7 +314,7 @@ function materializeKeyframeFrames(frames) {
           break;
         }
       }
-      out[i] = /** @type {KeyframeFrame} */ (fwd || last);
+      out[i] = (fwd || last)!;
     }
   }
   return out;
@@ -286,10 +324,9 @@ function materializeKeyframeFrames(frames) {
  * @param {string} layerId
  * @param {LayerKeyframeCache} cache
  */
-function scheduleAsyncFill(layerId, cache) {
+function scheduleAsyncFill(layerId: string, cache: LayerKeyframeCache) {
   cancelAsyncJob(layerId);
   const gen = cache.gen;
-  /** @type {{ gen: number, timer: number, cancelled: boolean }} */
   const job = { gen, timer: 0, cancelled: false };
   asyncJobs.set(layerId, job);
 
@@ -308,7 +345,7 @@ function scheduleAsyncFill(layerId, cache) {
       onKeyframeProgress?.({
         layerId,
         index: -1,
-        frame: /** @type {KeyframeFrame} */ (live.frames[0]),
+        frame: live.frames[0]!,
         readyCount: live.readyCount,
         K: live.K,
         done: true,
@@ -317,8 +354,7 @@ function scheduleAsyncFill(layerId, cache) {
     }
 
     const t0 = performance.now();
-    /** @type {{ sampleMs: number, chebMs: number, idctMs: number, gradMs: number }} */
-    const stages = { sampleMs: 0, chebMs: 0, idctMs: 0, gradMs: 0 };
+    const stages: BakeStages = { sampleMs: 0, chebMs: 0, idctMs: 0, gradMs: 0 };
     const frame = bakeFrameAt({ ...live.bakeOpts, K: live.K, min: live.min, max: live.max }, next, stages);
     if (job.cancelled || caches.get(layerId)?.gen !== gen) return;
     storeFrame(live, next, frame);
@@ -385,7 +421,7 @@ function scheduleAsyncFill(layerId, cache) {
  *   complete: boolean,
  * }}
  */
-export function ensureLayerKeyframes(opts) {
+export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
   const K = Math.max(2, opts.K ?? DEFAULT_KEYFRAME_K);
   const st = getParam(opts.paramName);
   if (!st) throw new Error(`Unknown param “${opts.paramName}” for keyframes`);
@@ -445,8 +481,7 @@ export function ensureLayerKeyframes(opts) {
 
   const blend = segmentForValue(cache, value);
   const t0 = performance.now();
-  /** @type {{ sampleMs: number, chebMs: number, idctMs: number, gradMs: number }} */
-  const stages = { sampleMs: 0, chebMs: 0, idctMs: 0, gradMs: 0 };
+  const stages: BakeStages = { sampleMs: 0, chebMs: 0, idctMs: 0, gradMs: 0 };
   let syncCount = 0;
   for (const k of [blend.i0, blend.i1]) {
     if (cache.frames[k]) continue;
@@ -511,7 +546,7 @@ export function ensureLayerKeyframes(opts) {
  *
  * @param {Parameters<typeof ensureLayerKeyframes>[0]} opts
  */
-export function sampleLayerKeyframes(opts) {
+export function sampleLayerKeyframes(opts: EnsureKeyframesOpts) {
   const ensured = ensureLayerKeyframes(opts);
   const cache = caches.get(opts.layerId);
   if (!cache) throw new Error("keyframe cache missing after ensure");
@@ -556,7 +591,7 @@ export function logKeyframeBake(reason = "bake") {
   const kf = getKeyframeMetrics();
   const s = kf.stages;
   const stageTotal = s.sampleMs + s.chebMs + s.idctMs + s.gradMs;
-  const pct = (ms) => (stageTotal > 0 ? ((100 * ms) / stageTotal).toFixed(0) : "0");
+  const pct = (ms: number) => (stageTotal > 0 ? ((100 * ms) / stageTotal).toFixed(0) : "0");
   const syncFrames = lastBakeDetails.reduce((n, d) => n + (d.async ? 0 : d.frames || 0), 0);
   console.log(
     `[keyframes] ${reason}: ${kf.bakeMs.toFixed(1)}ms sync · ` +
@@ -579,7 +614,7 @@ export function noteKeyframeLayer() {
  * @param {string} layerId
  * @returns {{ id: string, i0: number, i1: number, t: number } | null}
  */
-export function peekKeyframeBlend(layerId) {
+export function peekKeyframeBlend(layerId: string) {
   const cache = caches.get(layerId);
   if (!cache) return null;
   const st = getParam(cache.paramName);
