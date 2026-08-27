@@ -1,4 +1,4 @@
-/** Density expression (MathLive/LaTeX via Compute Engine) + 3D Chebyshev fit → world monomials. */
+/** Density expression (MathLive/LaTeX via Compute Engine) + 3D Chebyshev fit → IDCT dens. */
 
 import { compile, ComputeEngine } from "@cortex-js/compute-engine";
 import { MAX_DEG } from "./clipGrid.js";
@@ -54,7 +54,7 @@ const LATEX_FN_REWRITE = [
  * so users need not type `\`. Skips names already introduced by `\`.
  * @param {string} latex
  */
-export function normalizeLatexFunctions(latex) {
+function normalizeLatexFunctions(latex) {
   let s = String(latex ?? "");
   for (const name of LATEX_FN_REWRITE) {
     const re = new RegExp(`(^|[^\\\\A-Za-z])(${name})(?![A-Za-z])`, "gi");
@@ -131,7 +131,7 @@ function coerceNumber(v) {
 }
 
 /** World (x,y,z) → spherical / cylindrical auxiliaries for the expr scope. */
-export function polarFromCartesian(x, y, z) {
+function polarFromCartesian(x, y, z) {
   const rho = Math.hypot(x, y);
   const r = Math.hypot(rho, z);
   const phi = Math.atan2(y, x);
@@ -629,7 +629,7 @@ function chebToMonomial3D(chebCoeffs, deg, half) {
   return Float32Array.from(mono);
 }
 
-export function evalMonomial3D(mono, deg, x, y, z) {
+function evalMonomial3D(mono, deg, x, y, z) {
   const n = deg + 1;
   let s = 0;
   let xp = 1;

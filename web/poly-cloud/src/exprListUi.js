@@ -851,7 +851,6 @@ export function mountExprList(opts) {
 
       const isParamDef = needed.length > 0;
       const warn = getExprWarning(item.id);
-      row.classList.toggle("is-param", isParamDef || !!warn);
       row.classList.toggle("is-param-def", isParamDef || !!warn);
       row.classList.toggle("is-hidden", !item.enabled);
       row.classList.toggle("selected", item.id === getSelectedId());
@@ -1225,7 +1224,6 @@ export function mountExprList(opts) {
         "expr-row" +
         (item.id === selected ? " selected" : "") +
         (item.enabled ? "" : " is-hidden") +
-        (ownsParam || warn ? " is-param" : "") +
         (ownsParam || warn ? " is-param-def" : "") +
         (warn ? " has-error" : "");
       row.dataset.id = item.id;

@@ -18,7 +18,6 @@ import { compileParamLatex, formatParamLatexValue } from "./fit.js";
  *   animMode: AnimMode,
  *   latex: string,
  *   exprId: string | null,
- *   hosted: boolean,
  *   driven: boolean,
  *   freeParams: string[],
  *   error: string | null,
@@ -89,7 +88,6 @@ function makeParam(name, init = {}) {
     animMode: normalizeAnimMode(init.animMode),
     latex,
     exprId: typeof init.exprId === "string" ? init.exprId : null,
-    hosted: !!init.hosted,
     driven: false,
     freeParams: [],
     error: null,
@@ -117,10 +115,6 @@ export function getParam(name) {
 export function anyParamAnimating() {
   for (const p of params.values()) if (p.animating) return true;
   return false;
-}
-
-export function anyParamNeedsTick() {
-  return anyParamAnimating();
 }
 
 /**
@@ -157,7 +151,6 @@ export function collectAnimDirtyParams() {
  *   name: string,
  *   latex: string,
  *   exprId: string,
- *   hosted?: boolean,
  *   min?: number,
  *   max?: number,
  *   speed?: number,
@@ -183,7 +176,6 @@ export function syncParamsFromDefinitions(defs, seed = {}) {
           ...s,
           latex: d.latex,
           exprId: d.exprId,
-          hosted: !!d.hosted,
           min: d.min ?? s.min,
           max: d.max ?? s.max,
           speed: d.speed ?? s.speed,
@@ -197,9 +189,8 @@ export function syncParamsFromDefinitions(defs, seed = {}) {
     }
     params.set(d.name, {
       ...cur,
-      latex: d.hosted ? cur.latex : d.latex,
+      latex: d.latex,
       exprId: d.exprId,
-      hosted: !!d.hosted,
       min: Number.isFinite(d.min) ? d.min : cur.min,
       max: Number.isFinite(d.max) ? d.max : cur.max,
       speed: Number.isFinite(d.speed) && d.speed > 0 ? d.speed : cur.speed,
@@ -414,9 +405,3 @@ export function tickParamAnimation(timeSec) {
   }
   return changed;
 }
-
-export function clearParams() {
-  params.clear();
-}
-
-export { formatParamLatexValue };

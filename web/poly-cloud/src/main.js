@@ -16,7 +16,6 @@ import {
   recompileAllParams,
   evalParamEquations,
   tickParamAnimation,
-  anyParamNeedsTick,
   collectAnimDirtyParams,
   anyParamAnimating,
 } from "./params.js";
@@ -271,7 +270,6 @@ function compileAllExprs(opts = {}) {
     name,
     latex: item.latex,
     exprId: item.id,
-    hosted: false,
     min: item.sliderMin,
     max: item.sliderMax,
     speed: item.sliderSpeed,
@@ -1057,14 +1055,32 @@ let lastSceneBake = null;
 /** Fit-time: IDCT each expression → GPU scene (manifolds + densities). */
 function bakeChebVolume() {
   if (!lastSceneBake) return null;
-  const { densLayers, constraints, M, dens } = lastSceneBake;
+  const { densLayers, constraints, M } = lastSceneBake;
   if (isClipBakeGpuReady()) {
     const up = uploadSceneVolumes({ densLayers, constraints, M });
     if (up) bakeMsSmooth = bakeMsSmooth * 0.5 + up.bakeMs * 0.5;
   }
   lastVolumeM = M;
-  if (dens) applyVolumeTexture(dens, M);
-  return { dens, M };
+  // WebGL fallback only — GPU path uses per-layer dens via uploadSceneVolumes.
+  if (!useGpuClipPath()) {
+    const dens = ensureDensSumForWebGl();
+    if (dens) applyVolumeTexture(dens, M);
+  }
+  return { dens: lastSceneBake.dens, M };
+}
+
+/** Lazy dens sum for the WebGL Beer texture (skipped on the GPU path). */
+function ensureDensSumForWebGl() {
+  if (!lastSceneBake) return null;
+  if (lastSceneBake.dens) return lastSceneBake.dens;
+  const { densLayers, M } = lastSceneBake;
+  if (!densLayers?.length) return null;
+  const densSum = new Float32Array(M * M * M);
+  for (const d of densLayers) {
+    for (let i = 0; i < densSum.length; i++) densSum[i] += d.dens[i] || 0;
+  }
+  lastSceneBake.dens = densSum;
+  return densSum;
 }
 
 function applyVolumeTexture(dens, M) {
@@ -1385,8 +1401,10 @@ function uploadFit(opts = {}) {
         continue;
       }
 
+      const skipHeavy = fromAnim || layers.length > 1;
       const fit = fitChebyshev3D(L.fn, half, deg, {
-        skipL2: fromAnim || layers.length > 1,
+        skipL2: skipHeavy,
+        skipMono: skipHeavy,
       });
       fittedCount++;
       const idct = idctCheb3D(fit.cheb, fit.deg, fit.deg + 1);
@@ -1426,9 +1444,9 @@ function uploadFit(opts = {}) {
       }
     }
 
-    // Preview texture: sum of density layers only (never constraints).
+    // WebGL preview texture: sum of density layers (skipped when WebGPU is active).
     let densSum = null;
-    if (densLayers.length) {
+    if (densLayers.length && !useGpuClipPath()) {
       densSum = new Float32Array(M * M * M);
       for (const d of densLayers) {
         for (let i = 0; i < densSum.length; i++) densSum[i] += d.dens[i] || 0;
@@ -1735,7 +1753,7 @@ function frame(rafNow) {
   loopFpsFrames++;
 
   // Named param animation → Chebyshev refit (throttled).
-  if (anyParamNeedsTick()) {
+  if (anyParamAnimating()) {
     const tSec = t0 / 1000;
     const animChanged = tickParamAnimation(tSec);
     const eqChanged = evalParamEquations();

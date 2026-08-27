@@ -65,12 +65,11 @@ export function setKeyframeProgressHandler(cb) {
 }
 
 export function getKeyframeMetrics() {
-  /** @type {{ sampleMs: number, chebMs: number, monoMs: number, idctMs: number, gradMs: number }} */
-  const stages = { sampleMs: 0, chebMs: 0, monoMs: 0, idctMs: 0, gradMs: 0 };
+  /** @type {{ sampleMs: number, chebMs: number, idctMs: number, gradMs: number }} */
+  const stages = { sampleMs: 0, chebMs: 0, idctMs: 0, gradMs: 0 };
   for (const d of lastBakeDetails) {
     stages.sampleMs += d.sampleMs || 0;
     stages.chebMs += d.chebMs || 0;
-    stages.monoMs += d.monoMs || 0;
     stages.idctMs += d.idctMs || 0;
     stages.gradMs += d.gradMs || 0;
   }
@@ -103,12 +102,6 @@ export function clearKeyframeCaches() {
   lastBakeDetails = [];
 }
 
-/** @param {string} id */
-export function invalidateKeyframeCache(id) {
-  cancelAsyncJob(id);
-  caches.delete(id);
-}
-
 /**
  * Eligible when dirty free-params collapse to exactly one animated slider
  * (not driven by another equation).
@@ -136,7 +129,7 @@ export function keyframeAnimParam(freeParams, dirty) {
  * @param {number} t
  * @param {Float32Array} out
  */
-export function lerpFloat32(a, b, t, out) {
+function lerpFloat32(a, b, t, out) {
   const n = out.length;
   const u = 1 - t;
   for (let i = 0; i < n; i++) out[i] = u * a[i] + t * b[i];
@@ -148,7 +141,7 @@ export function lerpFloat32(a, b, t, out) {
  * @param {number} value
  * @returns {{ i0: number, i1: number, t: number }}
  */
-export function segmentForValue(cache, value) {
+function segmentForValue(cache, value) {
   const span = Math.max(1e-12, cache.max - cache.min);
   const u = Math.min(1, Math.max(0, (value - cache.min) / span));
   const K = cache.K;
@@ -210,7 +203,7 @@ function cacheMatches(cache, { paramName, min, max, K, deg, half, role, latex, i
 /**
  * @param {object} opts
  * @param {number} k
- * @param {{ sampleMs: number, chebMs: number, monoMs: number, idctMs: number, gradMs: number }} stages
+ * @param {{ sampleMs: number, chebMs: number, idctMs: number, gradMs: number }} stages
  * @returns {KeyframeFrame}
  */
 function bakeFrameAt(opts, k, stages) {
@@ -225,7 +218,6 @@ function bakeFrameAt(opts, k, stages) {
   if (fit.timing && stages) {
     stages.sampleMs += fit.timing.sampleMs;
     stages.chebMs += fit.timing.chebMs;
-    stages.monoMs += fit.timing.monoMs;
   }
   let tStage = performance.now();
   const idct = idctCheb3D(fit.cheb, fit.deg, fit.deg + 1);
@@ -259,7 +251,7 @@ function storeFrame(cache, k, frame) {
  * @param {(KeyframeFrame | null)[]} frames
  * @returns {KeyframeFrame[]}
  */
-export function materializeKeyframeFrames(frames) {
+function materializeKeyframeFrames(frames) {
   /** @type {KeyframeFrame | null} */
   let last = null;
   for (const fr of frames) {
@@ -325,8 +317,8 @@ function scheduleAsyncFill(layerId, cache) {
     }
 
     const t0 = performance.now();
-    /** @type {{ sampleMs: number, chebMs: number, monoMs: number, idctMs: number, gradMs: number }} */
-    const stages = { sampleMs: 0, chebMs: 0, monoMs: 0, idctMs: 0, gradMs: 0 };
+    /** @type {{ sampleMs: number, chebMs: number, idctMs: number, gradMs: number }} */
+    const stages = { sampleMs: 0, chebMs: 0, idctMs: 0, gradMs: 0 };
     const frame = bakeFrameAt({ ...live.bakeOpts, K: live.K, min: live.min, max: live.max }, next, stages);
     if (job.cancelled || caches.get(layerId)?.gen !== gen) return;
     storeFrame(live, next, frame);
@@ -453,8 +445,8 @@ export function ensureLayerKeyframes(opts) {
 
   const blend = segmentForValue(cache, value);
   const t0 = performance.now();
-  /** @type {{ sampleMs: number, chebMs: number, monoMs: number, idctMs: number, gradMs: number }} */
-  const stages = { sampleMs: 0, chebMs: 0, monoMs: 0, idctMs: 0, gradMs: 0 };
+  /** @type {{ sampleMs: number, chebMs: number, idctMs: number, gradMs: number }} */
+  const stages = { sampleMs: 0, chebMs: 0, idctMs: 0, gradMs: 0 };
   let syncCount = 0;
   for (const k of [blend.i0, blend.i1]) {
     if (cache.frames[k]) continue;
@@ -530,19 +522,11 @@ export function sampleLayerKeyframes(opts) {
   if (!a || !b) throw new Error("sync keyframe pair missing");
   const out = cache.scratch;
   lerpFloat32(a.dens, b.dens, t, out.dens);
-  if (cache.role === "constraint" && out.gx && a.gx && b.gx) {
-    lerpFloat32(a.gx, b.gx, t, out.gx);
-    lerpFloat32(a.gy, b.gy, t, out.gy);
-    lerpFloat32(a.gz, b.gz, t, out.gz);
-  }
   lerpMsAcc += performance.now() - tLerp;
   lastLerpMs = lerpMsAcc;
 
   return {
     dens: out.dens,
-    gx: out.gx,
-    gy: out.gy,
-    gz: out.gz,
     cheb: ensured.cheb,
     fitRel: ensured.fitRel,
     M: ensured.M,
@@ -571,7 +555,7 @@ export function logKeyframeBake(reason = "bake") {
   if (!lastBakeDetails.length) return;
   const kf = getKeyframeMetrics();
   const s = kf.stages;
-  const stageTotal = s.sampleMs + s.chebMs + s.monoMs + s.idctMs + s.gradMs;
+  const stageTotal = s.sampleMs + s.chebMs + s.idctMs + s.gradMs;
   const pct = (ms) => (stageTotal > 0 ? ((100 * ms) / stageTotal).toFixed(0) : "0");
   const syncFrames = lastBakeDetails.reduce((n, d) => n + (d.async ? 0 : d.frames || 0), 0);
   console.log(
@@ -579,7 +563,6 @@ export function logKeyframeBake(reason = "bake") {
       `${syncFrames} frame(s) now · rest async · K=${kf.K} · ` +
       `sample ${s.sampleMs.toFixed(1)}ms (${pct(s.sampleMs)}%) · ` +
       `dct ${s.chebMs.toFixed(1)}ms (${pct(s.chebMs)}%) · ` +
-      `mono ${s.monoMs.toFixed(1)}ms (${pct(s.monoMs)}%) · ` +
       `idct ${s.idctMs.toFixed(1)}ms (${pct(s.idctMs)}%) · ` +
       `grad ${s.gradMs.toFixed(1)}ms (${pct(s.gradMs)}%)`,
     lastBakeDetails,
@@ -604,9 +587,4 @@ export function peekKeyframeBlend(layerId) {
   const blend = segmentForValue(cache, st.value);
   if (!cache.frames[blend.i0] || !cache.frames[blend.i1]) return null;
   return { id: layerId, i0: blend.i0, i1: blend.i1, t: blend.t };
-}
-
-/** @param {string} layerId */
-export function getKeyframeCache(layerId) {
-  return caches.get(layerId) ?? null;
 }

@@ -25,7 +25,7 @@ function idctCheb1D(coeff, M) {
  * Chebyshev → derivative Chebyshev (same length, last mode 0).
  * If s = Σ_{k=0}^{n-1} c_k T_k, returns d with s' = Σ d_k T_k.
  */
-export function chebDiff1D(c) {
+function chebDiff1D(c) {
   const n = c.length;
   const d = new Float64Array(n);
   if (n < 2) return d;

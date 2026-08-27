@@ -97,7 +97,7 @@ struct DrawParams {
   half: f32,
   scale: f32,
   isoLevel: f32,
-  shadeMode: u32,
+  _pad0: f32,
   ro: vec3f,
   volBase: f32,
   m0: vec4f,
@@ -609,8 +609,6 @@ struct DrawParams {
   m0: vec4f,
   m1: vec4f,
   m2: vec4f,
-  absorb: vec4f,
-  emit: vec4f,
 }
 
 @group(0) @binding(0) var<uniform> draw: DrawParams;
@@ -1235,13 +1233,13 @@ function packDrawParamsIso(
   const u32 = new Uint32Array(buf);
   const f32 = new Float32Array(buf);
   u32[0] = fbW | 0; u32[1] = fbH | 0; u32[2] = gridM | 0; u32[3] = steps | 0;
-  f32[4] = half; f32[5] = scale; f32[6] = isoLevel; u32[7] = 1;
+  f32[4] = half; f32[5] = scale; f32[6] = isoLevel; f32[7] = 0;
   f32[8] = ro[0]; f32[9] = ro[1]; f32[10] = ro[2];
   f32[11] = volBase;
   f32[12] = M[0]; f32[13] = M[1]; f32[14] = M[2];
   f32[16] = M[3]; f32[17] = M[4]; f32[18] = M[5];
   f32[20] = M[6]; f32[21] = M[7]; f32[22] = M[8];
-  // volBaseB / blendT / gradCount at 24..26 (was absorb/emit slot)
+  // volBaseB / blendT / gradCount at 24..26
   f32[24] = volBaseB;
   f32[25] = blendT;
   const stops = normalizeRgbStops(gradRgbs, absorb, emit);
@@ -1267,8 +1265,7 @@ function normalizeRgbStops(gradRgbs, absorb, emit) {
 }
 
 /**
- * Beer uniforms — densBase in the isoLevel slot (f32), layerCount in shadeMode slot.
- * Colors live in a separate storage buffer (avoids uniform array packing issues).
+ * Beer uniforms — densBase / layerCount after half+scale; colors live in layerGrads storage.
  */
 function packDrawParamsBeer(fbW, fbH, gridM, steps, half, scale, densBaseOff, layerCount, ro, M) {
   const buf = new ArrayBuffer(256);
@@ -1280,8 +1277,6 @@ function packDrawParamsBeer(fbW, fbH, gridM, steps, half, scale, densBaseOff, la
   f32[12] = M[0]; f32[13] = M[1]; f32[14] = M[2];
   f32[16] = M[3]; f32[17] = M[4]; f32[18] = M[5];
   f32[20] = M[6]; f32[21] = M[7]; f32[22] = M[8];
-  f32[24] = 0.15; f32[25] = 0.25; f32[26] = 0.45;
-  f32[28] = 0.55; f32[29] = 0.75; f32[30] = 1.0;
   return buf;
 }
 

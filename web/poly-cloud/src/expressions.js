@@ -18,11 +18,7 @@ export const EXPR_GRADIENTS = [
   { color: "#00c8e0", color2: "#c080ff" }, /* aqua → lilac glass */
 ];
 
-/** Primary swatch colors (gradient start). */
-export const EXPR_COLORS = EXPR_GRADIENTS.map((g) => g.color);
-
-export const DEFAULT_EXPR_COLOR = EXPR_COLORS[0];
-export const DEFAULT_EXPR_COLOR2 = EXPR_GRADIENTS[0].color2;
+export const DEFAULT_EXPR_COLOR = EXPR_GRADIENTS[0].color;
 
 function gradientForIndex(i) {
   return EXPR_GRADIENTS[i % EXPR_GRADIENTS.length];
@@ -93,11 +89,6 @@ export function nextExprGradient() {
   const idx = EXPR_GRADIENTS.findIndex((g) => g.color === last.color);
   const g = gradientForIndex(idx >= 0 ? idx + 1 : items.length);
   return { ...g, colors: [g.color, g.color2] };
-}
-
-/** Next palette color after the last expression (or index 0 if empty). */
-export function nextExprColor() {
-  return nextExprGradient().color;
 }
 
 /**
@@ -230,11 +221,6 @@ export function listExpressions() {
   return items.slice();
 }
 
-/** @returns {ExprItem | null} */
-export function getSelectedExpr() {
-  return items.find((e) => e.id === selectedId) ?? null;
-}
-
 export function getSelectedId() {
   return selectedId;
 }
@@ -272,24 +258,6 @@ export function insertExprAt(index, init = {}) {
     color: init.color ?? colorForIndex(at),
   });
   items.splice(at, 0, row);
-  return row;
-}
-
-/**
- * Insert a new expression after `afterId` (or at end). Selects the new row.
- * @param {string | null} [afterId]
- * @param {Partial<ExprItem>} [init]
- */
-export function insertExprAfter(afterId = selectedId, init = {}) {
-  const idx = afterId ? items.findIndex((e) => e.id === afterId) : items.length - 1;
-  const at = clampInsertIndex(idx >= 0 ? idx + 1 : items.length, init);
-  const row = createExprItem({
-    ...init,
-    color: init.color ?? colorForIndex(at),
-  });
-  items.splice(at, 0, row);
-  selectedId = row.id;
-  emit();
   return row;
 }
 
