@@ -1,7 +1,27 @@
-import { MAX_DENS_LAYERS, gpu, DEFAULT_DENS_RGB, DEFAULT_DENS_RGB2 } from "./gpuState.js";
+import type { ConstraintLayer, DensLayer, KeyframeBlend, KeyframeFrame } from "../../types/models.js";
+import { MAX_DENS_LAYERS, gpu, DEFAULT_DENS_RGB, DEFAULT_DENS_RGB2, type RgbTriplet } from "./gpuState.js";
 import { normalizeRgbStops, writeLayerColors } from "./uniforms.js";
 
-function ensureVolumeBuf(floatCount) {
+export interface SceneUploadPayload {
+  densLayers?: DensLayer[];
+  constraints?: ConstraintLayer[];
+  M: number;
+}
+
+export interface SceneUploadResult {
+  M: number;
+  bakeMs: number;
+  epoch: number;
+}
+
+export interface KeyframeBlendPatch {
+  id?: string;
+  i0: number;
+  i1: number;
+  t: number;
+}
+
+function ensureVolumeBuf(floatCount: number): void {
   const { device } = gpu;
   if (!device) return;
   const aligned = Math.max(256, Math.ceil((floatCount * 4) / 256) * 256);
@@ -14,25 +34,23 @@ function ensureVolumeBuf(floatCount) {
   gpu.volumeCapacity = aligned;
   if (old) {
     void device.queue.onSubmittedWorkDone().then(() => {
-      try { old.destroy(); } catch (_) {}
+      try { old.destroy(); } catch { /* device lost */ }
     });
   }
 }
 
-/** @param {{ color?: number[], color2?: number[], colors?: number[][] }} d */
-function stopsFromLayer(d) {
+function stopsFromLayer(d: Pick<DensLayer, "color" | "color2" | "colors"> | undefined): RgbTriplet[] {
   if (Array.isArray(d?.colors) && d.colors.length) {
     return d.colors.map((c) => [c[0], c[1], c[2]]);
   }
   return normalizeRgbStops(
     null,
-    d?.color || DEFAULT_DENS_RGB,
-    d?.color2 || DEFAULT_DENS_RGB2,
+    (d?.color as RgbTriplet) || DEFAULT_DENS_RGB,
+    (d?.color2 as RgbTriplet) || DEFAULT_DENS_RGB2,
   );
 }
 
-/** @param {number[][][]} layerStopsList per-layer list of [r,g,b] stops */
-export function uploadSceneColors(layerStopsList) {
+export function uploadSceneColors(layerStopsList: RgbTriplet[][] | null | undefined): void {
   gpu.densGradStops = (layerStopsList || []).slice(0, MAX_DENS_LAYERS).map((stops) =>
     normalizeRgbStops(
       Array.isArray(stops) && stops.length && Array.isArray(stops[0]) ? stops : null,
@@ -43,7 +61,7 @@ export function uploadSceneColors(layerStopsList) {
   writeLayerColors(gpu.device, gpu.colorBuf, gpu.densGradStops);
 }
 
-export function uploadSceneVolumes(scene) {
+export function uploadSceneVolumes(scene: SceneUploadPayload | null): SceneUploadResult | null {
   if (!gpu.device || !scene) return null;
   const t0 = performance.now();
   const M = Math.max(2, scene.M | 0);
@@ -66,7 +84,7 @@ export function uploadSceneVolumes(scene) {
   const totalFloats = consFloats + dens.length * volN;
   gpu.scenePacked = totalFloats > 0 ? new Float32Array(Math.max(volN, totalFloats)) : null;
   let off = 0;
-  const putVol = (src) => {
+  const putVol = (src: Float32Array | undefined) => {
     if (!gpu.scenePacked) return;
     if (src && src.length) {
       gpu.scenePacked.set(src.length >= volN ? src.subarray(0, volN) : src, off);
@@ -91,7 +109,7 @@ export function uploadSceneVolumes(scene) {
       putVol(c.gy);
       putVol(c.gz);
     }
-    const blend = c.blend || { i0: 0, i1: 0, t: 0 };
+    const blend: KeyframeBlend = c.blend || { i0: 0, i1: 0, t: 0 };
     const K = frames ? frames.length : 1;
     const stops = stopsFromLayer(c);
     return {
@@ -118,7 +136,7 @@ export function uploadSceneVolumes(scene) {
 
   gpu.sceneEpoch++;
   ensureVolumeBuf(Math.max(volN, gpu.scenePacked ? gpu.scenePacked.length : volN));
-  if (gpu.scenePacked) gpu.device.queue.writeBuffer(gpu.volumeBuf, 0, gpu.scenePacked);
+  if (gpu.scenePacked && gpu.volumeBuf) gpu.device.queue.writeBuffer(gpu.volumeBuf, 0, gpu.scenePacked);
   writeLayerColors(gpu.device, gpu.colorBuf, gpu.densGradStops);
 
   gpu.profileBakeMs = gpu.profileBakeMs * 0.5 + (performance.now() - t0) * 0.5;
@@ -128,10 +146,9 @@ export function uploadSceneVolumes(scene) {
   return { M, bakeMs: performance.now() - t0, epoch: gpu.sceneEpoch };
 }
 
-/** @param {{ id?: string, i0: number, i1: number, t: number }[]} blends */
-export function setConstraintKeyframeBlends(blends) {
+export function setConstraintKeyframeBlends(blends: KeyframeBlendPatch[] | null | undefined): void {
   if (!blends?.length || !gpu.sceneConstraints.length) return;
-  const byId = new Map();
+  const byId = new Map<string, KeyframeBlendPatch>();
   for (const b of blends) {
     if (b?.id != null) byId.set(b.id, b);
   }
@@ -145,13 +162,11 @@ export function setConstraintKeyframeBlends(blends) {
   }
 }
 
-/**
- * @param {string} layerId
- * @param {number} frameIndex
- * @param {{ dens?: Float32Array, gx?: Float32Array, gy?: Float32Array, gz?: Float32Array }} frame
- * @returns {boolean}
- */
-export function patchConstraintKeyframeFrame(layerId, frameIndex, frame) {
+export function patchConstraintKeyframeFrame(
+  layerId: string,
+  frameIndex: number,
+  frame: Partial<KeyframeFrame> | null | undefined,
+): boolean {
   if (!gpu.device || !gpu.volumeBuf || !gpu.scenePacked || !frame) return false;
   const c = gpu.sceneConstraints.find((x) => x.id === layerId);
   if (!c || !(c.K > 1)) return false;
@@ -162,12 +177,12 @@ export function patchConstraintKeyframeFrame(layerId, frameIndex, frame) {
   const base = c.base + k * stride;
   if (base + stride > gpu.scenePacked.length) return false;
 
-  const put = (src, slot) => {
+  const put = (src: Float32Array | undefined, slot: number) => {
     const off = base + slot * volN;
     if (src && src.length) {
-      gpu.scenePacked.set(src.length >= volN ? src.subarray(0, volN) : src, off);
+      gpu.scenePacked!.set(src.length >= volN ? src.subarray(0, volN) : src, off);
     } else {
-      gpu.scenePacked.fill(0, off, off + volN);
+      gpu.scenePacked!.fill(0, off, off + volN);
     }
   };
   put(frame.dens, 0);
@@ -181,7 +196,7 @@ export function patchConstraintKeyframeFrame(layerId, frameIndex, frame) {
   return true;
 }
 
-export function hasUploadedVolume() {
+export function hasUploadedVolume(): boolean {
   return gpu.sceneM > 0 && (gpu.densLayerCount > 0 || gpu.sceneConstraints.length > 0);
 }
 

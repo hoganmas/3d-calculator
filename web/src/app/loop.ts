@@ -34,7 +34,7 @@ import { uploadFit, tickGpuKeyframeBlends } from "./pipeline.js";
 import { hudText, refreshMetricsDump } from "./hud.js";
 import { syncClipPresentation } from "./presentation.js";
 
-function frame(rafNow) {
+function frame(rafNow: number) {
   const t0 = performance.now();
   if (state.lastRafAt > 0) {
     const rafDt = rafNow > 0 ? rafNow - state.lastRafAt : t0 - state.lastRafAt;

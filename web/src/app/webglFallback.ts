@@ -36,7 +36,7 @@ volumeTex.colorSpace = THREE.NoColorSpace;
 volumeTex.needsUpdate = true;
 
 /** @type {THREE.DataTexture | null} */
-let clipVolumeTex = null;
+let clipVolumeTex: THREE.DataTexture | null = null;
 let clipVolumeM = 0;
 
 export const clipUniforms = {
@@ -73,7 +73,7 @@ clipQuad.frustumCulled = false;
 clipQuad.visible = false;
 scene.add(clipQuad);
 
-export function applyVolumeTexture(dens, M) {
+export function applyVolumeTexture(dens: Float32Array, M: number) {
   const h = M * M;
   if (!clipVolumeTex || clipVolumeM !== M) {
     if (clipVolumeTex) clipVolumeTex.dispose();
@@ -86,7 +86,7 @@ export function applyVolumeTexture(dens, M) {
     clipVolumeTex.needsUpdate = true;
     clipVolumeM = M;
     clipUniforms.uVolumeTex.value = clipVolumeTex;
-  } else {
+  } else if (clipVolumeTex.image?.data) {
     clipVolumeTex.image.data.set(dens);
     clipVolumeTex.needsUpdate = true;
   }
@@ -190,7 +190,7 @@ export function syncClipCpuVolume() {
   state.clipDirty = false;
 }
 
-export async function prepareClipGpuForDegree(deg) {
+export async function prepareClipGpuForDegree(deg: number) {
   try {
     const ok = await initClipBakeGpu(els.viewport);
     if (!ok) return false;

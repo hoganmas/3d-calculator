@@ -12,7 +12,7 @@
     "isolatedModules": true,
     "resolveJsonModule": true,
     "verbatimModuleSyntax": true,
-    "types": ["vite/client"]
+    "types": ["vite/client", "@webgpu/types"]
   },
   "include": ["src/**/*.ts", "src/**/*.svelte", "src/**/*.d.ts"],
   "exclude": ["node_modules", "dist"]

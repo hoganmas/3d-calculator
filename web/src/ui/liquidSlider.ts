@@ -5,11 +5,15 @@
 
 const THUMB_PX = 18;
 
-/**
- * @param {HTMLInputElement} input
- * @returns {number} 0…1
- */
-function valueT(input) {
+interface ThumbMorph {
+  skewX?: number;
+  skewY?: number;
+  dx?: number;
+  dy?: number;
+  dragging?: boolean;
+}
+
+function valueT(input: HTMLInputElement) {
   const min = Number(input.min);
   const max = Number(input.max);
   const val = Number(input.value);
@@ -17,18 +21,7 @@ function valueT(input) {
   return Math.min(1, Math.max(0, (val - min) / (max - min)));
 }
 
-/**
- * @param {HTMLElement} thumb
- * @param {number} t
- * @param {{
- *   skewX?: number,
- *   skewY?: number,
- *   dx?: number,
- *   dy?: number,
- *   dragging?: boolean,
- * }} [morph]
- */
-function applyThumb(thumb, t, morph = {}) {
+function applyThumb(thumb: HTMLElement, t: number, morph: ThumbMorph = {}) {
   thumb.style.setProperty("--t", String(t));
   thumb.style.setProperty("--skew-x", `${morph.skewX ?? 0}deg`);
   thumb.style.setProperty("--skew-y", `${morph.skewY ?? 0}deg`);
@@ -37,11 +30,7 @@ function applyThumb(thumb, t, morph = {}) {
   thumb.classList.toggle("is-dragging", !!morph.dragging);
 }
 
-/**
- * Sync overlay position from the range value (e.g. after programmatic updates).
- * @param {HTMLInputElement | null | undefined} input
- */
-export function syncLiquidThumb(input) {
+export function syncLiquidThumb(input: HTMLInputElement | null | undefined) {
   if (!(input instanceof HTMLInputElement)) return;
   const track = input.closest(".liquid-track");
   const thumb = track?.querySelector(".liquid-thumb");
@@ -53,18 +42,13 @@ export function syncLiquidThumb(input) {
   applyThumb(thumb, valueT(input));
 }
 
-/**
- * Ensure a liquid thumb exists in `track` and follows `input`.
- * @param {HTMLElement} track
- * @param {HTMLInputElement} input
- */
-export function mountLiquidThumb(track, input) {
+export function mountLiquidThumb(track: HTMLElement, input: HTMLInputElement) {
   if (!(track instanceof HTMLElement) || !(input instanceof HTMLInputElement)) return;
   track.classList.add("liquid-track");
   input.classList.add("liquid-range");
   track.style.setProperty("--thumb-size", `${THUMB_PX}px`);
 
-  let thumb = track.querySelector(".liquid-thumb");
+  let thumb = track.querySelector(".liquid-thumb") as HTMLElement | null;
   if (!(thumb instanceof HTMLElement)) {
     thumb = document.createElement("span");
     thumb.className = "liquid-thumb";
@@ -80,14 +64,10 @@ export function mountLiquidThumb(track, input) {
   }
   track.dataset.liquidBound = "1";
 
-  /** @type {{ x: number, y: number } | null} */
-  let pointer = null;
+  let pointer: { x: number; y: number } | null = null;
   let dragging = false;
-  /** @type {{ skewX: number, skewY: number, dx: number, dy: number }} */
   let morph = { skewX: 0, skewY: 0, dx: 0, dy: 0 };
-  /** @type {number} */
   let settleRaf = 0;
-  /** @type {number} */
   let dragRaf = 0;
 
   const stopSettle = () => {
@@ -106,7 +86,7 @@ export function mountLiquidThumb(track, input) {
    */
   const morphTowardPointer = () => {
     const t = valueT(input);
-    thumb.style.setProperty("--t", String(t));
+    thumb!.style.setProperty("--t", String(t));
 
     if (!pointer) {
       return { skewX: 0, skewY: 0, dx: 0, dy: 0 };
@@ -139,7 +119,10 @@ export function mountLiquidThumb(track, input) {
     };
   };
 
-  const paint = (next, isDragging) => {
+  const paint = (
+    next: { skewX: number; skewY: number; dx: number; dy: number },
+    isDragging: boolean,
+  ) => {
     morph = next;
     applyThumb(thumb, valueT(input), { ...next, dragging: isDragging });
   };
@@ -165,7 +148,7 @@ export function mountLiquidThumb(track, input) {
     stopDragRaf();
     const start = performance.now();
     const from = { ...morph };
-    const tick = (now) => {
+    const tick = (now: number) => {
       const u = Math.min(1, (now - start) / 340);
       const e = 1 - (1 - u) ** 3;
       const bounce = Math.sin(u * Math.PI) * (1 - u);
@@ -188,20 +171,20 @@ export function mountLiquidThumb(track, input) {
     settleRaf = requestAnimationFrame(tick);
   };
 
-  const onPointerMove = (ev) => {
+  const onPointerMove = (ev: PointerEvent) => {
     pointer = { x: ev.clientX, y: ev.clientY };
   };
 
   const onInput = () => {
-    if (dragging) thumb.style.setProperty("--t", String(valueT(input)));
+    if (dragging) thumb!.style.setProperty("--t", String(valueT(input)));
     else syncLiquidThumb(input);
   };
 
-  const onPointerDown = (ev) => {
+  const onPointerDown = (ev: PointerEvent) => {
     stopSettle();
     dragging = true;
     pointer = { x: ev.clientX, y: ev.clientY };
-    thumb.classList.add("is-dragging");
+    thumb!.classList.add("is-dragging");
     try {
       input.setPointerCapture(ev.pointerId);
     } catch (_) {
@@ -212,7 +195,7 @@ export function mountLiquidThumb(track, input) {
     dragRaf = requestAnimationFrame(tickDrag);
   };
 
-  const onPointerUp = (ev) => {
+  const onPointerUp = (ev: PointerEvent) => {
     dragging = false;
     pointer = null;
     stopDragRaf();

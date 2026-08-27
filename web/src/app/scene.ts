@@ -61,14 +61,18 @@ scene.add(worldGrid);
 export const worldLabels = new THREE.Group();
 labelScene.add(worldLabels);
 
-/** @type {import("three").ShaderMaterial["uniforms"] | null} */
-let boundClipUniforms = null;
+let boundClipUniforms: THREE.ShaderMaterial["uniforms"] | null = null;
 
-export function bindClipUniforms(clipUniforms) {
+export function bindClipUniforms(clipUniforms: THREE.ShaderMaterial["uniforms"]) {
   boundClipUniforms = clipUniforms;
 }
 
-function makeAxisLabel(text, color, position, labelStroke) {
+function makeAxisLabel(
+  text: string,
+  color: string,
+  position: THREE.Vector3,
+  labelStroke: string,
+) {
   // High-res canvas so sprites stay sharp under orbit / retina.
   const css = 128;
   const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
@@ -77,6 +81,7 @@ function makeAxisLabel(text, color, position, labelStroke) {
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext("2d");
+  if (!ctx) return new THREE.Sprite(new THREE.SpriteMaterial());
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
   ctx.clearRect(0, 0, size, size);
@@ -111,7 +116,7 @@ function makeAxisLabel(text, color, position, labelStroke) {
   return spr;
 }
 
-function styleGrid(grid, opacity) {
+function styleGrid(grid: THREE.GridHelper, opacity: number) {
   const mats = Array.isArray(grid.material) ? grid.material : [grid.material];
   for (const m of mats) {
     m.transparent = true;
@@ -120,22 +125,24 @@ function styleGrid(grid, opacity) {
   }
 }
 
-export function rebuildWorldGrid(half) {
+export function rebuildWorldGrid(half: number) {
   while (worldGrid.children.length) {
-    const child = worldGrid.children.pop();
-    child.geometry?.dispose?.();
-    if (child.material) {
+    const child = worldGrid.children.pop() as THREE.Mesh | undefined;
+    child?.geometry?.dispose?.();
+    if (child?.material) {
       const mats = Array.isArray(child.material) ? child.material : [child.material];
       for (const m of mats) {
-        m.map?.dispose?.();
+        const tex = (m as THREE.MeshStandardMaterial).map;
+        tex?.dispose?.();
         m.dispose?.();
       }
     }
   }
   while (worldLabels.children.length) {
-    const child = worldLabels.children.pop();
-    child.material?.map?.dispose?.();
-    child.material?.dispose?.();
+    const child = worldLabels.children.pop() as THREE.Sprite | undefined;
+    const mat = child?.material as THREE.SpriteMaterial | undefined;
+    mat?.map?.dispose?.();
+    mat?.dispose?.();
   }
 
   const h = Math.max(0.5, half);
@@ -196,7 +203,7 @@ export function rebuildWorldGrid(half) {
 }
 
 /** Fit / march use half-extent h; UI “box size” is full edge length S = 2h. */
-export function setBoxSize(size) {
+export function setBoxSize(size: number) {
   const s = Math.max(1e-6, size);
   const h = 0.5 * s;
   boxHelper.geometry.dispose();

@@ -10,7 +10,12 @@ import {
   getSsaoShader,
 } from "./shaders/compose.js";
 
-async function compileChecked(label, code) {
+export interface PipelineBuildResult {
+  gridRebuildHalf?: number;
+}
+
+async function compileChecked(label: string, code: string): Promise<GPUShaderModule> {
+  if (!gpu.device) throw new Error("GPU device not initialized");
   const mod = gpu.device.createShaderModule({ code });
   const info = await mod.getCompilationInfo();
   for (const m of info.messages) {
@@ -19,8 +24,7 @@ async function compileChecked(label, code) {
   return mod;
 }
 
-/** @returns {Promise<{ gridRebuildHalf?: number } | false>} */
-export async function ensurePipelinesForDegree(_deg) {
+export async function ensurePipelinesForDegree(_deg: number): Promise<PipelineBuildResult | false> {
   if (!gpu.device) return false;
   if (
     gpu.isoPipeline && gpu.beerPipeline && gpu.fxaaPipeline && gpu.ssaoPipeline &&
@@ -38,11 +42,11 @@ export async function ensurePipelinesForDegree(_deg) {
   const fxaaMod = await compileChecked("fxaa", getFxaaShader());
   const ssaoMod = await compileChecked("ssao", getSsaoShader());
 
-  const blendPremul = {
+  const blendPremul: GPUBlendState = {
     color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
     alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
   };
-  const blendMin = {
+  const blendMin: GPUBlendState = {
     color: { srcFactor: "one", dstFactor: "one", operation: "min" },
     alpha: { srcFactor: "one", dstFactor: "one", operation: "min" },
   };

@@ -1,20 +1,20 @@
 # Source layout (`src/`)
 
-Vite entry: [`index.html`](index.html) → [`src/main.js`](src/main.js) (thin bootstrap).
+Vite entry: [`index.html`](index.html) → [`src/main.ts`](src/main.ts) (thin bootstrap).
 
 ```
 src/
-  main.js                 Wire modules, mount expression list, start loop
+  main.ts                 Wire modules, mount expression list, start loop
   app/
     state.ts              Shared mutable runtime state
     dom.ts                  DOM refs, settings dialog, panel resize
-    scene.js                THREE scene, camera, grid, lava background
+    scene.ts                THREE scene, camera, grid, lava background
     compile.ts              Expression compile + preset helpers
     pipeline.ts             uploadFit, bakeChebVolume, keyframes
-    webglFallback.js        WebGL Beer march (no WebGPU)
-    presentation.js         Resize, march downscale, GPU/CPU presentation
-    hud.js                  Metrics HUD + compile status
-    loop.js                 requestAnimationFrame loop
+    webglFallback.ts        WebGL Beer march (no WebGPU)
+    presentation.ts         Resize, march downscale, GPU/CPU presentation
+    hud.ts                  Metrics HUD + compile status
+    loop.ts                 requestAnimationFrame loop
   math/
     fit.ts                  LaTeX compile + Chebyshev least-squares fit
     idct.ts                 Separable Chebyshev IDCT → dens grid (+ grad)
@@ -24,18 +24,18 @@ src/
     params.ts               Free-parameter values + animation
     keyframes.ts            Animated-param keyframe cache + GPU blend
   render/
-    camera.js               NDC → world ray helpers
-    background.js           Three.js fullscreen backdrop shader
+    camera.ts               NDC → world ray helpers
+    background.ts           Three.js fullscreen backdrop shader
     webgl/
-      marchShaders.js       WebGL Beer–Lambert fallback GLSL
+      marchShaders.ts       WebGL Beer–Lambert fallback GLSL
     webgpu/
-      march.js              WebGPU init, frame graph, public exports
-      gpuState.js           Shared GPU device / texture state
-      uniforms.js           Draw-param packing + layer color upload
-      sceneUpload.js        Volume upload + keyframe patch
-      pipelines.js          Shader module compile + pipeline creation
+      march.ts              WebGPU init, frame graph, public exports
+      gpuState.ts           Shared GPU device / texture state
+      uniforms.ts           Draw-param packing + layer color upload
+      sceneUpload.ts        Volume upload + keyframe patch
+      pipelines.ts          Shader module compile + pipeline creation
       shaders/
-        compose.js          Load .wgsl ?raw, inject constants
+        compose.ts          Load .wgls ?raw, inject constants
         common/gradient.wgsl
         isoHermite.wgsl
         isoTrilinear.wgsl
@@ -51,11 +51,11 @@ src/
       helpers.ts            MathLive + row helpers
       popovers.ts           Gradient / animation popovers
       dragReorder.ts        Pointer drag-reorder controller
-    expressionList.js       Re-export mountExprList
+    expressionList.ts       Re-export mountExprList
     popover.ts              Floating UI popover helper
-    liquidSlider.js         Glass-style range slider thumbs
+    liquidSlider.ts         Glass-style range slider thumbs
+    theme.ts / theme.css
     app.css                 Panel / expr-list / settings layout styles
-    theme.js / theme.css
 ```
 
 ## Data flow
@@ -68,7 +68,7 @@ MathLive (ui/expr-sidebar)
   → upload + march (app/pipeline → render/webgpu/march, or app/webglFallback)
 ```
 
-Animated free parameters bake keyframes in `model/keyframes.js` (cold fit, hot GPU lerp).
+Animated free parameters bake keyframes in `model/keyframes.ts` (cold fit, hot GPU lerp).
 
 ## Layer rules
 
@@ -79,12 +79,13 @@ Animated free parameters bake keyframes in `model/keyframes.js` (cold fit, hot G
 | `render/` | `math/`, `model/`, sibling render modules |
 | `ui/` | `math/`, `model/`, sibling `ui/` |
 | `app/` | all of the above (orchestration) |
-| `main.js` | `app/`, `ui/` |
+| `main.ts` | `app/`, `ui/` |
 
-Avoid importing `app/` or `main.js` from `math/`, `model/`, `render/`, or `ui/`.
+Avoid importing `app/` or `main.ts` from `math/`, `model/`, `render/`, or `ui/`.
 
 ## Notes
 
 - **WGSL lives in `.wgsl` files** under `render/webgpu/shaders/`; Hermite vs trilinear iso uses two separate shaders selected at pipeline build.
 - **Legacy names** — some internals still say `clip*` (e.g. `clipQuad`, `[clip-grid]` logs).
+- **TS migration** — `web/src/` is fully TypeScript; imports use `.js` extensions. Vite resolves missing `.js` to sibling `.ts` via `resolveTsFromJs` in `vite.config.js`. WebGPU types from `@webgpu/types`.
 - **Pipeline write-up** — [`research/poly/notes/cheb-idct-volume.md`](../research/poly/notes/cheb-idct-volume.md).

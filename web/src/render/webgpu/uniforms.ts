@@ -1,15 +1,19 @@
 import { MAX_GRAD_STOPS } from "../../model/expressions.js";
-import { MAX_DENS_LAYERS } from "./gpuState.js";
 import {
+  MAX_DENS_LAYERS,
   DEFAULT_DENS_RGB,
   DEFAULT_DENS_RGB2,
   DEFAULT_ISO_RGB,
   DEFAULT_ISO_RGB2,
+  type RgbTriplet,
 } from "./gpuState.js";
 
-/** @param {number[][] | null} gradRgbs @param {number[]} absorb @param {number[]} emit */
-export function normalizeRgbStops(gradRgbs, absorb, emit) {
-  let stops = Array.isArray(gradRgbs) && gradRgbs.length
+export function normalizeRgbStops(
+  gradRgbs: RgbTriplet[] | null | undefined,
+  absorb: RgbTriplet,
+  emit: RgbTriplet,
+): RgbTriplet[] {
+  let stops: RgbTriplet[] = Array.isArray(gradRgbs) && gradRgbs.length
     ? gradRgbs.map((c) => [c[0], c[1], c[2]])
     : [absorb, emit];
   if (stops.length < 1) stops = [DEFAULT_ISO_RGB, DEFAULT_ISO_RGB2];
@@ -18,14 +22,23 @@ export function normalizeRgbStops(gradRgbs, absorb, emit) {
   return stops;
 }
 
-/**
- * Classic pack; volBase / volBaseB / blendT for GPU keyframe mix.
- * @param {number[][]} [gradRgbs] list of [r,g,b] stops
- */
 export function packDrawParamsIso(
-  fbW, fbH, gridM, steps, half, scale, isoLevel, volBase, ro, M, absorb, emit,
-  volBaseB = volBase, blendT = 0, gradRgbs = null,
-) {
+  fbW: number,
+  fbH: number,
+  gridM: number,
+  steps: number,
+  half: number,
+  scale: number,
+  isoLevel: number,
+  volBase: number,
+  ro: number[],
+  M: Float64Array | Float32Array | number[],
+  absorb: RgbTriplet,
+  emit: RgbTriplet,
+  volBaseB: number = volBase,
+  blendT: number = 0,
+  gradRgbs: RgbTriplet[] | null = null,
+): ArrayBuffer {
   const buf = new ArrayBuffer(256);
   const u32 = new Uint32Array(buf);
   const f32 = new Float32Array(buf);
@@ -49,7 +62,18 @@ export function packDrawParamsIso(
   return buf;
 }
 
-export function packDrawParamsBeer(fbW, fbH, gridM, steps, half, scale, densBaseOff, layerCount, ro, M) {
+export function packDrawParamsBeer(
+  fbW: number,
+  fbH: number,
+  gridM: number,
+  steps: number,
+  half: number,
+  scale: number,
+  densBaseOff: number,
+  layerCount: number,
+  ro: number[],
+  M: Float64Array | Float32Array | number[],
+): ArrayBuffer {
   const buf = new ArrayBuffer(256);
   const u32 = new Uint32Array(buf);
   const f32 = new Float32Array(buf);
@@ -62,7 +86,16 @@ export function packDrawParamsBeer(fbW, fbH, gridM, steps, half, scale, densBase
   return buf;
 }
 
-export function packSsaoParams(fbW, fbH, half, radius, strength, bias, ro, M) {
+export function packSsaoParams(
+  fbW: number,
+  fbH: number,
+  half: number,
+  radius: number,
+  strength: number,
+  bias: number,
+  ro: number[],
+  M: Float64Array | Float32Array | number[],
+): ArrayBuffer {
   const buf = new ArrayBuffer(128);
   const u32 = new Uint32Array(buf);
   const f32 = new Float32Array(buf);
@@ -75,8 +108,11 @@ export function packSsaoParams(fbW, fbH, half, radius, strength, bias, ro, M) {
   return buf;
 }
 
-/** @param {GPUDevice | null} device @param {GPUBuffer | null} colorBuf @param {number[][][]} layerStopsList */
-export function writeLayerColors(device, colorBuf, layerStopsList) {
+export function writeLayerColors(
+  device: GPUDevice | null,
+  colorBuf: GPUBuffer | null,
+  layerStopsList: RgbTriplet[][] | null | undefined,
+): void {
   if (!device || !colorBuf) return;
   const data = new Float32Array(MAX_DENS_LAYERS * MAX_GRAD_STOPS * 4);
   for (let L = 0; L < MAX_DENS_LAYERS; L++) {

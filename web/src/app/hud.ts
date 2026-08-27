@@ -11,18 +11,18 @@ import {
 } from "./presentation.js";
 import { compileAllExprs, fmtParamNum } from "./compile.js";
 
-export function fmtRel(v) {
+export function fmtRel(v: number) {
   if (!Number.isFinite(v)) return "∞";
   if (v < 1e-3) return v.toExponential(2);
   return v.toPrecision(3);
 }
 
-export function setErr(msg) {
+export function setErr(msg: string) {
   els.err.textContent = msg || "";
 }
 
 /** Highlight expression fields when compile fails (preserve duplicate-var warnings). */
-export function setExprCompileOk(ok) {
+export function setExprCompileOk(ok: boolean) {
   els.exprList?.querySelectorAll(".expr-field").forEach((mf) => {
     const row = mf.closest?.(".expr-row");
     const id = row instanceof HTMLElement ? row.dataset.id : null;
@@ -142,7 +142,7 @@ export function buildMetricsReport() {
       `fit_cheb_ms     ${t.chebMs.toFixed(2)}`,
       `fit_mono_ms     ${t.monoMs.toFixed(2)}`,
       `fit_l2_ms       ${t.l2Ms.toFixed(2)}`,
-      `fit_upload_ms   ${t.uploadMs.toFixed(2)}`,
+      `fit_upload_ms   ${(t.uploadMs ?? 0).toFixed(2)}`,
     );
     if (Number.isFinite(t.fittedCount)) {
       lines.push(`fit_layers      ${t.fittedCount}`);
@@ -150,15 +150,15 @@ export function buildMetricsReport() {
     if (Number.isFinite(t.keyframedCount)) {
       lines.push(`kf_layers       ${t.keyframedCount}`);
     }
-    if (Number.isFinite(t.kfBakeMs) && t.kfBakeMs > 0) {
+    if (t.kfBakeMs != null && t.kfBakeMs > 0) {
       lines.push(`kf_bake_ms      ${t.kfBakeMs.toFixed(2)}`);
     }
-    if (Number.isFinite(t.kfLerpMs) && t.kfLerpMs > 0) {
+    if (t.kfLerpMs != null && t.kfLerpMs > 0) {
       lines.push(`kf_lerp_ms      ${t.kfLerpMs.toFixed(2)}`);
-    } else if (Number.isFinite(t.keyframedCount) && t.keyframedCount > 0) {
+    } else if (t.keyframedCount != null && t.keyframedCount > 0) {
       lines.push(`kf_blend        gpu`);
     }
-    if (Number.isFinite(t.kfK) && t.keyframedCount > 0) {
+    if (t.kfK != null && (t.keyframedCount ?? 0) > 0) {
       lines.push(`kf_K            ${t.kfK}`);
     }
   }
@@ -174,7 +174,7 @@ export function buildMetricsReport() {
 
 export function refreshMetricsDump() {
   state.lastMetricsText = buildMetricsReport();
-  if (els.metricsDump) els.metricsDump.value = state.lastMetricsText;
+  if (els.metricsDump) (els.metricsDump as HTMLTextAreaElement).value = state.lastMetricsText;
 }
 
 export async function copyMetricsToClipboard() {

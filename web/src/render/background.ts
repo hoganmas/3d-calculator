@@ -2,6 +2,7 @@
  * View-dependent lava-lamp skybox (interior sphere, solid-angle blob field).
  */
 import * as THREE from "three";
+import type { Camera } from "three";
 
 const SKY_RADIUS = 80;
 const BLOB_COUNT = 10;
@@ -118,17 +119,28 @@ void main() {
 }
 `;
 
-function hexToVec3(hex) {
+export interface LavaColors {
+  lava1: string;
+  lava2: string;
+  lava3: string;
+}
+
+function hexToVec3(hex: string): THREE.Vector3 {
   const h = hex.replace("#", "");
   const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
   const n = parseInt(full, 16) || 0;
   return new THREE.Vector3(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
 }
 
-/**
- * @param {{ lava1: string, lava2: string, lava3: string }} colors
- */
-export function createLavaBackground(colors) {
+export interface LavaBackground {
+  mesh: THREE.Mesh;
+  material: THREE.ShaderMaterial;
+  syncCamera: (camera: Camera) => void;
+  setTime: (timeSec: number) => void;
+  setColors: (c: LavaColors) => void;
+}
+
+export function createLavaBackground(colors: LavaColors): LavaBackground {
   const geometry = new THREE.SphereGeometry(SKY_RADIUS, 72, 48);
   const material = new THREE.ShaderMaterial({
     vertexShader,
@@ -150,15 +162,12 @@ export function createLavaBackground(colors) {
   return {
     mesh,
     material,
-    /** @param {THREE.Camera} camera */
     syncCamera(camera) {
       mesh.position.copy(camera.position);
     },
-    /** @param {number} timeSec */
     setTime(timeSec) {
       material.uniforms.uTime.value = timeSec;
     },
-    /** @param {{ lava1: string, lava2: string, lava3: string }} c */
     setColors(c) {
       material.uniforms.uColor1.value.copy(hexToVec3(c.lava1));
       material.uniforms.uColor2.value.copy(hexToVec3(c.lava2));

@@ -1,5 +1,5 @@
 import { PRESETS } from "../math/fit.js";
-import { getThemePref, setThemePref } from "../ui/theme.js";
+import { getThemePref, setThemePref, type ThemePref } from "../ui/theme.js";
 
 function el<T extends HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
@@ -66,7 +66,7 @@ export function initDom() {
   if (els.themePref) {
     els.themePref.value = getThemePref();
     els.themePref.addEventListener("change", () => {
-      setThemePref(els.themePref!.value as "dark" | "light" | "system");
+      setThemePref(els.themePref!.value as ThemePref);
     });
   }
 

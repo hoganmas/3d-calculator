@@ -34,7 +34,7 @@
   let focusEpoch = 0;
   let pendingFocus: { id: string; pos: number } | null = null;
 
-  const rowRefs: Record<string, ExprRow | undefined> = {};
+  let rowRefs = $state<Record<string, ExprRow | undefined>>({});
   let dragCtrl: DragReorderController | null = null;
 
   function beginSuppressAutoCommit() {

@@ -18,7 +18,7 @@ import {
 } from "./scene.js";
 import { clipQuad, useGpuClipPath } from "./webglFallback.js";
 
-function marchDownscaleTickPct(n) {
+function marchDownscaleTickPct(n: number) {
   return ((n - MARCH_DOWNSCALE_MIN) / (MARCH_DOWNSCALE_MAX - MARCH_DOWNSCALE_MIN)) * 100;
 }
 
@@ -61,7 +61,7 @@ export function marchDownscale() {
 }
 
 /** CSS px covered by the floating sidebar (0 on narrow layouts). */
-export function compositionCoveredWidth(vw) {
+export function compositionCoveredWidth(vw: number) {
   if (typeof window !== "undefined" && window.matchMedia("(max-width: 800px)").matches) {
     return 0;
   }
@@ -73,13 +73,13 @@ export function compositionCoveredWidth(vw) {
 }
 
 /** NDC x of the free-region center (0 when the panel does not inset composition). */
-export function compositionNdcOffsetX(vw) {
+export function compositionNdcOffsetX(vw: number) {
   const covered = compositionCoveredWidth(vw);
   if (covered <= 1 || vw <= covered + 40) return 0;
   return covered / vw;
 }
 
-export function applyCameraComposition(vw, vh) {
+export function applyCameraComposition(vw: number, vh: number) {
   // Keep projection in sync with offsetDirMatrix used by volume rays:
   // rays aim forward at NDC x = +offset (free-region center to the right of the panel),
   // so world points on the view axis must project to that same NDC x.
@@ -111,14 +111,19 @@ export function marchFramebufferSize() {
   };
 }
 
-/** @type {(() => string) | null} */
-let getHudText = null;
+let getHudText: (() => string) | null = null;
 
-export function bindHudText(getter) {
+export function bindHudText(getter: () => string) {
   getHudText = getter;
 }
 
-function applyDisplaySize(rw, rh, vw, vh, { markClipDirty = true } = {}) {
+function applyDisplaySize(
+  rw: number,
+  rh: number,
+  vw: number,
+  vh: number,
+  { markClipDirty = true }: { markClipDirty?: boolean } = {},
+) {
   applyCameraComposition(vw, vh);
   renderer.setSize(rw, rh, false);
   const canvas = renderer.domElement;

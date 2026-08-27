@@ -7,20 +7,18 @@ import axisLabelWgsl from "./axisLabel.wgsl?raw";
 import fxaaWgsl from "./fxaa.wgsl?raw";
 import ssaoWgsl from "./ssao.wgsl?raw";
 
-/** @param {string} src @param {Record<string, string | number>} vars */
-function inject(src, vars) {
+function inject(src: string, vars: Record<string, string | number>): string {
   return Object.entries(vars).reduce(
     (s, [k, v]) => s.replaceAll(`{{${k}}}`, String(v)),
     src,
   );
 }
 
-function gradientBlock(maxGradStops) {
+function gradientBlock(maxGradStops: number): string {
   return inject(gradientWgsl, { MAX_GRAD_STOPS: maxGradStops });
 }
 
-/** @param {boolean} useHermite @param {number} maxGradStops */
-export function getIsoShader(useHermite, maxGradStops) {
+export function getIsoShader(useHermite: boolean, maxGradStops: number): string {
   const base = useHermite ? isoHermiteWgsl : isoTrilinearWgsl;
   return inject(base, {
     GRADIENT_WGSL: gradientBlock(maxGradStops),
@@ -28,8 +26,7 @@ export function getIsoShader(useHermite, maxGradStops) {
   });
 }
 
-/** @param {number} maxGradStops @param {number} maxDensLayers */
-export function getBeerShader(maxGradStops, maxDensLayers) {
+export function getBeerShader(maxGradStops: number, maxDensLayers: number): string {
   return inject(beerWgsl, {
     GRADIENT_WGSL: gradientBlock(maxGradStops),
     MAX_GRAD_STOPS: maxGradStops,
@@ -37,18 +34,18 @@ export function getBeerShader(maxGradStops, maxDensLayers) {
   });
 }
 
-export function getGridShader() {
+export function getGridShader(): string {
   return gridWgsl;
 }
 
-export function getAxisLabelShader() {
+export function getAxisLabelShader(): string {
   return axisLabelWgsl;
 }
 
-export function getFxaaShader() {
+export function getFxaaShader(): string {
   return fxaaWgsl;
 }
 
-export function getSsaoShader() {
+export function getSsaoShader(): string {
   return ssaoWgsl;
 }

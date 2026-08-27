@@ -4,41 +4,35 @@
 
 const STORAGE_KEY = "poly-cloud-theme";
 
-/** @typedef {"dark" | "light" | "system"} ThemePref */
-/** @typedef {"dark" | "light"} ThemeResolved */
+export type ThemePref = "dark" | "light" | "system";
+export type ThemeResolved = "dark" | "light";
 
-/** @type {Set<(resolved: ThemeResolved, pref: ThemePref) => void>} */
-const listeners = new Set();
+const listeners = new Set<(resolved: ThemeResolved, pref: ThemePref) => void>();
 
-/** @returns {ThemePref} */
-export function getThemePref() {
+export function getThemePref(): ThemePref {
   const v = localStorage.getItem(STORAGE_KEY);
   if (v === "light" || v === "system") return v;
   return "dark";
 }
 
-/** @param {ThemePref} pref */
-export function resolveTheme(pref) {
+export function resolveTheme(pref: ThemePref): ThemeResolved {
   if (pref === "system") {
     return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
   }
   return pref;
 }
 
-/** @param {ThemePref} pref */
-export function setThemePref(pref) {
+export function setThemePref(pref: ThemePref) {
   localStorage.setItem(STORAGE_KEY, pref);
   applyTheme(pref);
 }
 
-/** @param {(resolved: ThemeResolved, pref: ThemePref) => void} fn */
-export function onThemeChange(fn) {
+export function onThemeChange(fn: (resolved: ThemeResolved, pref: ThemePref) => void) {
   listeners.add(fn);
   return () => listeners.delete(fn);
 }
 
-/** @param {ThemePref} [pref] */
-export function applyTheme(pref = getThemePref()) {
+export function applyTheme(pref: ThemePref = getThemePref()) {
   const resolved = resolveTheme(pref);
   document.documentElement.setAttribute("data-theme", resolved);
   document.documentElement.dataset.themePref = pref;
@@ -53,7 +47,7 @@ export function initTheme() {
   });
 }
 
-function cssHex(name) {
+function cssHex(name: string) {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   if (!raw) return 0;
   if (raw.startsWith("#")) {
@@ -64,16 +58,16 @@ function cssHex(name) {
   return 0;
 }
 
-function cssFloat(name, fallback = 0) {
+function cssFloat(name: string, fallback = 0) {
   const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
   return Number.isFinite(v) ? v : fallback;
 }
 
-function cssColor(name) {
+function cssColor(name: string) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
-function cssHexToRgb01(hexStr) {
+function cssHexToRgb01(hexStr: string) {
   const h = hexStr.replace("#", "").trim();
   if (!h) return [1, 1, 1];
   const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;

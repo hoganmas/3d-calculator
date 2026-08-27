@@ -1,6 +1,7 @@
 /**
  * WebGPU volume march: IDCT dens grids + iso manifolds + multi-layer Beer.
  */
+import type { Camera, PerspectiveCamera } from "three";
 import { ndcToDirMatrix, perspectiveDirScale, offsetDirMatrix } from "../camera.js";
 import { MAX_GRAD_STOPS } from "../../model/expressions.js";
 import {
@@ -17,7 +18,6 @@ import {
   packDrawParamsIso,
   packDrawParamsBeer,
   packSsaoParams,
-  normalizeRgbStops,
   writeLayerColors,
 } from "./uniforms.js";
 import {
@@ -39,12 +39,48 @@ export {
   hasUploadedVolume,
 };
 
-export function getIsoInterpHermite() {
+export interface ClipGpuTheme {
+  gridMajor?: number;
+  gridMinor?: number;
+  boxEdgeRgb?: number[];
+  axisXRgb?: number[];
+  axisYRgb?: number[];
+  axisZRgb?: number[];
+  labelStroke?: string;
+}
+
+export interface ClipGpuProfile {
+  idctMs: number;
+  marchMs: number;
+  marchFbW: number;
+  marchFbH: number;
+  presentWallMs: number;
+  presentIntervalMs: number;
+  lastPresentAt: number;
+  method: string;
+  gridM: number;
+  timestamps: boolean;
+  isoInterp: string;
+}
+
+export interface RenderClipFrameGpuParams {
+  camera: PerspectiveCamera;
+  half: number;
+  fbW: number;
+  fbH: number;
+  scale: number;
+  steps: number;
+  ndcOffsetX?: number;
+  displayW?: number;
+  displayH?: number;
+}
+
+export function getIsoInterpHermite(): boolean {
   return gpu.isoInterpHermite;
 }
 
-/** @returns {boolean} true if the mode changed (iso pipeline must rebuild) */
-export function setIsoInterpHermite(on) {
+/** @returns true if the mode changed (iso pipeline must rebuild) */
+export function setIsoInterpHermite(on: boolean): boolean {
   const next = !!on;
   if (next === gpu.isoInterpHermite) return false;
   gpu.isoInterpHermite = next;
@@ -52,13 +88,20 @@ export function setIsoInterpHermite(on) {
   return true;
 }
 
-function pushGridVert(dst, i, x, y, z, r, g, b, a) {
+function pushGridVert(
+  dst: Float32Array, i: number, x: number, y: number, z: number,
+  r: number, g: number, b: number, a: number,
+): void {
   const o = i * 8;
   dst[o] = x; dst[o + 1] = y; dst[o + 2] = z; dst[o + 3] = 0;
   dst[o + 4] = r; dst[o + 5] = g; dst[o + 6] = b; dst[o + 7] = a;
 }
 
-function pushGridLine(dst, i, ax, ay, az, bx, by, bz, r, g, b, a) {
+function pushGridLine(
+  dst: Float32Array, i: number,
+  ax: number, ay: number, az: number, bx: number, by: number, bz: number,
+  r: number, g: number, b: number, a: number,
+): number {
   pushGridVert(dst, i, ax, ay, az, r, g, b, a);
   pushGridVert(dst, i + 1, bx, by, bz, r, g, b, a);
   return i + 2;
@@ -72,10 +115,7 @@ let themeAxisYRgb = [0.35, 0.75, 0.48];
 let themeAxisZRgb = [0.79, 0.66, 0.91];
 let themeLabelStroke = "rgba(26, 18, 40, 0.58)";
 
-/**
- * @param {{ gridMajor?: number, gridMinor?: number, boxEdgeRgb?: number[], axisXRgb?: number[], axisYRgb?: number[], axisZRgb?: number[], labelStroke?: string }} colors
- */
-export function applyClipGpuTheme(colors) {
+export function applyClipGpuTheme(colors: ClipGpuTheme): void {
   if (colors.gridMajor) themeGridMajor = colors.gridMajor;
   if (colors.gridMinor) themeGridMinor = colors.gridMinor;
   if (colors.boxEdgeRgb) themeBoxRgb = colors.boxEdgeRgb;
@@ -87,16 +127,11 @@ export function applyClipGpuTheme(colors) {
   gpu.labelAtlasDirty = true;
 }
 
-function hexToRgb(hex) {
+function hexToRgb(hex: number): number[] {
   return [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255];
 }
 
-/**
- * Build / upload world grid + axes + fit-box edges for the WebGPU path.
- * Matches main.js rebuildWorldGrid extents.
- * @param {number} half
- */
-export function syncClipGpuWorldGrid(half) {
+export function syncClipGpuWorldGrid(half: number): void {
   const h = Math.max(0.5, half);
   if (!gpu.device) {
     gpu.gridHalf = h;
@@ -117,7 +152,7 @@ export function syncClipGpuWorldGrid(half) {
   const data = new Float32Array(maxVerts * 8);
   let n = 0;
 
-  const emitPlane = (axis, alpha) => {
+  const emitPlane = (axis: "xz" | "xy" | "yz", alpha: number) => {
     for (let i = 0; i <= divisions; i++) {
       const t = lo + i * step;
       const major = i === 0 || i === divisions || Math.abs(t) < 1e-6;
@@ -177,7 +212,7 @@ export function syncClipGpuWorldGrid(half) {
   gpu.device.queue.writeBuffer(gpu.gridVertexBuf, 0, data.subarray(0, n * 8));
 }
 
-function rgb01Css(rgb) {
+function rgb01Css(rgb: number[]): string {
   const r = Math.round(Math.min(1, Math.max(0, rgb[0])) * 255);
   const g = Math.round(Math.min(1, Math.max(0, rgb[1])) * 255);
   const b = Math.round(Math.min(1, Math.max(0, rgb[2])) * 255);
@@ -194,6 +229,7 @@ function ensureAxisLabelAtlas() {
   canvasEl.width = cell * 3;
   canvasEl.height = cell;
   const c2d = canvasEl.getContext("2d");
+  if (!c2d) return;
   c2d.clearRect(0, 0, canvasEl.width, canvasEl.height);
   c2d.font = "600 72px 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif";
   c2d.textAlign = "center";
@@ -245,7 +281,7 @@ function ensureAxisLabelAtlas() {
  * @param {{ matrixWorld: { elements: ArrayLike<number> } }} camera
  * @param {number} half
  */
-function uploadAxisLabelBillboards(camera, half) {
+function uploadAxisLabelBillboards(camera: Camera, half: number): number {
   ensureAxisLabelAtlas();
   if (!gpu.device || !gpu.labelVertexBuf) return 0;
 
@@ -286,7 +322,10 @@ function uploadAxisLabelBillboards(camera, half) {
   return vi;
 }
 
-function packGridParams(viewProj, ro, half, M, fbW, fbH) {
+function packGridParams(
+  viewProj: ArrayLike<number>, ro: number[], half: number,
+  M: Float64Array | Float32Array | number[], fbW: number, fbH: number,
+): ArrayBuffer {
   const buf = new ArrayBuffer(160);
   const f32 = new Float32Array(buf);
   // Column-major mat4
@@ -299,19 +338,19 @@ function packGridParams(viewProj, ro, half, M, fbW, fbH) {
   return buf;
 }
 
-export function isClipBakeGpuReady() {
+export function isClipBakeGpuReady(): boolean {
   return Boolean(
     gpu.device && gpu.isoPipeline && gpu.beerPipeline && gpu.fxaaPipeline && gpu.ssaoPipeline && gpu.gridPipeline && gpu.labelPipeline,
   );
 }
-export function isClipMarchReady() {
+export function isClipMarchReady(): boolean {
   return Boolean(
     isClipBakeGpuReady() && gpu.ctx && gpu.sceneM > 1 &&
     (gpu.densLayerCount > 0 || gpu.sceneConstraints.length > 0),
   );
 }
 
-function noteGpuPresent(submitWallAt) {
+function noteGpuPresent(submitWallAt: number): void {
   const now = performance.now();
   gpu.profilePresentWallMs = gpu.profilePresentWallMs * 0.85 + (now - submitWallAt) * 0.15;
   if (gpu.lastPresentAt > 0) gpu.profilePresentIntervalMs = gpu.profilePresentIntervalMs * 0.85 + (now - gpu.lastPresentAt) * 0.15;
@@ -319,7 +358,7 @@ function noteGpuPresent(submitWallAt) {
   gpu.lastPresentAt = now;
 }
 
-export function getClipGpuProfile() {
+export function getClipGpuProfile(): ClipGpuProfile {
   return {
     idctMs: gpu.profileBakeMs,
     marchMs: gpu.profileMarchMs,
@@ -335,14 +374,14 @@ export function getClipGpuProfile() {
   };
 }
 
-export function resetClipGpuProfile() {
+export function resetClipGpuProfile(): void {
   gpu.profileBakeMs = 0;
   gpu.profileMarchMs = 0;
   gpu.profileMarchFbW = 0;
   gpu.profileMarchFbH = 0;
 }
 
-function attachClipGpuCanvas(viewportEl) {
+function attachClipGpuCanvas(viewportEl: HTMLElement): HTMLCanvasElement {
   if (gpu.canvas) return gpu.canvas;
   gpu.canvas = document.createElement("canvas");
   gpu.canvas.className = "clip-gpu";
@@ -351,14 +390,15 @@ function attachClipGpuCanvas(viewportEl) {
   viewportEl.appendChild(gpu.canvas);
   return gpu.canvas;
 }
-export function setClipGpuCanvasVisible(visible) {
+export function setClipGpuCanvasVisible(visible: boolean): void {
   if (!gpu.canvas) return;
   gpu.canvas.style.display = visible ? "block" : "none";
 }
 
-function ensureOcclTex(w, h) {
+function ensureOcclTex(w: number, h: number): void {
   if (gpu.occlTex && gpu.occlW === w && gpu.occlH === h) return;
-  if (gpu.occlTex) { try { gpu.occlTex.destroy(); } catch (_) {} }
+  if (gpu.occlTex) { try { gpu.occlTex.destroy(); } catch { /* */ } }
+  if (!gpu.device) return;
   gpu.occlTex = gpu.device.createTexture({
     size: [w, h],
     format: "rgba16float",
@@ -368,9 +408,10 @@ function ensureOcclTex(w, h) {
   gpu.occlH = h;
 }
 
-function ensureDepthTex(w, h) {
+function ensureDepthTex(w: number, h: number): void {
   if (gpu.depthTex && gpu.depthW === w && gpu.depthH === h) return;
-  if (gpu.depthTex) { try { gpu.depthTex.destroy(); } catch (_) {} }
+  if (gpu.depthTex) { try { gpu.depthTex.destroy(); } catch { /* */ } }
+  if (!gpu.device) return;
   gpu.depthTex = gpu.device.createTexture({
     size: [w, h],
     format: "depth32float",
@@ -380,9 +421,10 @@ function ensureDepthTex(w, h) {
   gpu.depthH = h;
 }
 
-function ensureNormalTex(w, h) {
+function ensureNormalTex(w: number, h: number): void {
   if (gpu.normalTex && gpu.normalW === w && gpu.normalH === h) return;
-  if (gpu.normalTex) { try { gpu.normalTex.destroy(); } catch (_) {} }
+  if (gpu.normalTex) { try { gpu.normalTex.destroy(); } catch { /* */ } }
+  if (!gpu.device) return;
   gpu.normalTex = gpu.device.createTexture({
     size: [w, h],
     format: "rgba8unorm",
@@ -392,9 +434,10 @@ function ensureNormalTex(w, h) {
   gpu.normalH = h;
 }
 
-function ensureSceneColorTex(w, h) {
+function ensureSceneColorTex(w: number, h: number): void {
   if (gpu.sceneColorTex && gpu.sceneColorW === w && gpu.sceneColorH === h) return;
-  if (gpu.sceneColorTex) { try { gpu.sceneColorTex.destroy(); } catch (_) {} }
+  if (gpu.sceneColorTex) { try { gpu.sceneColorTex.destroy(); } catch { /* */ } }
+  if (!gpu.device) return;
   gpu.sceneColorTex = gpu.device.createTexture({
     size: [w, h],
     format: gpu.canvasFormat,
@@ -404,9 +447,10 @@ function ensureSceneColorTex(w, h) {
   gpu.sceneColorH = h;
 }
 
-function ensureSceneColorAoTex(w, h) {
+function ensureSceneColorAoTex(w: number, h: number): void {
   if (gpu.sceneColorAoTex && gpu.sceneColorAoW === w && gpu.sceneColorAoH === h) return;
-  if (gpu.sceneColorAoTex) { try { gpu.sceneColorAoTex.destroy(); } catch (_) {} }
+  if (gpu.sceneColorAoTex) { try { gpu.sceneColorAoTex.destroy(); } catch { /* */ } }
+  if (!gpu.device) return;
   gpu.sceneColorAoTex = gpu.device.createTexture({
     size: [w, h],
     format: gpu.canvasFormat,
@@ -416,10 +460,10 @@ function ensureSceneColorAoTex(w, h) {
   gpu.sceneColorAoH = h;
 }
 
-export function resizeClipGpuCanvas(pixelW, pixelH) {
+export function resizeClipGpuCanvas(pixelW: number, pixelH: number): { w: number; h: number } {
   if (!gpu.canvas || !gpu.device) return { w: pixelW | 0, h: pixelH | 0 };
   if (!gpu.ctx) {
-    gpu.ctx = gpu.canvas.getContext("webgpu");
+    gpu.ctx = gpu.canvas.getContext("webgpu") as GPUCanvasContext | null;
     if (!gpu.ctx) return { w: pixelW | 0, h: pixelH | 0 };
   }
   const w = Math.max(1, pixelW | 0);
@@ -445,7 +489,7 @@ export function resizeClipGpuCanvas(pixelW, pixelH) {
   return { w: gpu.canvas.width, h: gpu.canvas.height };
 }
 
-function ensureMarchTargets(w, h) {
+function ensureMarchTargets(w: number, h: number): void {
   ensureOcclTex(w, h);
   ensureDepthTex(w, h);
   ensureNormalTex(w, h);
@@ -456,7 +500,7 @@ function ensureMarchTargets(w, h) {
 
 
 /** Clear the WebGPU overlay to transparent (no density / iso). */
-export function clearClipGpuFrame(fbW, fbH) {
+export function clearClipGpuFrame(fbW: number, fbH: number): boolean {
   if (!gpu.device || !gpu.ctx || !gpu.canvas) return false;
   const { w, h } = resizeClipGpuCanvas(fbW, fbH);
   const view = gpu.ctx.getCurrentTexture().createView();
@@ -477,7 +521,7 @@ export function clearClipGpuFrame(fbW, fbH) {
   return true;
 }
 
-export async function ensurePipelinesForDegree(deg) {
+export async function ensurePipelinesForDegree(deg: number) {
   const result = await buildPipelines(deg);
   if (result && result.gridRebuildHalf != null) {
     syncClipGpuWorldGrid(result.gridRebuildHalf);
@@ -485,7 +529,7 @@ export async function ensurePipelinesForDegree(deg) {
   return result !== false;
 }
 
-export async function initClipBakeGpu(viewportEl) {
+export async function initClipBakeGpu(viewportEl: HTMLElement | null | undefined): Promise<boolean> {
   if (isClipBakeGpuReady()) return true;
   if (gpu.initFailed) return false;
   if (gpu.initPromise) return gpu.initPromise;
@@ -495,7 +539,7 @@ export async function initClipBakeGpu(viewportEl) {
       const adapter = await navigator.gpu.requestAdapter();
       if (!adapter) { gpu.initFailed = true; return false; }
       gpu.timestampsSupported = adapter.features.has("timestamp-query");
-      const requiredFeatures = gpu.timestampsSupported ? ["timestamp-query"] : [];
+      const requiredFeatures: GPUFeatureName[] = gpu.timestampsSupported ? ["timestamp-query"] : [];
       gpu.device = await adapter.requestDevice({ requiredFeatures });
       gpu.device.lost.then(() => {
         gpu.device = null;
@@ -543,11 +587,11 @@ export async function initClipBakeGpu(viewportEl) {
         size: MAX_DENS_LAYERS * MAX_GRAD_STOPS * 16,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
       });
-      writeLayerColors(gpu.device, gpu.colorBuf, [[DEFAULT_DENS_RGB, DEFAULT_DENS_RGB2]]);
+      writeLayerColors(gpu.device, gpu.colorBuf, [[DEFAULT_DENS_RGB, DEFAULT_DENS_RGB2] as number[][]]);
       ensureVolumeBuf(8 * 8 * 8);
       await ensurePipelinesForDegree(4);
       if (viewportEl) attachClipGpuCanvas(viewportEl);
-      if (gpu.canvas) gpu.ctx = gpu.canvas.getContext("webgpu");
+      if (gpu.canvas) gpu.ctx = gpu.canvas.getContext("webgpu") as GPUCanvasContext | null;
       return isClipBakeGpuReady();
     } catch (e) {
       console.warn("[clipBakeGpu] init failed", e);
@@ -560,12 +604,13 @@ export async function initClipBakeGpu(viewportEl) {
   return gpu.initPromise;
 }
 
-function scheduleStampReadback() {
+function scheduleStampReadback(): void {
   if (!gpu.timestampsSupported || !gpu.stampReadBuf || gpu.stampReadPending) return;
   gpu.stampReadPending = true;
-  gpu.stampReadBuf.mapAsync(GPUMapMode.READ).then(() => {
-    const stamps = new BigInt64Array(gpu.stampReadBuf.getMappedRange().slice(0));
-    gpu.stampReadBuf.unmap();
+  const readBuf = gpu.stampReadBuf;
+  readBuf.mapAsync(GPUMapMode.READ).then(() => {
+    const stamps = new BigInt64Array(readBuf.getMappedRange().slice(0));
+    readBuf.unmap();
     gpu.stampReadPending = false;
     if (stamps[1] > stamps[0]) {
       gpu.profileMarchMs = gpu.profileMarchMs * 0.7 + Number(stamps[1] - stamps[0]) / 1e6 * 0.3;
@@ -573,11 +618,13 @@ function scheduleStampReadback() {
   }).catch(() => { gpu.stampReadPending = false; });
 }
 
-function darken(c, t) {
+function darken(c: number[], t: number): number[] {
   return [c[0] * t, c[1] * t, c[2] * t];
 }
 
-export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps, ndcOffsetX = 0, displayW = 0, displayH = 0 }) {
+export function renderClipFrameGpu({
+  camera, half, fbW, fbH, scale, steps, ndcOffsetX = 0, displayW = 0, displayH = 0,
+}: RenderClipFrameGpuParams): boolean {
   if (
     !isClipBakeGpuReady() || !gpu.ctx || !gpu.volumeBuf || !gpu.colorBuf ||
     !gpu.fxaaParamBuf || !gpu.ssaoParamBuf || !gpu.fxaaSampler || !gpu.gridParamBuf
@@ -585,6 +632,22 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps, ndcOf
     return false;
   }
   if (gpu.densLayerCount < 1 && gpu.sceneConstraints.length < 1) return false;
+
+  const device = gpu.device!;
+  const ctx = gpu.ctx;
+  const volumeBuf = gpu.volumeBuf;
+  const colorBuf = gpu.colorBuf;
+  const fxaaParamBuf = gpu.fxaaParamBuf;
+  const ssaoParamBuf = gpu.ssaoParamBuf;
+  const fxaaSampler = gpu.fxaaSampler;
+  const gridParamBuf = gpu.gridParamBuf;
+  const isoPipeline = gpu.isoPipeline!;
+  const beerPipeline = gpu.beerPipeline!;
+  const ssaoPipeline = gpu.ssaoPipeline!;
+  const fxaaPipeline = gpu.fxaaPipeline!;
+  const gridPipeline = gpu.gridPipeline!;
+  const drawParamBuf = gpu.drawParamBuf!;
+  const drawParamBufBeer = gpu.drawParamBufBeer!;
 
   const o = camera.position;
   const { sx, sy } = perspectiveDirScale(camera);
@@ -601,23 +664,30 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps, ndcOf
   ensureMarchTargets(marchW, marchH);
   syncClipGpuWorldGrid(h);
 
+  const sceneColorTex = gpu.sceneColorTex;
+  const sceneColorAoTex = gpu.sceneColorAoTex;
+  const occlTex = gpu.occlTex;
+  const depthTex = gpu.depthTex;
+  const normalTex = gpu.normalTex;
+  if (!sceneColorTex || !sceneColorAoTex || !occlTex || !depthTex || !normalTex) return false;
+
   gpu.profileMarchFbW = marchW;
   gpu.profileMarchFbH = marchH;
   gpu.profileMethod = "gpu-iso+ssao+beer+grid+fxaa";
   gpu.profileGridM = Mgrid;
 
-  if (gpu.scenePacked) gpu.device.queue.writeBuffer(gpu.volumeBuf, 0, gpu.scenePacked);
-  writeLayerColors(gpu.device, gpu.colorBuf, gpu.densGradStops);
+  if (gpu.scenePacked) device.queue.writeBuffer(volumeBuf, 0, gpu.scenePacked);
+  writeLayerColors(device, colorBuf, gpu.densGradStops);
 
-  let sceneView = gpu.sceneColorTex.createView();
-  const swapView = gpu.ctx.getCurrentTexture().createView();
-  const occlView = gpu.occlTex.createView();
-  const depthView = gpu.depthTex.createView();
-  const normalView = gpu.normalTex.createView();
+  let sceneView = sceneColorTex.createView();
+  const swapView = ctx.getCurrentTexture().createView();
+  const occlView = occlTex.createView();
+  const depthView = depthTex.createView();
+  const normalView = normalTex.createView();
 
   // Clear scene color + occl (far = 1) + normals + depth (far = 1)
   {
-    const enc = gpu.device.createCommandEncoder();
+    const enc = device.createCommandEncoder();
     const pass = enc.beginRenderPass({
       colorAttachments: [
         {
@@ -647,7 +717,7 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps, ndcOf
       },
     });
     pass.end();
-    gpu.device.queue.submit([enc.finish()]);
+    device.queue.submit([enc.finish()]);
   }
 
   for (const c of gpu.sceneConstraints) {
@@ -658,8 +728,8 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps, ndcOf
     const c0 = c.color || DEFAULT_ISO_RGB;
     const c1 = c.color2 || DEFAULT_ISO_RGB2;
     const stops = c.colors || [c0, c1];
-    gpu.device.queue.writeBuffer(
-      gpu.drawParamBuf,
+    device.queue.writeBuffer(
+      drawParamBuf,
       0,
       packDrawParamsIso(
         marchW, marchH, Mgrid, steps, h, scale, c.isoLevel, base0, ro, Mat,
@@ -667,14 +737,14 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps, ndcOf
         base1, blendT, stops,
       ),
     );
-    const bg = gpu.device.createBindGroup({
-      layout: gpu.isoPipeline.getBindGroupLayout(0),
+    const bg = device.createBindGroup({
+      layout: isoPipeline.getBindGroupLayout(0),
       entries: [
-        { binding: 0, resource: { buffer: gpu.drawParamBuf } },
-        { binding: 1, resource: { buffer: gpu.volumeBuf } },
+        { binding: 0, resource: { buffer: drawParamBuf } },
+        { binding: 1, resource: { buffer: volumeBuf } },
       ],
     });
-    const enc = gpu.device.createCommandEncoder();
+    const enc = device.createCommandEncoder();
     const pass = enc.beginRenderPass({
       colorAttachments: [
         { view: sceneView, loadOp: "load", storeOp: "store" },
@@ -687,18 +757,18 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps, ndcOf
         depthStoreOp: "store",
       },
     });
-    pass.setPipeline(gpu.isoPipeline);
+    pass.setPipeline(isoPipeline);
     pass.setBindGroup(0, bg);
     pass.draw(3);
     pass.end();
-    gpu.device.queue.submit([enc.finish()]);
+    device.queue.submit([enc.finish()]);
   }
 
   // Iso-only SSAO → ping-pong color (skip if no manifolds this frame).
   if (gpu.sceneConstraints.length > 0) {
-    const aoView = gpu.sceneColorAoTex.createView();
-    gpu.device.queue.writeBuffer(
-      gpu.ssaoParamBuf,
+    const aoView = sceneColorAoTex.createView();
+    device.queue.writeBuffer(
+      ssaoParamBuf,
       0,
       packSsaoParams(
         marchW, marchH, h,
@@ -708,16 +778,16 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps, ndcOf
         ro, Mat,
       ),
     );
-    const bg = gpu.device.createBindGroup({
-      layout: gpu.ssaoPipeline.getBindGroupLayout(0),
+    const bg = device.createBindGroup({
+      layout: ssaoPipeline.getBindGroupLayout(0),
       entries: [
-        { binding: 0, resource: { buffer: gpu.ssaoParamBuf } },
+        { binding: 0, resource: { buffer: ssaoParamBuf } },
         { binding: 1, resource: sceneView },
         { binding: 2, resource: occlView },
         { binding: 3, resource: normalView },
       ],
     });
-    const enc = gpu.device.createCommandEncoder();
+    const enc = device.createCommandEncoder();
     const pass = enc.beginRenderPass({
       colorAttachments: [{
         view: aoView,
@@ -726,53 +796,53 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps, ndcOf
         storeOp: "store",
       }],
     });
-    pass.setPipeline(gpu.ssaoPipeline);
+    pass.setPipeline(ssaoPipeline);
     pass.setBindGroup(0, bg);
     pass.draw(3);
     pass.end();
-    gpu.device.queue.submit([enc.finish()]);
+    device.queue.submit([enc.finish()]);
     sceneView = aoView;
   }
 
   if (gpu.densLayerCount > 0 && gpu.densPacked) {
-    gpu.device.queue.writeBuffer(
-      gpu.drawParamBufBeer,
+    device.queue.writeBuffer(
+      drawParamBufBeer,
       0,
       packDrawParamsBeer(marchW, marchH, Mgrid, steps, h, scale, gpu.densBase, gpu.densLayerCount, ro, Mat),
     );
-    const bg = gpu.device.createBindGroup({
-      layout: gpu.beerPipeline.getBindGroupLayout(0),
+    const bg = device.createBindGroup({
+      layout: beerPipeline.getBindGroupLayout(0),
       entries: [
-        { binding: 0, resource: { buffer: gpu.drawParamBufBeer } },
-        { binding: 1, resource: { buffer: gpu.volumeBuf } },
+        { binding: 0, resource: { buffer: drawParamBufBeer } },
+        { binding: 1, resource: { buffer: volumeBuf } },
         { binding: 2, resource: occlView },
-        { binding: 3, resource: { buffer: gpu.colorBuf } },
+        { binding: 3, resource: { buffer: colorBuf } },
       ],
     });
-    const enc = gpu.device.createCommandEncoder();
+    const enc = device.createCommandEncoder();
     const pass = enc.beginRenderPass({
       colorAttachments: [{ view: sceneView, loadOp: "load", storeOp: "store" }],
     });
-    pass.setPipeline(gpu.beerPipeline);
+    pass.setPipeline(beerPipeline);
     pass.setBindGroup(0, bg);
     pass.draw(3);
     pass.end();
-    gpu.device.queue.submit([enc.finish()]);
+    device.queue.submit([enc.finish()]);
   }
 
   // FXAA → swapchain (upsamples march-res color to display resolution).
   {
     const inv = new Float32Array([1 / marchW, 1 / marchH, 0, 0]);
-    gpu.device.queue.writeBuffer(gpu.fxaaParamBuf, 0, inv);
-    const bg = gpu.device.createBindGroup({
-      layout: gpu.fxaaPipeline.getBindGroupLayout(0),
+    device.queue.writeBuffer(fxaaParamBuf, 0, inv);
+    const bg = device.createBindGroup({
+      layout: fxaaPipeline.getBindGroupLayout(0),
       entries: [
-        { binding: 0, resource: { buffer: gpu.fxaaParamBuf } },
+        { binding: 0, resource: { buffer: fxaaParamBuf } },
         { binding: 1, resource: sceneView },
-        { binding: 2, resource: gpu.fxaaSampler },
+        { binding: 2, resource: fxaaSampler },
       ],
     });
-    const enc = gpu.device.createCommandEncoder();
+    const enc = device.createCommandEncoder();
     const pass = enc.beginRenderPass({
       colorAttachments: [
         {
@@ -783,11 +853,11 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps, ndcOf
         },
       ],
     });
-    pass.setPipeline(gpu.fxaaPipeline);
+    pass.setPipeline(fxaaPipeline);
     pass.setBindGroup(0, bg);
     pass.draw(3);
     pass.end();
-    gpu.device.queue.submit([enc.finish()]);
+    device.queue.submit([enc.finish()]);
   }
 
   // World grid / axes / labels at display res; soft-occlude via march gpu.occlTex.
@@ -805,54 +875,55 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps, ndcOf
           e[3 * 4 + r] * v[c * 4 + 3];
       }
     }
-    gpu.device.queue.writeBuffer(
-      gpu.gridParamBuf,
+    device.queue.writeBuffer(
+      gridParamBuf,
       0,
       packGridParams(viewProj, ro, h, Mat, outW, outH),
     );
     const labelVertCount = gpu.labelPipeline
       ? uploadAxisLabelBillboards(camera, h)
       : 0;
-    const bg = gpu.device.createBindGroup({
-      layout: gpu.gridPipeline.getBindGroupLayout(0),
+    const bg = device.createBindGroup({
+      layout: gridPipeline.getBindGroupLayout(0),
       entries: [
-        { binding: 0, resource: { buffer: gpu.gridParamBuf } },
+        { binding: 0, resource: { buffer: gridParamBuf } },
         { binding: 1, resource: occlView },
       ],
     });
-    const enc = gpu.device.createCommandEncoder();
+    const enc = device.createCommandEncoder();
     const pass = enc.beginRenderPass({
       colorAttachments: [
         { view: swapView, loadOp: "load", storeOp: "store" },
       ],
     });
-    pass.setPipeline(gpu.gridPipeline);
+    pass.setPipeline(gridPipeline);
     pass.setBindGroup(0, bg);
     pass.setVertexBuffer(0, gpu.gridVertexBuf);
     pass.draw(gpu.gridVertexCount);
 
     if (gpu.labelPipeline && gpu.labelVertexBuf && gpu.labelAtlasTex && gpu.labelAtlasSamp && labelVertCount > 0) {
-      const labelBg = gpu.device.createBindGroup({
-        layout: gpu.labelPipeline.getBindGroupLayout(0),
+      const labelPipeline = gpu.labelPipeline;
+      const labelBg = device.createBindGroup({
+        layout: labelPipeline.getBindGroupLayout(0),
         entries: [
-          { binding: 0, resource: { buffer: gpu.gridParamBuf } },
+          { binding: 0, resource: { buffer: gridParamBuf } },
           { binding: 1, resource: gpu.labelAtlasTex.createView() },
           { binding: 2, resource: gpu.labelAtlasSamp },
           { binding: 3, resource: occlView },
         ],
       });
-      pass.setPipeline(gpu.labelPipeline);
+      pass.setPipeline(labelPipeline);
       pass.setBindGroup(0, labelBg);
       pass.setVertexBuffer(0, gpu.labelVertexBuf);
       pass.draw(labelVertCount);
     }
 
     pass.end();
-    gpu.device.queue.submit([enc.finish()]);
+    device.queue.submit([enc.finish()]);
   }
 
   const submitWallAt = performance.now();
-  void gpu.device.queue.onSubmittedWorkDone().then(() => {
+  void device.queue.onSubmittedWorkDone().then(() => {
     noteGpuPresent(submitWallAt);
     scheduleStampReadback();
   });
