@@ -190,6 +190,23 @@ function pruneUnusedAutoParams() {
 }
 
 /**
+ * While typing in a field expression, skip inserting/pruning auto-param rows.
+ * Otherwise each letter (`c`→`co`→`cos`) recreates the math-field and kills
+ * MathLive's inline shortcuts (`cos` → `\cos`).
+ */
+function shouldDeferAutoParamRows() {
+  const ae = document.activeElement;
+  if (!ae) return false;
+  const mf =
+    (ae.closest && ae.closest("math-field")) ||
+    (ae.tagName === "MATH-FIELD" ? ae : null);
+  if (!mf) return false;
+  const row = mf.closest?.(".expr-row");
+  if (!row || row.classList.contains("is-param-def")) return false;
+  return true;
+}
+
+/**
  * Compile all expressions: parameter rows feed shared values; field rows become layers.
  * Free symbols without a dedicated `a=…` row get an auto-created parameter line.
  * @param {{ rebuildUi?: boolean, _afterEnsure?: boolean }} [opts]
@@ -264,9 +281,11 @@ function compileAllExprs(opts = {}) {
     ...[...new Set(depNames)].filter((n) => !known.has(n) && !definedParams.has(n)),
   ];
 
-  const pruned = !opts._afterEnsure && pruneUnusedAutoParams();
-  if ((pruned || needRows.length) && !opts._afterEnsure) {
-    if (needRows.length) ensureParamExprRows(needRows);
+  const deferAuto = shouldDeferAutoParamRows();
+  const pruned = !opts._afterEnsure && !deferAuto && pruneUnusedAutoParams();
+  const toCreate = deferAuto ? [] : needRows;
+  if ((pruned || toCreate.length) && !opts._afterEnsure) {
+    if (toCreate.length) ensureParamExprRows(toCreate);
     return compileAllExprs({ ...opts, _afterEnsure: true });
   }
 
@@ -287,7 +306,7 @@ function compileAllExprs(opts = {}) {
     pendingParamSeed = {};
   }
 
-  evalParamEquations(performance.now() / 1000);
+  evalParamEquations();
   const params = getParamValues();
   for (const L of layers) L.fn = L.compiled.bind(params);
 
@@ -1266,7 +1285,7 @@ function uploadFit(opts = {}) {
         continue;
       }
 
-      // Keyframe path: one dirty cosine-animated slider → GPU blend (iso) / CPU lerp (dens).
+      // Keyframe path: one dirty animated slider → GPU blend (iso) / CPU lerp (dens).
       const kfParam =
         fromAnim && depends
           ? keyframeAnimParam(L.compiled.freeParams, dirty)
@@ -1663,11 +1682,11 @@ function frame(rafNow) {
   lastRafAt = rafNow > 0 ? rafNow : t0;
   loopFpsFrames++;
 
-  // Named param animation / LaTeX time → Chebyshev refit (throttled).
+  // Named param animation → Chebyshev refit (throttled).
   if (anyParamNeedsTick()) {
     const tSec = t0 / 1000;
     const animChanged = tickParamAnimation(tSec);
-    const eqChanged = evalParamEquations(tSec);
+    const eqChanged = evalParamEquations();
     if (animChanged || eqChanged) {
       if (animChanged) {
         for (const name of listParamNames()) {

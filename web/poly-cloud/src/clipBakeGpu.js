@@ -143,6 +143,48 @@ fn fieldAt(p: vec3f) -> f32 {
   return d - draw.isoLevel;
 }
 
+/** Blended dens at an integer Chebyshev-grid vertex (pre-iso). */
+fn blendedDens(ix: i32, iy: i32, iz: i32) -> f32 {
+  let a = densAtBase(u32(draw.volBase), ix, iy, iz);
+  let b = densAtBase(u32(draw.volBaseB), ix, iy, iz);
+  return mix(a, b, draw.blendT);
+}
+
+/** Lower corner of the trilinear cell containing p (in Chebyshev index space). */
+fn cellIndexAt(p: vec3f) -> vec3i {
+  let half = draw.half;
+  let M = i32(draw.gridM);
+  let last = max(M - 2, 0);
+  let xi = clamp(p / half, vec3f(-1.0), vec3f(1.0));
+  let x0 = clamp(i32(floor(chebIndex(xi.x))), 0, last);
+  let y0 = clamp(i32(floor(chebIndex(xi.y))), 0, last);
+  let z0 = clamp(i32(floor(chebIndex(xi.z))), 0, last);
+  return vec3i(x0, y0, z0);
+}
+
+/**
+ * Final-hit test: the sampled field is trilinear inside each grid cell, so a
+ * real isosurface can only exist in that cell if the 8 corner values bracket
+ * isoLevel (min ≤ iso ≤ max). Rejects Newton/ray near-misses that land in a
+ * same-sign cell (ghost halo).
+ */
+fn cellBracketsIso(p: vec3f) -> bool {
+  let c = cellIndexAt(p);
+  let iso = draw.isoLevel;
+  var lo = 1e30;
+  var hi = -1e30;
+  for (var dz: i32 = 0; dz < 2; dz++) {
+    for (var dy: i32 = 0; dy < 2; dy++) {
+      for (var dx: i32 = 0; dx < 2; dx++) {
+        let v = blendedDens(c.x + dx, c.y + dy, c.z + dz) - iso;
+        lo = min(lo, v);
+        hi = max(hi, v);
+      }
+    }
+  }
+  return lo <= 0.0 && hi >= 0.0;
+}
+
 /** Analytic ∇f from Chebyshev-diff IDCT slabs (∂/∂ξ,∂/∂η,∂/∂ζ), then / half → world. */
 fn fieldGrad(p: vec3f) -> vec3f {
   let half = draw.half;
@@ -182,9 +224,9 @@ fn shadeIso(p: vec3f, rd: vec3f, n: vec3f) -> vec4f {
   let c0 = stops[0].xyz;
   let c1 = stops[nStops - 1u].xyz;
 
-  // Fresnel rim — hot end at silhouettes
-  let fresnel = pow(1.0 - ndotv, 2.0);
-  rgb += c1 * fresnel * 0.48;
+  // Mild fresnel — keep some rim without making silhouettes scream with view angle.
+  let fresnel = pow(1.0 - ndotv, 2.4);
+  rgb += c1 * fresnel * 0.2;
 
   // Specular on blended albedo
   let H = normalize(L + V);
@@ -195,11 +237,51 @@ fn shadeIso(p: vec3f, rd: vec3f, n: vec3f) -> vec4f {
 }
 
 fn isoNormal(p: vec3f, rd: vec3f) -> vec3f {
-  var g = fieldGrad(p);
+  // Evaluate ∇f slightly inside the fit domain — endpoint clamp makes
+  // boundary gradients noisy (grain where isos meet the box faces).
+  let half = draw.half;
+  let inset = max(1e-4, 2e-3 * half);
+  let pIn = clamp(p, vec3f(-half + inset), vec3f(half - inset));
+  var g = fieldGrad(pIn);
   let gl = length(g);
   var n = select(vec3f(0.0, 1.0, 0.0), g / gl, gl > 1e-8);
   if (dot(n, -rd) < 0.0) { n = -n; }
   return n;
+}
+
+/**
+ * Walk [t0,t1] and return the FIRST sign-change sub-bracket (near zero along the ray).
+ * Returns (lo, hi, flo, fAtT1). Empty when hi < lo; fAtT1 is always fieldAt(t1).
+ */
+fn firstZeroBracket(ro: vec3f, rd: vec3f, t0: f32, t1: f32, f0: f32, samples: u32) -> vec4f {
+  var prevT = t0;
+  var prevF = f0;
+  let n = max(samples, 1u);
+  var fEnd = f0;
+  for (var s: u32 = 1u; s <= n; s++) {
+    let t = mix(t0, t1, f32(s) / f32(n));
+    let f = fieldAt(ro + rd * t);
+    fEnd = f;
+    if (prevF * f <= 0.0) {
+      return vec4f(prevT, t, prevF, f); // w unused on hit path
+    }
+    prevT = t;
+    prevF = f;
+  }
+  return vec4f(t1, t0, f0, fEnd); // empty: hi < lo
+}
+
+/** Bisect an already-isolated nearest-zero bracket (HEAD-cost refine). */
+fn bisectIso(ro: vec3f, rd: vec3f, lo: f32, hi: f32, flo: f32) -> f32 {
+  var a = lo;
+  var b = hi;
+  var fa = flo;
+  for (var k: u32 = 0u; k < 12u; k++) {
+    let mid = 0.5 * (a + b);
+    let fm = fieldAt(ro + rd * mid);
+    if (fa * fm <= 0.0) { b = mid; } else { a = mid; fa = fm; }
+  }
+  return 0.5 * (a + b);
 }
 
 fn marchIso(ro: vec3f, rd: vec3f, tEnter: f32, tExit: f32) -> FSOut {
@@ -216,29 +298,56 @@ fn marchIso(ro: vec3f, rd: vec3f, tEnter: f32, tExit: f32) -> FSOut {
   var s0 = tEnter;
   var f0 = fieldAt(ro + rd * s0);
   let far = max(tExit, draw.half * 4.0);
+  var dfdT = 0.0;
+  var hasDfdT = false;
 
   for (var i: u32 = 0u; i < 192u; i++) {
     if (i >= steps) { break; }
     let s1 = min(s0 + dt, tExit);
-    let f1 = fieldAt(ro + rd * s1);
-    if (f0 * f1 < 0.0) {
-      var lo = s0; var hi = s1; var flo = f0;
-      for (var b: u32 = 0u; b < 12u; b++) {
-        let mid = 0.5 * (lo + hi);
-        let fm = fieldAt(ro + rd * mid);
-        if (flo * fm <= 0.0) { hi = mid; } else { lo = mid; flo = fm; }
+    let ds = max(s1 - s0, 1e-8);
+
+    // Far from iso along the ray → HEAD path: one endpoint sample only.
+    let distT = select(0.0, abs(f0) / max(abs(dfdT), 1e-8), hasDfdT);
+    let farFromIso = hasDfdT && (distT > 2.0 * dt);
+
+    var f1: f32;
+    var hit = -1.0;
+    if (farFromIso) {
+      f1 = fieldAt(ro + rd * s1);
+      if (f0 * f1 < 0.0) {
+        hit = bisectIso(ro, rd, s0, s1, f0);
       }
-      let hit = 0.5 * (lo + hi);
-      let d = clamp(hit / far, 0.0, 0.999);
-      let p = ro + rd * hit;
-      let n = isoNormal(p, rd);
-      out.color = shadeIso(p, rd, n);
-      out.occl = vec4f(d, 0.0, 0.0, 1.0);
-      out.normal = vec4f(n * 0.5 + 0.5, 1.0);
-      out.depth = d;
-      return out;
+    } else {
+      // Near band (or first step): densify; reuse endpoint from the scan.
+      let nDense = select(
+        4u,
+        u32(clamp(8.0 * dt / max(distT, 1e-6), 1.0, 8.0)),
+        hasDfdT,
+      );
+      let br = firstZeroBracket(ro, rd, s0, s1, f0, nDense);
+      f1 = br.w;
+      if (br.y > br.x) {
+        hit = bisectIso(ro, rd, br.x, br.y, br.z);
+      }
     }
-    s0 = s1; f0 = f1;
+
+    if (hit >= 0.0) {
+      let p = ro + rd * hit;
+      if (cellBracketsIso(p)) {
+        let d = clamp(hit / far, 0.0, 0.999);
+        let n = isoNormal(p, rd);
+        out.color = shadeIso(p, rd, n);
+        out.occl = vec4f(d, 0.0, 0.0, 1.0);
+        out.normal = vec4f(n * 0.5 + 0.5, 1.0);
+        out.depth = d;
+        return out;
+      }
+    }
+
+    dfdT = (f1 - f0) / ds;
+    hasDfdT = true;
+    s0 = s1;
+    f0 = f1;
     if (s0 >= tExit - 1e-6) { break; }
   }
   return out;
@@ -268,8 +377,8 @@ fn fsMain(in: VSOut) -> FSOut {
   let tmin = min(tA, tB); let tmax = max(tA, tB);
   var tEnter = max(max(max(tmin.x, tmin.y), tmin.z), 0.0);
   let tExit = min(min(tmax.x, tmax.y), tmax.z);
-  // Nudge off the faces so we don't march exactly on the discontinuous boundary.
-  let edgeEps = (tExit - tEnter) * 1e-4 + 1e-5;
+  // Stay clear of the discontinuous clamped boundary.
+  let edgeEps = (tExit - tEnter) * 2e-4 + 5e-5 * half;
   tEnter = tEnter + edgeEps;
   let tExitIn = tExit - edgeEps;
   if (!(tExitIn > tEnter + 1e-6)) {

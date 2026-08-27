@@ -67,8 +67,8 @@ export function invalidateKeyframeCache(id) {
 }
 
 /**
- * Eligible when dirty free-params collapse to exactly one cosine-animated slider
- * (not driven / time-equation).
+ * Eligible when dirty free-params collapse to exactly one animated slider
+ * (not driven by another equation).
  * @param {string[]} freeParams
  * @param {Set<string>} dirty
  * @returns {string | null} param name or null

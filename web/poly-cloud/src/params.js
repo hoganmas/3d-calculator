@@ -1,6 +1,6 @@
 /**
  * Runtime values for named parameters defined in the expression list (`a = …`).
- * RHS may use `t` (seconds) or other params.
+ * RHS may reference other params.
  */
 
 import { compileParamLatex, formatParamLatexValue } from "./fit.js";
@@ -17,7 +17,6 @@ import { compileParamLatex, formatParamLatexValue } from "./fit.js";
  *   latex: string,
  *   exprId: string | null,
  *   hosted: boolean,
- *   usesTime: boolean,
  *   driven: boolean,
  *   freeParams: string[],
  *   error: string | null,
@@ -63,7 +62,6 @@ function makeParam(name, init = {}) {
     latex,
     exprId: typeof init.exprId === "string" ? init.exprId : null,
     hosted: !!init.hosted,
-    usesTime: false,
     driven: false,
     freeParams: [],
     error: null,
@@ -93,13 +91,8 @@ export function anyParamAnimating() {
   return false;
 }
 
-export function anyParamUsesTime() {
-  for (const p of params.values()) if (p.usesTime) return true;
-  return false;
-}
-
 export function anyParamNeedsTick() {
-  return anyParamAnimating() || anyParamUsesTime();
+  return anyParamAnimating();
 }
 
 /**
@@ -112,7 +105,6 @@ export function collectAnimDirtyParams() {
   const dirty = new Set();
   for (const [name, p] of params) {
     if (p.animating && !p.driven) dirty.add(name);
-    if (p.usesTime) dirty.add(name);
   }
   let grew = true;
   while (grew) {
@@ -246,7 +238,6 @@ export function setParamValue(name, value, { stopAnim = true, rewriteLatex = tru
     animating: stopAnim ? false : cur.animating,
     latex: rewriteLatex ? `${name}=${formatParamLatexValue(v)}` : cur.latex,
     driven: rewriteLatex ? false : cur.driven,
-    usesTime: rewriteLatex ? false : cur.usesTime,
     freeParams: rewriteLatex ? [] : cur.freeParams,
     error: rewriteLatex ? null : cur.error,
   };
@@ -260,11 +251,10 @@ export function recompileParam(name) {
   if (!cur) return false;
   try {
     const compiled = compileParamLatex(cur.latex, name);
-    const driven = compiled.usesTime || compiled.freeParams.length > 0;
+    const driven = compiled.freeParams.length > 0;
     /** @type {ParamState} */
     const next = {
       ...cur,
-      usesTime: compiled.usesTime,
       freeParams: compiled.freeParams,
       driven,
       error: null,
@@ -280,7 +270,6 @@ export function recompileParam(name) {
       ...cur,
       error: err instanceof Error ? err.message : String(err),
       driven: false,
-      usesTime: false,
       freeParams: [],
     });
     return false;
@@ -293,10 +282,10 @@ export function recompileAllParams() {
 }
 
 /**
- * @param {number} timeSec
+ * Evaluate driven parameter equations `a = f(b,…)`.
  * @returns {boolean}
  */
-export function evalParamEquations(timeSec) {
+export function evalParamEquations() {
   const names = listParamNames();
   if (!names.length) return false;
 
@@ -304,8 +293,7 @@ export function evalParamEquations(timeSec) {
   const compiled = new Map();
   for (const name of names) {
     const p = params.get(name);
-    if (!p || p.error) continue;
-    if (!p.driven && !p.usesTime) continue;
+    if (!p || p.error || !p.driven) continue;
     try {
       compiled.set(name, compileParamLatex(p.latex, name));
     } catch {
@@ -315,7 +303,7 @@ export function evalParamEquations(timeSec) {
   if (!compiled.size) return false;
 
   /** @type {Record<string, number>} */
-  const scope = { t: timeSec };
+  const scope = {};
   for (const [n, p] of params) scope[n] = p.value;
 
   let changed = false;

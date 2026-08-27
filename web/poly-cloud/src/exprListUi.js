@@ -137,6 +137,13 @@ function configureMathField(mf) {
   } catch (_) {
     /* ignore */
   }
+  // Keep MathLive's default cos→\cos etc. shortcuts; give them time to fire
+  // even if the user types slowly (0 = library default 1s flush).
+  try {
+    mf.inlineShortcutTimeout = 2000;
+  } catch (_) {
+    /* ignore */
+  }
 }
 
 /** True when MathLive's latex suggestion UI is showing (owns ↑/↓). */
@@ -207,6 +214,7 @@ export function mountExprList(opts) {
   /**
    * Commit ephemeral auto-params only after a real leave (other row or outside list).
    * Re-render blur+restore must not commit, or prune never sees autoParam.
+   * After leave, recompile so deferred auto-param rows can materialize.
    */
   function scheduleCommitIfLeftExpr(fromExprId) {
     queueMicrotask(() => {
@@ -216,6 +224,7 @@ export function mountExprList(opts) {
           const focusedId = focusedExprIdInList();
           if (focusedId === fromExprId) return;
           commitAutoParams();
+          onExprChange();
         });
       });
     });
@@ -402,7 +411,7 @@ export function mountExprList(opts) {
       play.classList.toggle("on", p.animating);
       play.textContent = p.animating ? "⏸" : "▶";
       play.title = p.driven
-        ? "Driven by equation (use t for time)"
+        ? "Driven by equation"
         : p.animating
           ? "Pause animation"
           : "Animate between min and max";

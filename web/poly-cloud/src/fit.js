@@ -9,7 +9,6 @@ const ce = new ComputeEngine();
  * Spatial vars (not sliders). Cartesian + spherical + cylindrical:
  *   r, θ, φ  — physics spherical (θ from +z, φ = atan2(y,x))
  *   ρ        — cylindrical radius √(x²+y²)
- * Also: t — wall-clock time (seconds) for parameter equations.
  * LaTeX `\theta`/`\phi`/`\rho` bind as `theta`/`phi`/`rho`.
  */
 const RESERVED_SYMBOLS = new Set([
@@ -20,14 +19,103 @@ const RESERVED_SYMBOLS = new Set([
   "theta",
   "phi",
   "rho",
-  "t",
 ]);
 
 /** World / polar coords — required for a field to be graphed (fit + march). */
 const SPATIAL_SYMBOLS = new Set(["x", "y", "z", "r", "theta", "phi", "rho"]);
 
-/** Wall-clock time symbol available in parameter RHS equations. */
-export const TIME_SYMBOL = "t";
+/**
+ * Built-in function names — never auto-promoted to slider parameters.
+ * (CE's `compile(string)` treats these as identifiers; LaTeX must be `ce.parse`d first.)
+ */
+const KNOWN_FUNCTION_NAMES = new Set([
+  "sin", "cos", "tan", "cot", "sec", "csc",
+  "arcsin", "arccos", "arctan", "arccot", "arcsec", "arccsc",
+  "asin", "acos", "atan", "atan2",
+  "sinh", "cosh", "tanh", "coth",
+  "asinh", "acosh", "atanh",
+  "exp", "ln", "log", "log10", "log2", "lg",
+  "sqrt", "cbrt", "abs", "sign", "floor", "ceil", "round",
+  "max", "min", "hypot", "pow",
+  "sinc", "erf", "gamma",
+]);
+
+/** Longest-first so `arccos` wins over `cos`. */
+const LATEX_FN_REWRITE = [
+  "arccos", "arcsin", "arctan", "arccot", "arcsec", "arccsc",
+  "arsinh", "arcosh", "artanh", "arctanh", "arcsech", "arccsch",
+  "sinh", "cosh", "tanh", "coth",
+  "sin", "cos", "tan", "cot", "sec", "csc",
+  "exp", "ln", "log", "max", "min", "sqrt", "abs",
+];
+
+/**
+ * Turn bare typed names (`cos`, `sin x`) into LaTeX commands (`\cos`, `\sin x`)
+ * so users need not type `\`. Skips names already introduced by `\`.
+ * @param {string} latex
+ */
+export function normalizeLatexFunctions(latex) {
+  let s = String(latex ?? "");
+  for (const name of LATEX_FN_REWRITE) {
+    const re = new RegExp(`(^|[^\\\\A-Za-z])(${name})(?![A-Za-z])`, "gi");
+    s = s.replace(re, (_, pre, n) => `${pre}\\${n.toLowerCase()}`);
+  }
+  return s;
+}
+
+/**
+ * Compile LaTeX via parse→box. Never pass raw strings to `compile()` — that path
+ * treats `cos` as a JS identifier (`_.cos`) instead of letter juxtaposition.
+ * @param {string} latex
+ */
+function compileLatex(latex) {
+  const src = normalizeLatexFunctions(String(latex ?? "").trim());
+  if (!src) {
+    return { success: false, unsupported: ["empty"], run: null, freeSymbols: [] };
+  }
+  let box;
+  try {
+    box = ce.parse(src);
+  } catch {
+    return { success: false, unsupported: ["parse"], run: null, freeSymbols: [] };
+  }
+  return compile(box);
+}
+
+/**
+ * Drop reserved / known-function symbols from CE freeSymbols.
+ * Also suppress `cos`-style letter runs that are only an incomplete function name.
+ * @param {Iterable<unknown>} freeSymbols
+ * @param {string} latex
+ * @param {{ skipName?: string | null }} [opts]
+ * @returns {{ freeParams: string[], usesSpace: boolean }}
+ */
+function collectFreeParams(freeSymbols, latex, opts = {}) {
+  /** @type {string[]} */
+  const ids = [];
+  let usesSpace = false;
+  for (const s of freeSymbols ?? []) {
+    const id = String(s);
+    if (SPATIAL_SYMBOLS.has(id)) usesSpace = true;
+    if (RESERVED_SYMBOLS.has(id)) continue;
+    if (opts.skipName && id === opts.skipName) continue;
+    if (KNOWN_FUNCTION_NAMES.has(id.toLowerCase())) continue;
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(id)) {
+      throw new Error(`Invalid parameter “${id}” (use letters / digits)`);
+    }
+    ids.push(id);
+  }
+
+  // Bare typed name of a known fn (`cos` / `sin` / …) — not a slider param.
+  // CE may parse these as letter products (and `sin` even eats `i` as √−1).
+  const compact = String(latex ?? "").replace(/\s+/g, "");
+  if (/^[A-Za-z]+$/.test(compact) && KNOWN_FUNCTION_NAMES.has(compact.toLowerCase())) {
+    return { freeParams: [], usesSpace: false };
+  }
+
+  ids.sort();
+  return { freeParams: ids, usesSpace };
+}
 
 /** @param {unknown} json MathJSON node */
 function symbolId(json) {
@@ -113,7 +201,7 @@ function isUserFunctionCall(json) {
 /**
  * Classify input and rewrite to a numeric field for fitting.
  *
- * - parameter `a = E`      → named slider / time eqn (LHS free symbol)
+ * - parameter `a = E`      → named slider / eqn (LHS free symbol)
  * - constraint `A = B`     → field A−B, isosurface at 0
  * - definition `f(…) = E`  → field E, volume (Beer)
  * - bare expression `E`    → field E, volume (Beer)
@@ -128,7 +216,7 @@ function isUserFunctionCall(json) {
  * }}
  */
 export function classifyExpr(raw) {
-  const src = String(raw ?? "").trim();
+  const src = normalizeLatexFunctions(String(raw ?? "").trim());
   if (!src) throw new Error("Empty expression");
 
   let box;
@@ -210,14 +298,13 @@ export function classifyExpr(raw) {
 
 /**
  * Compile a named parameter definition `a = <expr>` (or bare RHS for `expectedName`).
- * Free symbols besides reserved/`expectedName` are other parameters; `t` is time.
+ * Free symbols besides reserved/`expectedName` are other parameters.
  *
  * @param {string} raw
  * @param {string} expectedName
  * @returns {{
  *   name: string,
  *   rhsLatex: string,
- *   usesTime: boolean,
  *   freeParams: string[],
  *   isConstant: boolean,
  *   constantValue: number | null,
@@ -225,7 +312,7 @@ export function classifyExpr(raw) {
  * }}
  */
 export function compileParamLatex(raw, expectedName) {
-  const src = String(raw ?? "").trim();
+  const src = normalizeLatexFunctions(String(raw ?? "").trim());
   if (!src) throw new Error("Empty parameter");
 
   let name = expectedName;
@@ -253,8 +340,7 @@ export function compileParamLatex(raw, expectedName) {
   // Slot name is authoritative (field may show a=… or a bare RHS).
   name = expectedName;
 
-
-  const result = compile(rhsLatex);
+  const result = compileLatex(rhsLatex);
   if (!result?.success || typeof result.run !== "function") {
     const why = result?.unsupported?.length
       ? `unsupported: ${result.unsupported.join(", ")}`
@@ -262,26 +348,13 @@ export function compileParamLatex(raw, expectedName) {
     throw new Error(`Parameter ${why}`);
   }
 
-  const { run, freeSymbols = [] } = result;
-  /** @type {string[]} */
-  const freeParams = [];
-  let usesTime = false;
-  for (const s of freeSymbols) {
-    const id = String(s);
-    if (id === TIME_SYMBOL) {
-      usesTime = true;
-      continue;
-    }
-    if (RESERVED_SYMBOLS.has(id) || id === name) continue;
-    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(id)) {
-      throw new Error(`Invalid symbol “${id}” in parameter`);
-    }
-    freeParams.push(id);
-  }
-  freeParams.sort();
+  const { run } = result;
+  const { freeParams } = collectFreeParams(result.freeSymbols, rhsLatex, {
+    skipName: name,
+  });
 
   let constantValue = null;
-  let isConstant = freeParams.length === 0 && !usesTime;
+  let isConstant = freeParams.length === 0;
   if (isConstant) {
     try {
       constantValue = coerceNumber(run({}));
@@ -298,7 +371,6 @@ export function compileParamLatex(raw, expectedName) {
   return {
     name,
     rhsLatex,
-    usesTime,
     freeParams,
     isConstant,
     constantValue,
@@ -337,7 +409,7 @@ export function compileExpr(raw) {
   const classified = classifyExpr(raw);
   const src = classified.compileLatex;
 
-  const result = compile(src);
+  const result = compileLatex(src);
   if (!result?.success || typeof result.run !== "function") {
     const why = result?.unsupported?.length
       ? `unsupported: ${result.unsupported.join(", ")}`
@@ -345,19 +417,8 @@ export function compileExpr(raw) {
     throw new Error(`Expression ${why}`);
   }
 
-  const { run, freeSymbols = [] } = result;
-  const freeParams = [];
-  let usesSpace = false;
-  for (const s of freeSymbols) {
-    const id = String(s);
-    if (SPATIAL_SYMBOLS.has(id)) usesSpace = true;
-    if (RESERVED_SYMBOLS.has(id)) continue;
-    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(id)) {
-      throw new Error(`Invalid parameter “${id}” (use letters / digits)`);
-    }
-    freeParams.push(id);
-  }
-  freeParams.sort();
+  const { run } = result;
+  const { freeParams, usesSpace } = collectFreeParams(result.freeSymbols, src);
 
   const shade = usesSpace ? classified.shade : "none";
 
