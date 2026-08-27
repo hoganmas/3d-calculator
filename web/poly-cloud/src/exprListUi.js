@@ -16,6 +16,12 @@ import {
   getExprWarning,
   commitAutoParams,
   moveExpr,
+  DEFAULT_EXPR_COLOR,
+  resolveExprGradient,
+  cssGradientFromColors,
+  normalizeGradColors,
+  MAX_GRAD_STOPS,
+  MIN_GRAD_STOPS,
 } from "./expressions.js";
 import { classifyExpr } from "./fit.js";
 import {
@@ -200,6 +206,149 @@ export function mountExprList(opts) {
         });
       });
     });
+  }
+
+  function applyGradientChrome(row, item) {
+    const grad = resolveExprGradient(item);
+    const css = cssGradientFromColors(grad.colors);
+    row.style.setProperty("--expr-grad", css);
+    row.style.setProperty("--expr-c0", grad.color);
+    row.style.setProperty("--expr-c1", grad.color2);
+    const swatch = row.querySelector(".expr-color");
+    if (swatch instanceof HTMLElement) {
+      swatch.style.setProperty("--expr-grad", css);
+      swatch.style.setProperty("--expr-c0", grad.color);
+      swatch.style.setProperty("--expr-c1", grad.color2);
+      if (!swatch.disabled) {
+        swatch.title = `Edit gradient (${grad.colors.length} colors)`;
+      }
+    }
+  }
+
+  /** @type {HTMLElement | null} */
+  let openGradPopover = null;
+
+  function closeGradPopover() {
+    if (openGradPopover) {
+      openGradPopover.remove();
+      openGradPopover = null;
+    }
+    document.removeEventListener("pointerdown", onGradOutside, true);
+  }
+
+  function onGradOutside(ev) {
+    if (!(ev.target instanceof Node)) return;
+    if (openGradPopover?.contains(ev.target)) return;
+    if (ev.target instanceof Element && ev.target.closest(".expr-color")) return;
+    closeGradPopover();
+  }
+
+  /**
+   * @param {HTMLElement} anchor
+   * @param {any} item
+   * @param {HTMLElement} row
+   */
+  function openGradientEditor(anchor, item, row) {
+    closeGradPopover();
+    const grad = resolveExprGradient(item);
+    let draft = grad.colors.slice();
+
+    const pop = document.createElement("div");
+    pop.className = "grad-popover";
+    pop.setAttribute("role", "dialog");
+    pop.setAttribute("aria-label", "Edit gradient");
+
+    const head = document.createElement("div");
+    head.className = "grad-popover-head";
+    head.textContent = "Gradient colors";
+
+    const preview = document.createElement("div");
+    preview.className = "grad-popover-preview";
+
+    const list = document.createElement("div");
+    list.className = "grad-popover-stops";
+
+    const actions = document.createElement("div");
+    actions.className = "grad-popover-actions";
+
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "secondary";
+    addBtn.textContent = "Add color";
+
+    function commit(next) {
+      draft = normalizeGradColors(next);
+      updateExpr(item.id, { colors: draft });
+      applyGradientChrome(row, { ...item, colors: draft });
+      if (onColorChange) onColorChange();
+      else onExprChange();
+      renderStops();
+    }
+
+    function renderStops() {
+      preview.style.background = cssGradientFromColors(draft);
+      list.replaceChildren();
+      draft.forEach((hex, i) => {
+        const stop = document.createElement("div");
+        stop.className = "grad-stop";
+
+        const pick = document.createElement("input");
+        pick.type = "color";
+        pick.className = "grad-stop-color";
+        pick.value = hex.startsWith("#") ? hex : DEFAULT_EXPR_COLOR;
+        pick.title = `Stop ${i + 1}`;
+        pick.addEventListener("input", () => {
+          const next = draft.slice();
+          next[i] = pick.value;
+          commit(next);
+        });
+        pick.addEventListener("click", (ev) => ev.stopPropagation());
+
+        const label = document.createElement("span");
+        label.className = "grad-stop-label";
+        label.textContent = i === 0 ? "Start" : i === draft.length - 1 ? "End" : `Stop ${i + 1}`;
+
+        const rm = document.createElement("button");
+        rm.type = "button";
+        rm.className = "grad-stop-remove secondary";
+        rm.textContent = "×";
+        rm.title = "Remove stop";
+        rm.disabled = draft.length <= MIN_GRAD_STOPS;
+        rm.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          if (draft.length <= MIN_GRAD_STOPS) return;
+          const next = draft.slice();
+          next.splice(i, 1);
+          commit(next);
+        });
+
+        stop.append(pick, label, rm);
+        list.append(stop);
+      });
+      addBtn.disabled = draft.length >= MAX_GRAD_STOPS;
+      addBtn.title =
+        draft.length >= MAX_GRAD_STOPS
+          ? `Max ${MAX_GRAD_STOPS} colors`
+          : "Add a gradient stop";
+    }
+
+    addBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      if (draft.length >= MAX_GRAD_STOPS) return;
+      const last = draft[draft.length - 1] || DEFAULT_EXPR_COLOR;
+      commit([...draft, last]);
+    });
+
+    actions.append(addBtn);
+    pop.append(head, preview, list, actions);
+
+    const rect = anchor.getBoundingClientRect();
+    pop.style.left = `${Math.min(window.innerWidth - 220, Math.max(8, rect.left))}px`;
+    pop.style.top = `${Math.min(window.innerHeight - 280, rect.bottom + 6)}px`;
+    document.body.append(pop);
+    openGradPopover = pop;
+    renderStops();
+    document.addEventListener("pointerdown", onGradOutside, true);
   }
 
   function syncParamSlider(row, name) {
@@ -469,14 +618,11 @@ export function mountExprList(opts) {
       else delete row.dataset.param;
 
       const swatch = row.querySelector(".expr-color");
-      if (swatch instanceof HTMLInputElement) {
+      if (swatch instanceof HTMLButtonElement) {
         const disabled = isParamDef || !!warn;
         swatch.disabled = disabled;
-        swatch.title = disabled ? "Parameters are not drawn" : "Color";
-        const hex = String(item.color || "#2d70b3");
-        if (document.activeElement !== swatch) {
-          swatch.value = hex.startsWith("#") ? hex : "#2d70b3";
-        }
+        swatch.title = disabled ? "Parameters are not drawn" : "Edit gradient colors";
+        applyGradientChrome(row, item);
       }
       if (mf instanceof HTMLElement) {
         mf.classList.toggle("invalid", !!warn);
@@ -671,6 +817,7 @@ export function mountExprList(opts) {
   }
 
   function render() {
+    closeGradPopover();
     beginSuppressAutoCommit();
     try {
       const focusSnap = captureFocus();
@@ -701,18 +848,17 @@ export function mountExprList(opts) {
       row.dataset.id = item.id;
       if (ownsParam && paramName) row.dataset.param = paramName;
 
-      const swatch = document.createElement("input");
-      swatch.type = "color";
+      const swatch = document.createElement("button");
+      swatch.type = "button";
       swatch.className = "expr-color";
-      swatch.value = item.color.startsWith("#") ? item.color : "#2d70b3";
-      swatch.title = ownsParam || warn ? "Parameters are not drawn" : "Color";
+      swatch.title = ownsParam || warn ? "Parameters are not drawn" : "Edit gradient colors";
       swatch.disabled = !!(ownsParam || warn);
-      swatch.addEventListener("input", () => {
-        updateExpr(item.id, { color: swatch.value });
-        if (onColorChange) onColorChange();
-        else onExprChange();
+      applyGradientChrome(row, item);
+      swatch.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        if (swatch.disabled) return;
+        openGradientEditor(swatch, item, row);
       });
-      swatch.addEventListener("click", (ev) => ev.stopPropagation());
 
       const mid = document.createElement("div");
       mid.className = "expr-mid";

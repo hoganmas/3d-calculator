@@ -2,6 +2,9 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import "mathlive";
 import "mathlive/static.css";
+import "./theme.css";
+import { initTheme, onThemeChange, readThemeColors, getThemePref, setThemePref } from "./theme.js";
+import { createLavaBackground } from "./lavaBackground.js";
 import { compileExpr, classifyExpr, fitChebyshev3D, PRESETS, formatParamLatexValue, compileParamLatex } from "./fit.js";
 import {
   syncParamsFromDefinitions,
@@ -27,6 +30,8 @@ import {
   insertExprAt,
   removeExprSilent,
   commitAutoParams,
+  resolveExprGradient,
+  color2ForPrimary,
 } from "./expressions.js";
 import { mountExprList } from "./exprListUi.js";
 import { clipGridVertex, clipGridFragment } from "./clipShaders.js";
@@ -58,7 +63,10 @@ import {
   resizeClipGpuCanvas,
   clearClipGpuFrame,
   syncClipGpuWorldGrid,
+  applyClipGpuTheme,
 } from "./clipBakeGpu.js";
+
+initTheme();
 
 const els = {
   preset: document.getElementById("preset"),
@@ -78,6 +86,7 @@ const els = {
   openSettings: document.getElementById("openSettings"),
   closeSettings: document.getElementById("closeSettings"),
   settingsDialog: document.getElementById("settingsDialog"),
+  themePref: document.getElementById("themePref"),
 };
 
 for (const [key, p] of Object.entries(PRESETS)) {
@@ -88,11 +97,14 @@ for (const [key, p] of Object.entries(PRESETS)) {
 }
 
 function applyPreset(key) {
-  const p = PRESETS[key] ?? PRESETS.blob;
-  els.preset.value = key;
+  const p = PRESETS[key] ?? PRESETS.sincos;
+  els.preset.value = key in PRESETS ? key : "sincos";
   pendingParamSeed = p.params ?? {};
-  // Density / constraint only — free params get auto-created `a=…` rows on compile.
-  setExpressions([{ latex: p.latex }]);
+  if (Array.isArray(p.expressions) && p.expressions.length) {
+    setExpressions(p.expressions);
+  } else {
+    setExpressions([{ latex: p.latex }]);
+  }
   exprListApi?.render();
 }
 
@@ -355,12 +367,22 @@ function marchDownscale() {
   return readMarchDownscale();
 }
 
-applyPreset("blob");
+applyPreset("sincos");
 if (!listExpressions().length) {
-  setExpressions([{ latex: PRESETS.blob.latex }]);
+  setExpressions([{ latex: PRESETS.sincos.latex }]);
 }
 initMarchSliderUi();
 syncMarchSlider();
+
+function layerRgbFromItem(item) {
+  const grad = resolveExprGradient(item);
+  const colors = grad.colors.map((hex) => hexToRgb01(hex));
+  return {
+    color: colors[0],
+    color2: colors[colors.length - 1],
+    colors,
+  };
+}
 
 exprListApi = mountExprList({
   root: els.exprList,
@@ -388,17 +410,25 @@ exprListApi = mountExprList({
         }
         if (!compiled.usesSpace) continue;
         const role = resolveExprRole(item.role, compiled.kind);
-        const rgb = hexToRgb01(item.color);
+        const rgb = layerRgbFromItem(item);
         if (role === "constraint") consCols.push(rgb);
         else densCols.push(rgb);
       }
       for (let i = 0; i < lastSceneBake.densLayers.length; i++) {
-        if (densCols[i]) lastSceneBake.densLayers[i].color = densCols[i];
+        if (densCols[i]) {
+          lastSceneBake.densLayers[i].color = densCols[i].color;
+          lastSceneBake.densLayers[i].color2 = densCols[i].color2;
+          lastSceneBake.densLayers[i].colors = densCols[i].colors;
+        }
       }
       for (let i = 0; i < lastSceneBake.constraints.length; i++) {
-        if (consCols[i]) lastSceneBake.constraints[i].color = consCols[i];
+        if (consCols[i]) {
+          lastSceneBake.constraints[i].color = consCols[i].color;
+          lastSceneBake.constraints[i].color2 = consCols[i].color2;
+          lastSceneBake.constraints[i].colors = consCols[i].colors;
+        }
       }
-      uploadSceneColors(lastSceneBake.densLayers.map((d) => d.color));
+      uploadSceneColors(lastSceneBake.densLayers.map((d) => d.colors || [d.color, d.color2]));
       if (isClipBakeGpuReady()) {
         uploadSceneVolumes({
           densLayers: lastSceneBake.densLayers,
@@ -420,14 +450,19 @@ setExpressionsOnChange(() => {
 
 const renderer = new THREE.WebGLRenderer({
   antialias: true,
-  alpha: false,
+  alpha: true,
   powerPreference: "high-performance",
 });
 renderer.setPixelRatio(1);
-renderer.setClearColor(0x07080b, 1);
+renderer.setClearColor(0x000000, 0);
 els.viewport.appendChild(renderer.domElement);
 
+let themeColors = readThemeColors();
+const lavaBg = createLavaBackground(themeColors);
+applyClipGpuTheme(themeColors);
+
 const scene = new THREE.Scene();
+scene.add(lavaBg.mesh);
 const camera = new THREE.PerspectiveCamera(50, 1, 0.05, 100);
 camera.position.set(3.2, 2.4, 4.2);
 
@@ -478,8 +513,8 @@ const clipUniforms = {
   uSteps: { value: 32 },
   uCameraPos: { value: new THREE.Vector3() },
   uDirM: { value: new THREE.Matrix3() },
-  uAbsorbColor: { value: new THREE.Color(0.15, 0.25, 0.45) },
-  uEmitColor: { value: new THREE.Color(0.55, 0.75, 1.0) },
+  uAbsorbColor: { value: new THREE.Color(...themeColors.beerAbsorb) },
+  uEmitColor: { value: new THREE.Color(...themeColors.beerEmit) },
 };
 
 const clipMat = new THREE.ShaderMaterial({
@@ -502,9 +537,10 @@ clipQuad.frustumCulled = false;
 clipQuad.visible = false;
 scene.add(clipQuad);
 
+const boxMat = new THREE.LineBasicMaterial({ color: themeColors.boxEdge });
 const boxHelper = new THREE.LineSegments(
   new THREE.EdgesGeometry(new THREE.BoxGeometry(4, 4, 4)),
-  new THREE.LineBasicMaterial({ color: 0x3a4558 }),
+  boxMat,
 );
 scene.add(boxHelper);
 
@@ -516,7 +552,7 @@ scene.add(worldGrid);
 const worldLabels = new THREE.Group();
 scene.add(worldLabels);
 
-function makeAxisLabel(text, color, position) {
+function makeAxisLabel(text, color, position, labelStroke) {
   // High-res canvas so sprites stay sharp under orbit / retina.
   const css = 128;
   const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
@@ -534,7 +570,7 @@ function makeAxisLabel(text, color, position) {
   ctx.textBaseline = "middle";
   // Soft stroke reduces shimmer / jagged edges when minified by the GPU.
   ctx.lineWidth = 3;
-  ctx.strokeStyle = "rgba(8,10,14,0.55)";
+  ctx.strokeStyle = labelStroke || "rgba(26, 18, 40, 0.58)";
   ctx.strokeText(text, css / 2, css / 2 + 1);
   ctx.fillStyle = color;
   ctx.fillText(text, css / 2, css / 2 + 1);
@@ -590,8 +626,9 @@ function rebuildWorldGrid(half) {
   const extent = Math.ceil(h + 0.5);
   const size = extent * 2;
   const divisions = Math.max(2, size);
-  const major = 0x4a5568;
-  const minor = 0x2a3140;
+  const tc = readThemeColors();
+  const major = tc.gridMajor;
+  const minor = tc.gridMinor;
 
   const gridXZ = new THREE.GridHelper(size, divisions, major, minor);
   styleGrid(gridXZ, 0.55);
@@ -614,9 +651,9 @@ function rebuildWorldGrid(half) {
     0, 0, 0, 0, 0, axisLen, // +Z
   ]);
   const axisColors = new Float32Array([
-    0.9, 0.35, 0.38, 0.9, 0.35, 0.38,
-    0.35, 0.75, 0.48, 0.35, 0.75, 0.48,
-    0.4, 0.65, 0.95, 0.4, 0.65, 0.95,
+    ...tc.axisXRgb, ...tc.axisXRgb,
+    ...tc.axisYRgb, ...tc.axisYRgb,
+    ...tc.axisZRgb, ...tc.axisZRgb,
   ]);
   const axisGeo = new THREE.BufferGeometry();
   axisGeo.setAttribute("position", new THREE.BufferAttribute(axisPositions, 3));
@@ -633,9 +670,9 @@ function rebuildWorldGrid(half) {
   worldGrid.add(axes);
 
   const tip = extent + 0.45;
-  worldLabels.add(makeAxisLabel("x", "#e85d66", new THREE.Vector3(tip, 0, 0)));
-  worldLabels.add(makeAxisLabel("y", "#5ecf7a", new THREE.Vector3(0, tip, 0)));
-  worldLabels.add(makeAxisLabel("z", "#6ea8fe", new THREE.Vector3(0, 0, tip)));
+  worldLabels.add(makeAxisLabel("x", tc.axisX, new THREE.Vector3(tip, 0, 0), tc.labelStroke));
+  worldLabels.add(makeAxisLabel("y", tc.axisY, new THREE.Vector3(0, tip, 0), tc.labelStroke));
+  worldLabels.add(makeAxisLabel("z", tc.axisZ, new THREE.Vector3(0, 0, tip), tc.labelStroke));
 
   // WebGPU path draws the same grid against iso depth (no texture copy).
   syncClipGpuWorldGrid(h);
@@ -652,6 +689,29 @@ function setBoxSize(size) {
 }
 
 rebuildWorldGrid(2);
+
+function applyThemeToScene() {
+  themeColors = readThemeColors();
+  lavaBg.setColors(themeColors);
+  boxMat.color.setHex(themeColors.boxEdge);
+  clipUniforms.uAbsorbColor.value.setRGB(...themeColors.beerAbsorb);
+  clipUniforms.uEmitColor.value.setRGB(...themeColors.beerEmit);
+  applyClipGpuTheme(themeColors);
+  rebuildWorldGrid(clipUniforms.uHalf.value);
+  clipDirty = true;
+}
+
+onThemeChange((_resolved, pref) => {
+  if (els.themePref && els.themePref.value !== pref) els.themePref.value = pref;
+});
+
+if (els.themePref) {
+  els.themePref.value = getThemePref();
+  els.themePref.addEventListener("change", () => {
+    setThemePref(/** @type {import("./theme.js").ThemePref} */ (els.themePref.value));
+  });
+}
+onThemeChange(() => applyThemeToScene());
 
 function fmtRel(v) {
   if (!Number.isFinite(v)) return "∞";
@@ -1124,7 +1184,7 @@ function uploadFit(opts = {}) {
     const baseParams = getParamValues();
 
     for (const L of layers) {
-      const color = hexToRgb01(L.item.color);
+      const { color, color2, colors } = layerRgbFromItem(L.item);
       const depends =
         !dirty ||
         L.compiled.freeParams.some((p) => dirty.has(p));
@@ -1149,6 +1209,8 @@ function uploadFit(opts = {}) {
               keyframes: prev.keyframes,
               blend: prev.blend || { i0: 0, i1: 0, t: 0 },
               color,
+              color2,
+              colors,
               isoLevel: L.compiled.isoLevel ?? prev.isoLevel ?? 0,
               cheb: prev.cheb,
               fitRel: prev.fitRel,
@@ -1161,11 +1223,13 @@ function uploadFit(opts = {}) {
               gy: prev.gy,
               gz: prev.gz,
               color,
+              color2,
+              colors,
               isoLevel: L.compiled.isoLevel ?? prev.isoLevel ?? 0,
             });
           }
         } else {
-          densLayers.push({ id: L.item.id, dens: prev.dens, color });
+          densLayers.push({ id: L.item.id, dens: prev.dens, color, color2 });
         }
         if (!cheb && prev.cheb) {
           cheb = prev.cheb;
@@ -1201,6 +1265,8 @@ function uploadFit(opts = {}) {
             keyframes: sample.frames,
             blend: sample.blend,
             color,
+            color2,
+            colors,
             isoLevel: L.compiled.isoLevel ?? 0,
             cheb: sample.cheb,
             fitRel: sample.fitRel,
@@ -1227,6 +1293,8 @@ function uploadFit(opts = {}) {
             id: L.item.id,
             dens: sample.dens.slice(),
             color,
+            color2,
+            colors,
             cheb: sample.cheb,
             fitRel: sample.fitRel,
           });
@@ -1254,6 +1322,8 @@ function uploadFit(opts = {}) {
           gy: grad.gy,
           gz: grad.gz,
           color,
+          color2,
+          colors,
           isoLevel: L.compiled.isoLevel ?? 0,
           cheb: fit.cheb,
           fitRel: fit.fitRelL2,
@@ -1263,6 +1333,8 @@ function uploadFit(opts = {}) {
           id: L.item.id,
           dens: idct.dens,
           color,
+          color2,
+          colors,
           cheb: fit.cheb,
           fitRel: fit.fitRelL2,
         });
@@ -1611,6 +1683,9 @@ function frame(rafNow) {
     syncClipCpuVolume();
   }
 
+  lavaBg.setTime(t0 / 1000);
+  lavaBg.syncCamera(camera);
+  renderer.autoClear = true;
   renderer.render(scene, camera);
 
   if (isClipBakeGpuReady()) {

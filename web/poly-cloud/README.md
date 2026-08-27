@@ -18,8 +18,8 @@ Requires a WebGPU-capable browser for the full multi-layer / manifold path. With
 ## Controls
 
 - **Expressions** — Enter splits / adds a row. Free symbols get a slider on that same row; write `a=…` for an explicit parameter equation. `A=B` → manifold; bare / `f=…` → density.
-- **Settings** (gear) — preset, poly deg / scale / steps / box size, march downscale, diagnostics.
-- **Reset view** — restores the default camera.
+- **Settings** (gear) — appearance (theme), preset, poly deg / scale / steps / box size, march downscale, diagnostics.
+- **Reset view** (recenter icon) — restores the default camera.
 
 ## Cost
 

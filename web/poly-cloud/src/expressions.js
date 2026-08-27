@@ -5,16 +5,100 @@
 
 let nextId = 1;
 
-/** Default palette for field expressions (manifolds / densities). */
-export const EXPR_COLORS = [
-  "#c74440",
-  "#2d70b3",
-  "#388c46",
-  "#6042a6",
-  "#fa7e19",
-  "#000000",
-  "#00a2b3",
+/** Max / min stops in a layer gradient. */
+export const MAX_GRAD_STOPS = 6;
+export const MIN_GRAD_STOPS = 2;
+
+/** Glassmorphic gradient pairs for densities / isosurfaces. */
+export const EXPR_GRADIENTS = [
+  { color: "#ff4500", color2: "#ffec00" }, /* flame → gold */
+  { color: "#ff1493", color2: "#7b2fff" }, /* deep pink → violet */
+  { color: "#0066ff", color2: "#00ffaa" }, /* royal blue → spring green */
+  { color: "#ff6b4a", color2: "#ffb0d8" }, /* coral → blush */
+  { color: "#00c8e0", color2: "#c080ff" }, /* aqua → lilac glass */
 ];
+
+/** Primary swatch colors (gradient start). */
+export const EXPR_COLORS = EXPR_GRADIENTS.map((g) => g.color);
+
+export const DEFAULT_EXPR_COLOR = EXPR_COLORS[0];
+export const DEFAULT_EXPR_COLOR2 = EXPR_GRADIENTS[0].color2;
+
+function gradientForIndex(i) {
+  return EXPR_GRADIENTS[i % EXPR_GRADIENTS.length];
+}
+
+/** Normalize a list of hex stops (clamp length, ensure ≥2). */
+export function normalizeGradColors(input, fallbackPrimary = DEFAULT_EXPR_COLOR) {
+  let cols = Array.isArray(input)
+    ? input.map((c) => String(c || "").trim()).filter(Boolean)
+    : [];
+  cols = cols.map((c) => (c.startsWith("#") ? c : `#${c}`));
+  if (cols.length === 0) {
+    cols = [fallbackPrimary, color2ForPrimary(fallbackPrimary)];
+  } else if (cols.length === 1) {
+    cols = [cols[0], color2ForPrimary(cols[0])];
+  }
+  if (cols.length > MAX_GRAD_STOPS) cols = cols.slice(0, MAX_GRAD_STOPS);
+  return cols;
+}
+
+/**
+ * @param {{ color?: string, color2?: string, colors?: string[] }} item
+ * @returns {{ colors: string[], color: string, color2: string }}
+ */
+export function resolveExprGradient(item) {
+  const colors = normalizeGradColors(
+    item.colors?.length
+      ? item.colors
+      : [
+          item.color ?? DEFAULT_EXPR_COLOR,
+          item.color2 ?? color2ForPrimary(item.color ?? DEFAULT_EXPR_COLOR),
+        ],
+    item.color ?? DEFAULT_EXPR_COLOR,
+  );
+  return {
+    colors,
+    color: colors[0],
+    color2: colors[colors.length - 1],
+  };
+}
+
+/** Secondary endpoint when the user edits the primary swatch only. */
+export function color2ForPrimary(primary) {
+  const hit = EXPR_GRADIENTS.find(
+    (g) => g.color.toLowerCase() === String(primary || "").toLowerCase(),
+  );
+  return hit ? hit.color2 : EXPR_GRADIENTS[0].color2;
+}
+
+/** CSS linear-gradient from stop list. */
+export function cssGradientFromColors(colors, angle = "145deg") {
+  const cols = normalizeGradColors(colors);
+  if (cols.length === 1) return cols[0];
+  const stops = cols
+    .map((c, i) => `${c} ${((i / (cols.length - 1)) * 100).toFixed(1)}%`)
+    .join(", ");
+  return `linear-gradient(${angle}, ${stops})`;
+}
+
+function colorForIndex(i) {
+  return gradientForIndex(i).color;
+}
+
+/** Next gradient pair after the last expression. */
+export function nextExprGradient() {
+  if (!items.length) return { ...EXPR_GRADIENTS[0], colors: [EXPR_GRADIENTS[0].color, EXPR_GRADIENTS[0].color2] };
+  const last = resolveExprGradient(items[items.length - 1]);
+  const idx = EXPR_GRADIENTS.findIndex((g) => g.color === last.color);
+  const g = gradientForIndex(idx >= 0 ? idx + 1 : items.length);
+  return { ...g, colors: [g.color, g.color2] };
+}
+
+/** Next palette color after the last expression (or index 0 if empty). */
+export function nextExprColor() {
+  return nextExprGradient().color;
+}
 
 /**
  * @typedef {"auto" | "density" | "constraint"} ExprRole
@@ -22,6 +106,8 @@ export const EXPR_COLORS = [
  *   id: string,
  *   latex: string,
  *   color: string,
+ *   color2: string,
+ *   colors: string[],
  *   role: ExprRole,
  *   enabled: boolean,
  *   sliderMin: number,
@@ -63,18 +149,6 @@ function emit() {
   if (onChange) onChange();
 }
 
-function colorForIndex(i) {
-  return EXPR_COLORS[i % EXPR_COLORS.length];
-}
-
-/** Next palette color after the last expression (or index 0 if empty). */
-export function nextExprColor() {
-  if (!items.length) return colorForIndex(0);
-  const last = items[items.length - 1].color?.toLowerCase?.() ?? "";
-  const idx = EXPR_COLORS.findIndex((c) => c.toLowerCase() === last);
-  return colorForIndex(idx >= 0 ? idx + 1 : items.length);
-}
-
 /**
  * @param {Partial<ExprItem> & { animate?: boolean, min?: number, max?: number, speed?: number, value?: number }} [init]
  * @returns {ExprItem}
@@ -92,10 +166,17 @@ export function createExprItem(init = {}) {
       ? init.max
       : 10;
   if (sliderMax < sliderMin) [sliderMin, sliderMax] = [sliderMax, sliderMin];
+  const grad = resolveExprGradient(
+    init.colors?.length || init.color
+      ? { color: init.color, color2: init.color2, colors: init.colors }
+      : nextExprGradient(),
+  );
   return {
     id,
     latex: init.latex ?? "",
-    color: init.color ?? nextExprColor(),
+    color: grad.color,
+    color2: grad.color2,
+    colors: grad.colors,
     role: init.role ?? "auto",
     enabled: init.enabled !== false,
     sliderMin,
@@ -284,6 +365,16 @@ export function updateExpr(id, patch) {
   const row = items.find((e) => e.id === id);
   if (!row) return null;
   Object.assign(row, patch);
+  if (patch.colors || patch.color != null || patch.color2 != null) {
+    const g = resolveExprGradient({
+      colors: patch.colors ?? row.colors,
+      color: patch.color ?? row.color,
+      color2: patch.color2 ?? row.color2,
+    });
+    row.colors = g.colors;
+    row.color = g.color;
+    row.color2 = g.color2;
+  }
   emit();
   return row;
 }
@@ -293,6 +384,16 @@ export function updateExprSilent(id, patch) {
   const row = items.find((e) => e.id === id);
   if (!row) return null;
   Object.assign(row, patch);
+  if (patch.colors || patch.color != null || patch.color2 != null) {
+    const g = resolveExprGradient({
+      colors: patch.colors ?? row.colors,
+      color: patch.color ?? row.color,
+      color2: patch.color2 ?? row.color2,
+    });
+    row.colors = g.colors;
+    row.color = g.color;
+    row.color2 = g.color2;
+  }
   return row;
 }
 

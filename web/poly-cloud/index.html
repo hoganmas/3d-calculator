@@ -5,31 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Laplacian</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <!-- Latin Modern = Computer Modern OpenType (standard LaTeX text face) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       rel="stylesheet"
-      href="https://cdn.jsdelivr.net/gh/sugina-dev/latin-modern-web@1.0.1/style/latinmodern-roman.css"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
     />
     <style>
-      :root {
-        color-scheme: dark;
-        --bg: #0e1014;
-        --panel: #161a22;
-        --panel-inset: 12px;
-        --panel-radius: 16px;
-        --glass-bg: rgba(14, 17, 24, 0.48);
-        --glass-bg-strong: rgba(18, 22, 30, 0.62);
-        --glass-stroke: rgba(255, 255, 255, 0.12);
-        --glass-highlight: rgba(255, 255, 255, 0.07);
-        --glass-blur: 22px;
-        --stroke: rgba(255, 255, 255, 0.12);
-        --text: #e8eaed;
-        --muted: #9aa3b2;
-        --accent: #6ea8fe;
-        --ok: #3dd68c;
-        --warn: #f5a524;
-        --panel-w: 360px;
-      }
       * {
         box-sizing: border-box;
       }
@@ -37,7 +19,7 @@
       body {
         margin: 0;
         height: 100%;
-        font-family: Georgia, "Times New Roman", Times, serif;
+        font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
         background: var(--bg);
         color: var(--text);
       }
@@ -52,7 +34,7 @@
         min-width: 0;
         min-height: 0;
         overflow: hidden;
-        background: #07080b;
+        background: transparent;
       }
       #panel {
         position: absolute;
@@ -72,35 +54,31 @@
         background: var(--glass-bg);
         backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
         -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
-        border: 1px solid var(--glass-stroke);
-        box-shadow:
-          0 16px 48px rgba(0, 0, 0, 0.38),
-          inset 0 1px 0 var(--glass-highlight);
+        border: none;
+        box-shadow: var(--glass-shadow), var(--glass-fresnel);
+        transition: box-shadow 0.18s ease;
       }
       #panelResize {
         position: absolute;
         z-index: 6;
         top: var(--panel-inset);
         bottom: var(--panel-inset);
-        left: calc(var(--panel-inset) + var(--panel-w) - 2px);
-        width: 6px;
+        left: calc(var(--panel-inset) + var(--panel-w) - 6px);
+        width: 12px;
         cursor: col-resize;
         background: transparent;
-        border-radius: 3px;
         touch-action: none;
-      }
-      #panelResize::after {
-        content: "";
-        position: absolute;
-        inset: 0 -4px;
-      }
-      #panelResize:hover,
-      #panelResize.dragging {
-        background: rgba(110, 168, 254, 0.45);
       }
       body.panel-resizing {
         cursor: col-resize;
         user-select: none;
+      }
+      #panel:has(+ #panelResize:hover),
+      body.panel-resizing #panel {
+        box-shadow:
+          var(--glass-shadow),
+          var(--glass-fresnel),
+          10px 0 36px var(--accent-ring);
       }
       body.panel-resizing #viewport,
       body.panel-resizing #viewport * {
@@ -111,26 +89,36 @@
         flex-direction: column;
         gap: 6px;
         margin: 0 -4px;
-        padding: 10px 0 28px;
+        padding: 4px 0 28px;
         min-height: 48px;
+        flex: 1;
       }
       .expr-row {
+        --expr-c0: #e85a10;
+        --expr-c1: #f5d020;
         display: grid;
         grid-template-columns: 16px 28px minmax(0, 1fr) 28px 28px;
         gap: 0;
         align-items: stretch;
         min-height: 52px;
         padding: 0;
-        border-radius: 8px;
-        border: 1px solid var(--glass-stroke);
-        background: rgba(255, 255, 255, 0.04);
+        border-radius: 10px;
+        border: none;
+        background: transparent;
+        box-shadow: var(--glass-fresnel-soft);
         overflow: hidden;
         position: relative;
+        transition: box-shadow 0.18s ease;
+      }
+      .expr-row:hover:not(.is-dragging) {
+        box-shadow: var(--glass-fresnel);
       }
       .expr-row.selected {
-        border-color: rgba(110, 168, 254, 0.55);
-        box-shadow: 0 0 0 1px rgba(110, 168, 254, 0.2);
-        background: rgba(110, 168, 254, 0.08);
+        box-shadow:
+          var(--glass-fresnel-soft),
+          0 0 0 1px var(--accent-ring),
+          0 0 18px var(--accent-ring);
+        background: transparent;
       }
       .expr-row.is-dragging {
         opacity: 0.35;
@@ -141,12 +129,12 @@
         left: 0;
         z-index: 10000;
         margin: 0;
-        opacity: 0.72;
+        opacity: 0.78;
         pointer-events: none;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+        box-shadow: var(--glass-shadow), var(--glass-fresnel);
         background: var(--glass-bg-strong);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
+        backdrop-filter: blur(var(--expr-glass-blur)) saturate(1.25);
+        -webkit-backdrop-filter: blur(var(--expr-glass-blur)) saturate(1.25);
         will-change: transform;
       }
       .expr-row.drag-over-before::before,
@@ -188,7 +176,7 @@
       }
       .expr-drag:hover {
         color: var(--text);
-        background: rgba(255, 255, 255, 0.04);
+        background: transparent;
       }
       .expr-list.is-reordering .expr-drag,
       .expr-drag:active {
@@ -206,7 +194,7 @@
         width: 28px;
         height: auto;
         min-height: 100%;
-        padding: 0;
+        padding: 10px 5px;
         margin: 0;
         border: none !important;
         border-radius: 0;
@@ -214,30 +202,109 @@
         box-shadow: none !important;
         cursor: pointer;
         align-self: stretch;
+        position: relative;
       }
-      .expr-color::-webkit-color-swatch-wrapper {
-        padding: 10px 5px;
-        background: transparent;
-      }
-      .expr-color::-webkit-color-swatch {
-        border: none;
+      .expr-color::after {
+        content: "";
+        display: block;
+        width: 100%;
+        height: 100%;
+        min-height: 32px;
         border-radius: 6px;
-        box-shadow:
-          inset 0 0 0 1px rgba(255, 255, 255, 0.18),
-          0 0 0 1px rgba(0, 0, 0, 0.25);
+        background: var(--expr-grad, linear-gradient(
+          145deg,
+          var(--expr-c0, #e85a10) 0%,
+          var(--expr-c1, #f5d020) 100%
+        ));
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
       }
-      .expr-color:hover::-webkit-color-swatch {
+      .expr-color:hover::after {
         box-shadow:
           inset 0 0 0 1px rgba(255, 255, 255, 0.28),
-          0 0 0 1px rgba(110, 168, 254, 0.35);
-      }
-      .expr-color::-moz-color-swatch {
-        border: none;
-        border-radius: 6px;
+          0 0 0 1px var(--accent-border);
       }
       .expr-color:disabled {
         cursor: default;
         opacity: 0.35;
+      }
+      .grad-popover {
+        position: fixed;
+        z-index: 20000;
+        width: 200px;
+        padding: 10px;
+        border-radius: 12px;
+        border: 1px solid var(--glass-stroke);
+        background: var(--glass-bg-strong);
+        backdrop-filter: blur(18px) saturate(1.2);
+        -webkit-backdrop-filter: blur(18px) saturate(1.2);
+        box-shadow: var(--glass-shadow-dialog);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        color: var(--text);
+        font-size: 12px;
+      }
+      .grad-popover-head {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .grad-popover-preview {
+        height: 28px;
+        border-radius: 8px;
+        border: 1px solid var(--glass-stroke);
+      }
+      .grad-popover-stops {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        max-height: 220px;
+        overflow: auto;
+      }
+      .grad-stop {
+        display: grid;
+        grid-template-columns: 28px 1fr 24px;
+        gap: 6px;
+        align-items: center;
+      }
+      .grad-stop-color {
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        border: 1px solid var(--glass-stroke);
+        border-radius: 6px;
+        background: transparent;
+        cursor: pointer;
+      }
+      .grad-stop-color::-webkit-color-swatch-wrapper {
+        padding: 2px;
+      }
+      .grad-stop-color::-webkit-color-swatch {
+        border: none;
+        border-radius: 4px;
+      }
+      .grad-stop-label {
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .grad-stop-remove {
+        width: 24px;
+        height: 24px;
+        padding: 0;
+        border-radius: 6px;
+        font-size: 14px;
+        line-height: 1;
+      }
+      .grad-popover-actions {
+        display: flex;
+        justify-content: stretch;
+      }
+      .grad-popover-actions button {
+        width: 100%;
+        font-size: 12px;
+        padding: 6px 8px;
       }
       .expr-mid {
         position: relative;
@@ -279,7 +346,7 @@
       }
       .expr-del:hover {
         background: rgba(227, 93, 106, 0.12);
-        color: #ff7b72;
+        color: var(--err);
       }
       .expr-vis {
         width: 28px;
@@ -296,7 +363,7 @@
       }
       .expr-vis:hover {
         color: var(--text);
-        background: rgba(110, 168, 254, 0.1);
+        background: var(--accent-soft);
       }
       .expr-vis svg {
         width: 14px;
@@ -310,27 +377,23 @@
         display: flex;
         align-items: center;
         gap: 12px;
-        margin: 2px 0 0;
+        min-width: 0;
       }
       #panel .brand-mark {
         width: 36px;
         height: 36px;
+        display: block;
         flex-shrink: 0;
         border-radius: 8px;
       }
       #panel h1 {
-        font-family: "Latin Modern Roman", "Computer Modern Serif", Georgia, serif;
+        font-family: "Space Grotesk", "IBM Plex Sans", system-ui, sans-serif;
         font-size: 26px;
-        font-weight: bold;
+        font-weight: 600;
         margin: 0;
-        letter-spacing: 0.01em;
+        letter-spacing: 0.04em;
         line-height: 1.1;
-      }
-      #panel .brand-sub {
-        margin: 2px 0 4px 48px;
-        font-family: "Latin Modern Roman", "Computer Modern Serif", Georgia, serif;
-        font-size: 12px;
-        color: var(--muted);
+        text-transform: lowercase;
       }
       #panel p {
         margin: 0;
@@ -380,7 +443,7 @@
         width: 100%;
         min-height: 52px;
         font-size: 18px;
-        --contains-highlight-background-color: #243044;
+        --contains-highlight-background-color: var(--math-highlight);
       }
       /* Hide MathLive menu / virtual-keyboard chrome */
       math-field::part(menu-toggle),
@@ -397,21 +460,22 @@
         outline: none;
       }
       .expr-row:focus-within {
-        border-color: var(--accent);
-        box-shadow: 0 0 0 1px rgba(110, 168, 254, 0.35);
+        border-color: var(--accent-border);
+        box-shadow: 0 0 0 1px var(--accent-focus);
+        background: transparent;
       }
       math-field.invalid {
         /* invalid styling applied via row when possible */
       }
       .expr-row:has(math-field.invalid) {
-        border-color: #e35d6a;
+        border-color: var(--err-border);
         box-shadow: 0 0 0 1px rgba(227, 93, 106, 0.35);
         background: transparent;
       }
       button {
         cursor: pointer;
         background: var(--accent);
-        color: #0a0c10;
+        color: var(--btn-on-accent);
         border-color: transparent;
         font-weight: 600;
       }
@@ -519,14 +583,14 @@
         cursor: pointer;
       }
       .expr-param-play:hover {
-        background: rgba(110, 168, 254, 0.12);
+        background: var(--accent-soft);
       }
       .expr-param-play:disabled {
         opacity: 0.35;
         cursor: not-allowed;
       }
       .expr-param-play.on {
-        background: rgba(110, 168, 254, 0.18);
+        background: var(--accent-soft-strong);
         color: var(--accent);
       }
       .expr-param-track {
@@ -584,7 +648,7 @@
         border-radius: 50%;
         background: var(--accent);
         border: none;
-        box-shadow: 0 0 0 6px rgba(110, 168, 254, 0.28);
+        box-shadow: 0 0 0 6px var(--accent-ring);
         cursor: pointer;
       }
       .expr-param-slider::-moz-range-thumb {
@@ -593,14 +657,14 @@
         border-radius: 50%;
         background: var(--accent);
         border: none;
-        box-shadow: 0 0 0 6px rgba(110, 168, 254, 0.28);
+        box-shadow: 0 0 0 6px var(--accent-ring);
         cursor: pointer;
       }
       .expr-param-slider:focus {
         outline: none;
       }
       .expr-param-slider:focus::-webkit-slider-thumb {
-        box-shadow: 0 0 0 7px rgba(110, 168, 254, 0.35);
+        box-shadow: 0 0 0 7px var(--accent-focus);
       }
       .expr-row.has-error {
         border-color: #e07070;
@@ -647,13 +711,15 @@
       }
       .brand-row {
         display: flex;
-        align-items: flex-start;
+        align-items: center;
         justify-content: space-between;
         gap: 8px;
       }
-      .brand-row .brand {
-        flex: 1;
-        min-width: 0;
+      .brand-row-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-left: auto;
       }
       .icon-btn {
         flex-shrink: 0;
@@ -670,21 +736,16 @@
       }
       .icon-btn:hover {
         color: var(--text);
-        border-color: rgba(110, 168, 254, 0.45);
-        background: rgba(110, 168, 254, 0.08);
+        border-color: var(--accent-border);
+        background: var(--accent-soft);
       }
       .icon-btn svg {
         width: 18px;
         height: 18px;
         display: block;
       }
-      .panel-actions {
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: 8px;
-      }
       .settings-dialog {
-        border: 1px solid var(--glass-stroke);
+        border: none;
         border-radius: 16px;
         padding: 0;
         background: var(--glass-bg-strong);
@@ -695,12 +756,10 @@
         width: 100%;
         max-height: min(88vh, 720px);
         overflow: hidden;
-        box-shadow:
-          0 18px 48px rgba(0, 0, 0, 0.45),
-          inset 0 1px 0 var(--glass-highlight);
+        box-shadow: var(--glass-shadow-dialog), var(--glass-fresnel);
       }
       .settings-dialog::backdrop {
-        background: rgba(6, 8, 12, 0.45);
+        background: var(--dialog-backdrop);
         backdrop-filter: blur(6px);
         -webkit-backdrop-filter: blur(6px);
       }
@@ -719,10 +778,10 @@
       }
       .settings-head h2 {
         margin: 0;
-        font-family: "Latin Modern Roman", "Computer Modern Serif", Georgia, serif;
+        font-family: "Space Grotesk", "IBM Plex Sans", system-ui, sans-serif;
         font-size: 20px;
-        font-weight: bold;
-        letter-spacing: 0.01em;
+        font-weight: 600;
+        letter-spacing: -0.01em;
       }
       .settings-body {
         display: flex;
@@ -795,10 +854,11 @@
         background: var(--glass-bg);
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
-        border: 1px solid var(--glass-stroke);
+        border: none;
+        box-shadow: var(--glass-fresnel-soft);
       }
       #err {
-        color: #ff7b72;
+        color: var(--err);
         font-size: 12px;
         min-height: 1.2em;
       }
@@ -873,39 +933,43 @@
     <div id="app">
       <aside id="panel">
         <div class="brand-row">
-          <div>
-            <div class="brand">
-              <img class="brand-mark" src="/favicon.svg" alt="" width="36" height="36" />
-              <h1>Laplacian</h1>
-            </div>
-            <p class="brand-sub">3D polynomial calculator</p>
+          <div class="brand">
+            <img class="brand-mark" src="/favicon.svg" alt="" width="36" height="36" />
+            <h1>Laplacian</h1>
           </div>
-          <button
-            id="openSettings"
-            class="icon-btn"
-            type="button"
-            aria-label="Open settings"
-            title="Settings"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75">
-              <circle cx="12" cy="12" r="3" />
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
-              />
-            </svg>
-          </button>
+          <div class="brand-row-actions">
+            <button
+              id="reset"
+              class="icon-btn"
+              type="button"
+              aria-label="Reset view"
+              title="Reset view"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75">
+                <circle cx="12" cy="12" r="3" />
+                <path stroke-linecap="round" d="M12 2v4M12 18v4M2 12h4M18 12h4" />
+              </svg>
+            </button>
+            <button
+              id="openSettings"
+              class="icon-btn"
+              type="button"
+              aria-label="Open settings"
+              title="Settings"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75">
+                <circle cx="12" cy="12" r="3" />
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+                />
+              </svg>
+            </button>
+          </div>
         </div>
 
-        <div class="expr-list-head">
-          <span style="font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em">Expressions</span>
-        </div>
-        <div id="exprList" class="expr-list"></div>
-
-        <div class="panel-actions">
-          <button id="reset" class="secondary" type="button">Reset view</button>
-        </div>
+        <div id="exprList" class="expr-list" aria-label="Expressions"></div>
 
         <div id="err"></div>
       </aside>
@@ -932,6 +996,18 @@
           </button>
         </header>
         <div class="settings-body">
+          <section class="settings-section">
+            <p class="settings-section-title">Appearance</p>
+            <label>
+              Theme
+              <select id="themePref">
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+                <option value="system">System</option>
+              </select>
+            </label>
+          </section>
+
           <section class="settings-section">
             <p class="settings-section-title">Scene</p>
             <label>

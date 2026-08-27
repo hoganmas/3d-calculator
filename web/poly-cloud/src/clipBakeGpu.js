@@ -2,8 +2,46 @@
  * WebGPU volume march: IDCT dens grids + iso manifolds + multi-layer Beer.
  */
 import { ndcToDirMatrix, perspectiveDirScale, offsetDirMatrix } from "./clipGrid.js";
+import { hexToRgb01, EXPR_GRADIENTS, MAX_GRAD_STOPS } from "./expressions.js";
 
 export const MAX_DENS_LAYERS = 8;
+
+const DEFAULT_DENS_RGB = hexToRgb01(EXPR_GRADIENTS[0].color);
+const DEFAULT_DENS_RGB2 = hexToRgb01(EXPR_GRADIENTS[0].color2);
+const DEFAULT_ISO_RGB = hexToRgb01(EXPR_GRADIENTS[1].color);
+const DEFAULT_ISO_RGB2 = hexToRgb01(EXPR_GRADIENTS[1].color2);
+
+/** Spatial + normal gradient factor (position for volumes, normal for 2D isos). */
+const GRADIENT_WGSL = `
+const MAX_GRAD_STOPS: u32 = ${MAX_GRAD_STOPS}u;
+
+fn gradientT(p: vec3f, half: f32) -> f32 {
+  let u = p / max(half, 1e-6);
+  let ty = clamp(u.y * 0.5 + 0.5, 0.0, 1.0);
+  let tx = clamp(u.x * 0.5 + 0.5, 0.0, 1.0);
+  let tz = clamp(u.z * 0.5 + 0.5, 0.0, 1.0);
+  let tr = clamp(length(u) * 0.70710678, 0.0, 1.0);
+  return clamp(0.36 * ty + 0.24 * tx + 0.24 * tz + 0.16 * tr, 0.0, 1.0);
+}
+
+fn isoGradientT(p: vec3f, n: vec3f, half: f32) -> f32 {
+  let tp = gradientT(p, half);
+  let gdir = normalize(vec3f(0.12, 0.94, 0.32));
+  let tn = clamp(0.5 + 0.5 * dot(n, gdir), 0.0, 1.0);
+  let tb = clamp(0.5 + 0.35 * n.y, 0.0, 1.0);
+  return clamp(mix(tp, tn, 0.58) * 0.82 + tb * 0.18, 0.0, 1.0);
+}
+
+/** Piecewise-linear sample across up to MAX_GRAD_STOPS colors. Count in stops[0].w */
+fn sampleGradStops(stops: ptr<function, array<vec4f, ${MAX_GRAD_STOPS}>>, t: f32) -> vec3f {
+  let n = max(min(u32((*stops)[0].w), MAX_GRAD_STOPS), 1u);
+  if (n <= 1u) { return (*stops)[0].xyz; }
+  let x = clamp(t, 0.0, 1.0) * f32(n - 1u);
+  let i = min(u32(floor(x)), n - 2u);
+  let f = fract(x);
+  return mix((*stops)[i].xyz, (*stops)[i + 1u].xyz, f);
+}
+`;
 
 /** Classic DrawParams layout (matches 872b141). volBase in the _p1 slot. */
 function makeIsoWgsl() {
@@ -22,12 +60,16 @@ struct DrawParams {
   m0: vec4f,
   m1: vec4f,
   m2: vec4f,
-  absorb: vec4f,
-  emit: vec4f,
   volBaseB: f32,
   blendT: f32,
-  _pad0: f32,
-  _pad1: f32,
+  gradCount: f32,
+  _padG: f32,
+  g0: vec4f,
+  g1: vec4f,
+  g2: vec4f,
+  g3: vec4f,
+  g4: vec4f,
+  g5: vec4f,
 }
 
 @group(0) @binding(0) var<uniform> draw: DrawParams;
@@ -114,13 +156,40 @@ fn fieldGrad(p: vec3f) -> vec3f {
   return vec3f(gxi, geta, gzeta) * invH;
 }
 
+${GRADIENT_WGSL}
+
 fn shadeIso(p: vec3f, rd: vec3f, n: vec3f) -> vec4f {
+  var stops: array<vec4f, ${MAX_GRAD_STOPS}>;
+  stops[0] = vec4f(draw.g0.xyz, draw.gradCount);
+  stops[1] = draw.g1;
+  stops[2] = draw.g2;
+  stops[3] = draw.g3;
+  stops[4] = draw.g4;
+  stops[5] = draw.g5;
+
   let L = normalize(vec3f(0.35, 0.85, 0.45));
+  let V = normalize(-rd);
   let ndotl = max(dot(n, L), 0.0);
-  let ambient = 0.42;
-  let lambert = ambient + (1.0 - ambient) * ndotl;
-  let base = mix(draw.absorb.xyz, draw.emit.xyz, 0.65);
-  let rgb = base * lambert;
+  let ndotv = max(dot(n, V), 0.0);
+
+  let tBase = isoGradientT(p, n, draw.half);
+  let tLight = mix(0.04, 0.96, pow(ndotl, 0.7));
+  let t = clamp(mix(tBase, tLight, 0.7), 0.0, 1.0);
+  var rgb = sampleGradStops(&stops, t);
+
+  let nStops = max(min(u32(draw.gradCount), MAX_GRAD_STOPS), 1u);
+  let c0 = stops[0].xyz;
+  let c1 = stops[nStops - 1u].xyz;
+
+  // Fresnel rim — hot end at silhouettes
+  let fresnel = pow(1.0 - ndotv, 2.0);
+  rgb += c1 * fresnel * 0.48;
+
+  // Specular on blended albedo
+  let H = normalize(L + V);
+  let spec = pow(max(dot(n, H), 0.0), 40.0);
+  rgb += mix(c0, c1, 0.7) * spec * 0.45;
+
   return vec4f(rgb, 1.0);
 }
 
@@ -236,7 +305,18 @@ struct DrawParams {
 @group(0) @binding(0) var<uniform> draw: DrawParams;
 @group(0) @binding(1) var<storage, read> volume: array<f32>;
 @group(0) @binding(2) var occlTex: texture_2d<f32>;
-@group(0) @binding(3) var<storage, read> layerColors: array<vec4f>;
+@group(0) @binding(3) var<storage, read> layerGrads: array<vec4f>;
+
+${GRADIENT_WGSL}
+
+fn sampleLayerGrad(L: u32, t: f32) -> vec3f {
+  let base = L * MAX_GRAD_STOPS;
+  var stops: array<vec4f, ${MAX_GRAD_STOPS}>;
+  for (var i: u32 = 0u; i < MAX_GRAD_STOPS; i++) {
+    stops[i] = layerGrads[base + i];
+  }
+  return sampleGradStops(&stops, t);
+}
 
 struct VSOut { @builtin(position) pos: vec4f, }
 
@@ -320,7 +400,8 @@ fn fsMain(in: VSOut) -> @location(0) vec4f {
       dval = clamp(dval, -4.0, 8.0);
       let sig = min(max(0.0, draw.scale * dval), 40.0);
       if (sig > 1e-8) {
-        let col = layerColors[L].xyz;
+        let gt = gradientT(p, half);
+        let col = sampleLayerGrad(L, gt);
         sigma += sig;
         emitAcc += col * sig;
       }
@@ -329,15 +410,15 @@ fn fsMain(in: VSOut) -> @location(0) vec4f {
       let absorb = exp(-sigma * ds);
       let opacity = 1.0 - absorb;
       let col = emitAcc / sigma;
-      // Match single-layer look: emit * sigma + small absorb tint.
-      rgb += T * opacity * (col * sigma + col * 0.15);
+      // Beer emission + soft ambient so wispy low-density regions stay luminous.
+      rgb += T * opacity * col * (1.0 + 0.42);
       T *= absorb;
     }
     s += dt;
   }
   let a = 1.0 - T;
   if (a < 0.001) { return vec4f(0.0); }
-  return vec4f(rgb * a, a);
+  return vec4f(rgb, a);
 }
 `;
 }
@@ -651,7 +732,13 @@ fn fsMain(in: VSOut) -> @location(0) vec4f {
     ao = pow(ao, 1.25);
   }
   let factor = mix(1.0, ao, p.strength);
-  return vec4f(color.rgb * factor, color.a);
+  // Occlusion: slide toward shadow gradient stop (c0-like), not grey darkening
+  let tOcc = (1.0 - factor) * 0.55;
+  let peak = max(max(color.r, color.g), color.b);
+  let hue = color.rgb / max(peak, 1e-4);
+  let shadowStop = hue * peak * 0.62;
+  let rgb = mix(color.rgb, mix(shadowStop, color.rgb, factor), tOcc);
+  return vec4f(rgb, color.a);
 }
 `;
 }
@@ -707,8 +794,8 @@ let fxaaSampler = null;
 /** @type {{ color: number[], isoLevel: number, base: number }[]} */
 let sceneConstraints = [];
 let densPacked = false;
-/** @type {number[][]} */
-let densColors = [];
+/** @type {number[][][]} rgb stops per dens layer */
+let densGradStops = [];
 let densLayerCount = 0;
 let densBase = 0;
 let sceneM = 0;
@@ -734,16 +821,17 @@ let lastPresentAt = 0;
 let profileMethod = "";
 let profileGridM = 0;
 
-const PIPELINE_EPOCH = 16;
+const PIPELINE_EPOCH = 21;
 let builtEpoch = -1;
 
 /**
- * Classic 256-byte pack; volBase / volBaseB / blendT for GPU keyframe mix.
- * volBase at f32[11]; volBaseB + blendT after emit at f32[32], f32[33].
+ * Classic pack; volBase / volBaseB / blendT for GPU keyframe mix.
+ * Gradient stops g0..g5 after blend fields (count in gradCount).
+ * @param {number[][]} [gradRgbs] list of [r,g,b] stops
  */
 function packDrawParamsIso(
   fbW, fbH, gridM, steps, half, scale, isoLevel, volBase, ro, M, absorb, emit,
-  volBaseB = volBase, blendT = 0,
+  volBaseB = volBase, blendT = 0, gradRgbs = null,
 ) {
   const buf = new ArrayBuffer(256);
   const u32 = new Uint32Array(buf);
@@ -751,15 +839,33 @@ function packDrawParamsIso(
   u32[0] = fbW | 0; u32[1] = fbH | 0; u32[2] = gridM | 0; u32[3] = steps | 0;
   f32[4] = half; f32[5] = scale; f32[6] = isoLevel; u32[7] = 1;
   f32[8] = ro[0]; f32[9] = ro[1]; f32[10] = ro[2];
-  f32[11] = volBase; // exact integer bases fit in f32 for our volume sizes
+  f32[11] = volBase;
   f32[12] = M[0]; f32[13] = M[1]; f32[14] = M[2];
   f32[16] = M[3]; f32[17] = M[4]; f32[18] = M[5];
   f32[20] = M[6]; f32[21] = M[7]; f32[22] = M[8];
-  f32[24] = absorb[0]; f32[25] = absorb[1]; f32[26] = absorb[2];
-  f32[28] = emit[0]; f32[29] = emit[1]; f32[30] = emit[2];
-  f32[32] = volBaseB;
-  f32[33] = blendT;
+  // volBaseB / blendT / gradCount at 24..26 (was absorb/emit slot)
+  f32[24] = volBaseB;
+  f32[25] = blendT;
+  const stops = normalizeRgbStops(gradRgbs, absorb, emit);
+  f32[26] = stops.length;
+  f32[27] = 0;
+  for (let i = 0; i < MAX_GRAD_STOPS; i++) {
+    const c = stops[Math.min(i, stops.length - 1)];
+    const o = 28 + i * 4;
+    f32[o] = c[0]; f32[o + 1] = c[1]; f32[o + 2] = c[2]; f32[o + 3] = 1;
+  }
   return buf;
+}
+
+/** @param {number[][] | null} gradRgbs @param {number[]} absorb @param {number[]} emit */
+function normalizeRgbStops(gradRgbs, absorb, emit) {
+  let stops = Array.isArray(gradRgbs) && gradRgbs.length
+    ? gradRgbs.map((c) => [c[0], c[1], c[2]])
+    : [absorb, emit];
+  if (stops.length < 1) stops = [DEFAULT_ISO_RGB, DEFAULT_ISO_RGB2];
+  if (stops.length === 1) stops = [stops[0], stops[0]];
+  if (stops.length > MAX_GRAD_STOPS) stops = stops.slice(0, MAX_GRAD_STOPS);
+  return stops;
 }
 
 /**
@@ -795,15 +901,24 @@ function packSsaoParams(fbW, fbH, half, radius, strength, bias, ro, M) {
   return buf;
 }
 
-function writeLayerColors(colors) {
+function writeLayerColors(layerStopsList) {
   if (!device || !colorBuf) return;
-  const data = new Float32Array(MAX_DENS_LAYERS * 4);
-  for (let i = 0; i < MAX_DENS_LAYERS; i++) {
-    const c = colors[i] || [0, 0, 0];
-    data[i * 4] = c[0];
-    data[i * 4 + 1] = c[1];
-    data[i * 4 + 2] = c[2];
-    data[i * 4 + 3] = 1;
+  const data = new Float32Array(MAX_DENS_LAYERS * MAX_GRAD_STOPS * 4);
+  for (let L = 0; L < MAX_DENS_LAYERS; L++) {
+    const raw = layerStopsList?.[L];
+    const stops = normalizeRgbStops(
+      Array.isArray(raw) && raw.length && Array.isArray(raw[0]) ? raw : null,
+      DEFAULT_DENS_RGB,
+      DEFAULT_DENS_RGB2,
+    );
+    for (let i = 0; i < MAX_GRAD_STOPS; i++) {
+      const c = stops[Math.min(i, stops.length - 1)];
+      const o = (L * MAX_GRAD_STOPS + i) * 4;
+      data[o] = c[0];
+      data[o + 1] = c[1];
+      data[o + 2] = c[2];
+      data[o + 3] = i === 0 ? stops.length : 0;
+    }
   }
   device.queue.writeBuffer(colorBuf, 0, data);
 }
@@ -818,6 +933,26 @@ function pushGridLine(dst, i, ax, ay, az, bx, by, bz, r, g, b, a) {
   pushGridVert(dst, i, ax, ay, az, r, g, b, a);
   pushGridVert(dst, i + 1, bx, by, bz, r, g, b, a);
   return i + 2;
+}
+
+let themeGridMajor = 0x6b5a82;
+let themeGridMinor = 0x3d2f55;
+let themeBoxRgb = [0.35, 0.29, 0.45];
+let themeAxisXRgb = [0.9, 0.35, 0.38];
+let themeAxisYRgb = [0.35, 0.75, 0.48];
+let themeAxisZRgb = [0.79, 0.66, 0.91];
+
+/**
+ * @param {{ gridMajor?: number, gridMinor?: number, boxEdgeRgb?: number[], axisXRgb?: number[], axisYRgb?: number[], axisZRgb?: number[] }} colors
+ */
+export function applyClipGpuTheme(colors) {
+  if (colors.gridMajor) themeGridMajor = colors.gridMajor;
+  if (colors.gridMinor) themeGridMinor = colors.gridMinor;
+  if (colors.boxEdgeRgb) themeBoxRgb = colors.boxEdgeRgb;
+  if (colors.axisXRgb) themeAxisXRgb = colors.axisXRgb;
+  if (colors.axisYRgb) themeAxisYRgb = colors.axisYRgb;
+  if (colors.axisZRgb) themeAxisZRgb = colors.axisZRgb;
+  gridHalf = -1;
 }
 
 function hexToRgb(hex) {
@@ -844,8 +979,8 @@ export function syncClipGpuWorldGrid(half) {
   const step = size / divisions;
   const lo = -size / 2;
   const hi = size / 2;
-  const [majR, majG, majB] = hexToRgb(0x4a5568);
-  const [minR, minG, minB] = hexToRgb(0x2a3140);
+  const [majR, majG, majB] = hexToRgb(themeGridMajor);
+  const [minR, minG, minB] = hexToRgb(themeGridMinor);
   const maxVerts = 3 * (divisions + 1) * 2 * 2 + 6 + 24 + 16;
   const data = new Float32Array(maxVerts * 8);
   let n = 0;
@@ -876,13 +1011,13 @@ export function syncClipGpuWorldGrid(half) {
 
   // RGB axes
   const axisLen = extent + 0.25;
-  n = pushGridLine(data, n, 0, 0, 0, axisLen, 0, 0, 0.9, 0.35, 0.38, 0.95);
-  n = pushGridLine(data, n, 0, 0, 0, 0, axisLen, 0, 0.35, 0.75, 0.48, 0.95);
-  n = pushGridLine(data, n, 0, 0, 0, 0, 0, axisLen, 0.4, 0.65, 0.95, 0.95);
+  n = pushGridLine(data, n, 0, 0, 0, axisLen, 0, 0, themeAxisXRgb[0], themeAxisXRgb[1], themeAxisXRgb[2], 0.95);
+  n = pushGridLine(data, n, 0, 0, 0, 0, axisLen, 0, themeAxisYRgb[0], themeAxisYRgb[1], themeAxisYRgb[2], 0.95);
+  n = pushGridLine(data, n, 0, 0, 0, 0, 0, axisLen, themeAxisZRgb[0], themeAxisZRgb[1], themeAxisZRgb[2], 0.95);
 
   // Fit-box wireframe
   const bh = h;
-  const br = 0.23; const bg = 0.27; const bb = 0.35; const ba = 0.85;
+  const br = themeBoxRgb[0]; const bg = themeBoxRgb[1]; const bb = themeBoxRgb[2]; const ba = 0.85;
   const corners = [
     [-bh, -bh, -bh], [bh, -bh, -bh], [bh, bh, -bh], [-bh, bh, -bh],
     [-bh, -bh, bh], [bh, -bh, bh], [bh, bh, bh], [-bh, bh, bh],
@@ -1088,10 +1223,30 @@ function ensureVolumeBuf(floatCount) {
   }
 }
 
-/** Update density colors without re-baking volumes. */
-export function uploadSceneColors(colors) {
-  densColors = (colors || []).slice(0, MAX_DENS_LAYERS).map((c) => c || [0.55, 0.75, 1]);
-  writeLayerColors(densColors);
+/** @param {{ color?: number[], color2?: number[], colors?: number[][] }} d */
+function stopsFromLayer(d) {
+  if (Array.isArray(d?.colors) && d.colors.length) {
+    return d.colors.map((c) => [c[0], c[1], c[2]]);
+  }
+  return normalizeRgbStops(
+    null,
+    d?.color || DEFAULT_DENS_RGB,
+    d?.color2 || DEFAULT_DENS_RGB2,
+  );
+}
+
+/** Update density layer gradient colors without re-baking volumes.
+ * @param {number[][][]} layerStopsList per-layer list of [r,g,b] stops
+ */
+export function uploadSceneColors(layerStopsList) {
+  densGradStops = (layerStopsList || []).slice(0, MAX_DENS_LAYERS).map((stops) =>
+    normalizeRgbStops(
+      Array.isArray(stops) && stops.length && Array.isArray(stops[0]) ? stops : null,
+      DEFAULT_DENS_RGB,
+      DEFAULT_DENS_RGB2,
+    ),
+  );
+  writeLayerColors(densGradStops);
 }
 
 export function uploadSceneVolumes(scene) {
@@ -1104,10 +1259,7 @@ export function uploadSceneVolumes(scene) {
   const cons = scene.constraints || [];
   const dens = (scene.densLayers || []).slice(0, MAX_DENS_LAYERS);
   densLayerCount = dens.length;
-  densColors = dens.map((d) => {
-    const c = d.color || [0.55, 0.75, 1];
-    return [c[0], c[1], c[2]];
-  });
+  densGradStops = dens.map((d) => stopsFromLayer(d));
 
   // Constraints: dens+gx+gy+gz per keyframe (K=1 if static). Dens: one slab each.
   const consStride = 4;
@@ -1148,9 +1300,12 @@ export function uploadSceneVolumes(scene) {
     }
     const blend = c.blend || { i0: 0, i1: 0, t: 0 };
     const K = frames ? frames.length : 1;
+    const stops = stopsFromLayer(c);
     return {
       id: c.id || null,
-      color: c.color || [0.9, 0.45, 0.35],
+      color: stops[0],
+      color2: stops[stops.length - 1],
+      colors: stops,
       isoLevel: Number.isFinite(c.isoLevel) ? c.isoLevel : 0,
       base,
       frameStride: consStride * volN,
@@ -1171,7 +1326,7 @@ export function uploadSceneVolumes(scene) {
   sceneEpoch++;
   ensureVolumeBuf(Math.max(volN, scenePacked ? scenePacked.length : volN));
   if (scenePacked) device.queue.writeBuffer(volumeBuf, 0, scenePacked);
-  writeLayerColors(densColors);
+  writeLayerColors(densGradStops);
 
   profileBakeMs = profileBakeMs * 0.5 + (performance.now() - t0) * 0.5;
   profileGridM = M;
@@ -1281,10 +1436,10 @@ export async function initClipBakeGpu(viewportEl) {
         addressModeV: "clamp-to-edge",
       });
       colorBuf = device.createBuffer({
-        size: MAX_DENS_LAYERS * 16,
+        size: MAX_DENS_LAYERS * MAX_GRAD_STOPS * 16,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
       });
-      writeLayerColors([[0.55, 0.75, 1]]);
+      writeLayerColors([[DEFAULT_DENS_RGB, DEFAULT_DENS_RGB2]]);
       ensureVolumeBuf(8 * 8 * 8);
       await ensurePipelinesForDegree(4);
       if (viewportEl) attachClipGpuCanvas(viewportEl);
@@ -1500,7 +1655,7 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps, ndcOf
   profileGridM = Mgrid;
 
   if (scenePacked) device.queue.writeBuffer(volumeBuf, 0, scenePacked);
-  writeLayerColors(densColors);
+  writeLayerColors(densGradStops);
 
   let sceneView = sceneColorTex.createView();
   const swapView = ctx.getCurrentTexture().createView();
@@ -1548,13 +1703,16 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps, ndcOf
     const base0 = c.base + (c.i0 | 0) * stride;
     const base1 = c.base + (c.i1 | 0) * stride;
     const blendT = Number.isFinite(c.t) ? c.t : 0;
+    const c0 = c.color || DEFAULT_ISO_RGB;
+    const c1 = c.color2 || DEFAULT_ISO_RGB2;
+    const stops = c.colors || [c0, c1];
     device.queue.writeBuffer(
       drawParamBuf,
       0,
       packDrawParamsIso(
         marchW, marchH, Mgrid, steps, h, scale, c.isoLevel, base0, ro, Mat,
-        darken(c.color, 0.35), c.color,
-        base1, blendT,
+        c0, c1,
+        base1, blendT, stops,
       ),
     );
     const bg = device.createBindGroup({

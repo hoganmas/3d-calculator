@@ -385,6 +385,10 @@ export function compileExpr(raw) {
 
 /** Preset densities as LaTeX (shown in the MathLive field). */
 export const PRESETS = {
+  sincos: {
+    label: "y = sin(x) cos(x)",
+    latex: String.raw`y=\sin(x)\cos(z)`,
+  },
   blob: {
     label: "Gaussian blob",
     latex: String.raw`e^{-(x^{2}+y^{2}+z^{2})}`,

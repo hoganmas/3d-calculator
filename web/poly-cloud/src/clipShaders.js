@@ -111,13 +111,16 @@ void main() {
     sigma = min(sigma, 40.0);
     float absorb = exp(-sigma * ds);
     float opacity = 1.0 - absorb;
-    rgb += T * opacity * (uEmitColor * sigma + uAbsorbColor * 0.15);
+    float gt = clamp(p.y / uHalf * 0.5 + 0.5, 0.0, 1.0);
+    gt = clamp(mix(gt, length(p) / max(uHalf * 1.414214, 1e-6), 0.38), 0.0, 1.0);
+    vec3 emitGrad = mix(uAbsorbColor, uEmitColor, gt);
+    rgb += T * opacity * emitGrad * (1.0 + 0.42);
     T *= absorb;
     s += dt;
   }
 
   float a = 1.0 - T;
   if (a < 0.001) discard;
-  gl_FragColor = vec4(rgb * a, a);
+  gl_FragColor = vec4(rgb, a);
 }
 `;
