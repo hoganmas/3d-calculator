@@ -1,62 +1,81 @@
 # Source layout (`src/`)
 
-Vite entry: [`index.html`](index.html) → [`src/main.js`](src/main.js) (thin bootstrap).
+Vite entry: [`index.html`](index.html) → [`src/main.ts`](src/main.ts) (thin bootstrap).
 
 ```
 src/
-  main.js                 Wire modules, mount expression list, start loop
+  main.ts                 Wire modules, mount expression list, start loop
   app/
-    state.js              Shared mutable runtime state
-    dom.js                  DOM refs, settings dialog, panel resize
-    scene.js                THREE scene, camera, grid, lava background
-    compile.js              Expression compile + preset helpers
-    pipeline.js             uploadFit, bakeChebVolume, keyframes
-    webglFallback.js        WebGL Beer march (no WebGPU)
-    presentation.js         Resize, march downscale, GPU/CPU presentation
-    hud.js                  Metrics HUD + compile status
-    loop.js                 requestAnimationFrame loop
+    state.ts              Shared mutable runtime state
+    dom.ts                  DOM refs, settings dialog, panel resize
+    scene.ts                THREE scene, camera, grid, lava background
+    compile.ts              Expression compile + preset helpers
+    pipeline.ts             uploadFit, bakeChebVolume, keyframes
+    webglFallback.ts        WebGL Beer march (no WebGPU)
+    presentation.ts         Resize, march downscale, GPU/CPU presentation
+    hud.ts                  Metrics HUD + compile status
+    loop.ts                 requestAnimationFrame loop
   math/
-    fit.js                  LaTeX compile + Chebyshev least-squares fit
-    idct.js                 Separable Chebyshev IDCT → dens grid (+ grad)
-    limits.js               MAX_DEG and shared math constants
+    fit.ts                  LaTeX compile + Chebyshev least-squares fit
+    idct.ts                 Separable Chebyshev IDCT → dens grid (+ grad)
+    limits.ts               MAX_DEG and shared math constants
   model/
-    expressions.js          Expression list state, colors, roles
-    params.js               Free-parameter values + animation
-    keyframes.js            Animated-param keyframe cache + GPU blend
+    expressions.ts          Expression list state, colors, roles
+    params.ts               Free-parameter values + animation
+    keyframes.ts            Animated-param keyframe cache + GPU blend
   render/
-    camera.js               NDC → world ray helpers
-    background.js           Three.js fullscreen backdrop shader
+    camera.ts               NDC → world ray helpers
+    background.ts           Three.js fullscreen backdrop shader
     webgl/
-      marchShaders.js       WebGL Beer–Lambert fallback GLSL
+      marchShaders.ts       WebGL Beer–Lambert fallback GLSL
     webgpu/
-      march.js              WebGPU init, frame graph, public exports
-      gpuState.js           Shared GPU device / texture state
-      uniforms.js           Draw-param packing + layer color upload
-      sceneUpload.js        Volume upload + keyframe patch
-      pipelines.js          Shader module compile + pipeline creation
+      march.ts              Public API (re-exports)
+      marchTypes.ts         Shared march types + GPU handle guards
+      marchReadiness.ts     Ready checks + iso interp mode
+      marchProfile.ts       GPU timing / profiling
+      marchCanvas.ts        Overlay canvas + offscreen targets
+      marchInit.ts          Device init + pipeline bootstrap
+      gridOverlay.ts        World grid, axes, axis-label billboards
+      renderFrame.ts        Per-frame iso / SSAO / Beer / FXAA pass graph
+      gpuState.ts           Shared GPU device / texture state
+      uniforms.ts           Draw-param packing + layer color upload
+      sceneUpload.ts        Volume upload + keyframe patch
+      pipelines.ts          Shader module compile + pipeline creation
       shaders/
-        compose.js          Load .wgsl ?raw, inject constants
+        compose.ts          Load .wgls ?raw, inject constants
         common/gradient.wgsl
         isoHermite.wgsl
         isoTrilinear.wgsl
         beer.wgsl, grid.wgsl, axisLabel.wgsl, fxaa.wgsl, ssao.wgsl
+  types/
+    models.ts               Shared TS domain types (ExprItem, SceneBake, …)
   ui/
-    expressionList.js       Sidebar: MathLive rows, sliders, play
-    liquidSlider.js         Glass-style range slider thumbs
-    theme.js / theme.css
+    expr-sidebar/           Svelte expression list (MathLive, drag, popovers)
+      mount.ts              Public mountExprList API
+      ExprSidebar.svelte    List host: render/sync API, drag controller
+      ExprRow.svelte        Single expression row + math-field
+      ParamRail.svelte      Parameter slider / animate controls
+      helpers.ts            MathLive + row helpers
+      popovers.ts           Gradient / animation popovers
+      dragReorder.ts        Pointer drag-reorder controller
+    expressionList.ts       Re-export mountExprList
+    popover.ts              Floating UI popover helper
+    liquidSlider.ts         Glass-style range slider thumbs
+    theme.ts / theme.css
+    app.css                 Panel / expr-list / settings layout styles
 ```
 
 ## Data flow
 
 ```
-MathLive (ui/expressionList)
+MathLive (ui/expr-sidebar)
   → compile + classify (app/compile, math/fit)
   → fit Chebyshev coeffs (math/fit)
   → IDCT volumes (math/idct)
   → upload + march (app/pipeline → render/webgpu/march, or app/webglFallback)
 ```
 
-Animated free parameters bake keyframes in `model/keyframes.js` (cold fit, hot GPU lerp).
+Animated free parameters bake keyframes in `model/keyframes.ts` (cold fit, hot GPU lerp).
 
 ## Layer rules
 
@@ -67,12 +86,13 @@ Animated free parameters bake keyframes in `model/keyframes.js` (cold fit, hot G
 | `render/` | `math/`, `model/`, sibling render modules |
 | `ui/` | `math/`, `model/`, sibling `ui/` |
 | `app/` | all of the above (orchestration) |
-| `main.js` | `app/`, `ui/` |
+| `main.ts` | `app/`, `ui/` |
 
-Avoid importing `app/` or `main.js` from `math/`, `model/`, `render/`, or `ui/`.
+Avoid importing `app/` or `main.ts` from `math/`, `model/`, `render/`, or `ui/`.
 
 ## Notes
 
 - **WGSL lives in `.wgsl` files** under `render/webgpu/shaders/`; Hermite vs trilinear iso uses two separate shaders selected at pipeline build.
 - **Legacy names** — some internals still say `clip*` (e.g. `clipQuad`, `[clip-grid]` logs).
+- **TS migration** — `web/src/` is fully TypeScript; imports use `.js` extensions. Vite resolves missing `.js` to sibling `.ts` via `resolveTsFromJs` in `vite.config.js`. WebGPU types from `@webgpu/types`.
 - **Pipeline write-up** — [`research/poly/notes/cheb-idct-volume.md`](../research/poly/notes/cheb-idct-volume.md).

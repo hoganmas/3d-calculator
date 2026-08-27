@@ -1,0 +1,235 @@
+/** Shared domain types for Laplacian (expressions → bake → GPU). */
+
+export type ExprRole = "auto" | "density" | "constraint";
+export type AnimMode = "pingpong" | "loop";
+export type ExprKind = "parameter" | "constraint" | "definition" | "bare";
+export type LayerRole = "parameter" | "density" | "constraint";
+
+export interface ExprItem {
+  id: string;
+  latex: string;
+  color: string;
+  color2: string;
+  colors: string[];
+  role: ExprRole;
+  enabled: boolean;
+  sliderMin: number;
+  sliderMax: number;
+  sliderSpeed: number;
+  sliderAnimating: boolean;
+  sliderPhase: number;
+  sliderAnimMode: AnimMode;
+  autoParam: boolean;
+}
+
+export interface ParamState {
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  animating: boolean;
+  speed: number;
+  phase: number;
+  animMode: AnimMode;
+  latex: string;
+  exprId: string | null;
+  driven: boolean;
+  freeParams: string[];
+  error: string | null;
+}
+
+export interface KeyframeBlend {
+  i0: number;
+  i1: number;
+  t: number;
+}
+
+export interface KeyframeFrame {
+  dens: Float32Array;
+  gx?: Float32Array;
+  gy?: Float32Array;
+  gz?: Float32Array;
+  cheb?: Float32Array;
+  fitRel?: number;
+}
+
+export interface DensLayer {
+  id?: string;
+  dens: Float32Array;
+  color: number[];
+  color2: number[];
+  colors?: number[][];
+  cheb?: Float32Array;
+  fitRel?: number;
+  keyframes?: KeyframeFrame[];
+}
+
+export interface ConstraintLayer {
+  id?: string;
+  dens?: Float32Array;
+  gx?: Float32Array;
+  gy?: Float32Array;
+  gz?: Float32Array;
+  color: number[];
+  color2: number[];
+  colors?: number[][];
+  isoLevel: number;
+  cheb?: Float32Array;
+  fitRel?: number;
+  keyframes?: KeyframeFrame[];
+  blend?: KeyframeBlend;
+}
+
+export interface SceneBake {
+  densLayers: DensLayer[];
+  constraints: ConstraintLayer[];
+  M: number;
+  dens: Float32Array | null;
+  deg?: number;
+  half?: number;
+  fittedCount?: number;
+  keyframedCount?: number;
+  keyframeBaked?: boolean;
+  densKeyframedCpu?: boolean;
+}
+
+export interface ExprMeta {
+  kind: ExprKind | "mixed";
+  shade: string;
+  isoLevel: number;
+  label: string;
+}
+
+export interface FitTiming {
+  sampleMs: number;
+  chebMs: number;
+  monoMs: number;
+  l2Ms: number;
+  totalMs: number;
+  uploadMs?: number;
+  fittedCount?: number;
+  keyframedCount?: number;
+  kfBakeMs?: number;
+  kfLerpMs?: number;
+  kfK?: number;
+  kfSampleMs?: number;
+  kfChebMs?: number;
+  kfIdctMs?: number;
+  kfGradMs?: number;
+}
+
+export interface CompiledLayer {
+  item: ExprItem;
+  role: LayerRole;
+  fn: (x: number, y: number, z: number) => number;
+  compiled: {
+    freeParams: string[];
+    isoLevel?: number;
+    kind?: ExprKind;
+  };
+}
+
+export interface ExprListApi {
+  render: (focus?: { id: string; pos?: number } | null) => void;
+  syncAllParamSliders?: () => void;
+  syncParamChrome?: () => boolean;
+}
+
+export type ClassifiedShade = "iso" | "volume" | "none";
+
+export interface ClassifiedExpr {
+  kind: ExprKind;
+  shade: ClassifiedShade;
+  isoLevel: number;
+  compileLatex: string;
+  label: string;
+  paramName?: string;
+}
+
+/** Field expressions (not parameter rows). */
+export type FieldKind = "constraint" | "definition" | "bare";
+
+export interface CompiledExpr {
+  freeParams: string[];
+  usesSpace: boolean;
+  kind: FieldKind;
+  shade: ClassifiedShade;
+  isoLevel: number;
+  classifyLabel: string;
+  bind: (params?: Record<string, number>) => (x: number, y: number, z: number) => number;
+}
+
+export interface CompiledParam {
+  name: string;
+  rhsLatex: string;
+  freeParams: string[];
+  isConstant: boolean;
+  constantValue: number | null;
+  eval: (scope?: Record<string, number>) => number;
+}
+
+export interface PresetParamSeed {
+  value?: number;
+  min?: number;
+  max?: number;
+  speed?: number;
+  animate?: boolean;
+  animating?: boolean;
+  phase?: number;
+  animMode?: AnimMode;
+}
+
+export interface PresetDef {
+  label: string;
+  latex?: string;
+  expressions?: Partial<ExprItem>[];
+  params?: Record<string, PresetParamSeed>;
+}
+
+export interface ChebFitTiming {
+  sampleMs: number;
+  chebMs: number;
+  monoMs: number;
+  l2Ms: number;
+  totalMs: number;
+}
+
+export interface ChebFitResult {
+  cheb: Float32Array;
+  mono: Float32Array | null;
+  deg: number;
+  half: number;
+  fitRelL2: number;
+  fMin: number;
+  fMax: number;
+  timing: ChebFitTiming;
+}
+
+export interface Idct3DResult {
+  dens: Float32Array;
+  M: number;
+  deg: number;
+  n: number;
+}
+
+export interface IdctGrad3DResult {
+  gx: Float32Array;
+  gy: Float32Array;
+  gz: Float32Array;
+  M: number;
+  deg: number;
+  n: number;
+}
+
+export interface CompileLayerResult {
+  item: ExprItem;
+  compiled: CompiledExpr;
+  role: LayerRole;
+  fn: (x: number, y: number, z: number) => number;
+}
+
+export interface CompileAllResult {
+  freeParams: string[];
+  layers: CompileLayerResult[];
+  warnings: string[];
+}
