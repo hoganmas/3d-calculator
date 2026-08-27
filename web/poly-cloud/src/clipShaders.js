@@ -59,8 +59,7 @@ float chebIndex(float xi) {
 }
 
 float sampleVolume(vec3 p) {
-  vec3 xi = p / uHalf;
-  if (abs(xi.x) > 1.0 || abs(xi.y) > 1.0 || abs(xi.z) > 1.0) return 0.0;
+  vec3 xi = clamp(p / uHalf, vec3(-1.0), vec3(1.0));
   float fx = chebIndex(xi.x);
   float fy = chebIndex(xi.y);
   float fz = chebIndex(xi.z);

@@ -457,6 +457,20 @@ renderer.setPixelRatio(1);
 renderer.setClearColor(0x000000, 0);
 els.viewport.appendChild(renderer.domElement);
 
+/** Axis labels on a higher canvas so isosurfaces (WebGPU or clip quad) never cover them. */
+const labelRenderer = new THREE.WebGLRenderer({
+  antialias: true,
+  alpha: true,
+  powerPreference: "low-power",
+});
+labelRenderer.setPixelRatio(1);
+labelRenderer.setClearColor(0x000000, 0);
+labelRenderer.domElement.className = "axis-labels";
+labelRenderer.domElement.style.cssText =
+  "position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2;";
+els.viewport.appendChild(labelRenderer.domElement);
+const labelScene = new THREE.Scene();
+
 let themeColors = readThemeColors();
 const lavaBg = createLavaBackground(themeColors);
 applyClipGpuTheme(themeColors);
@@ -508,7 +522,7 @@ const clipUniforms = {
   uGridM: { value: 2 },
   uFbW: { value: 1 },
   uFbH: { value: 1 },
-  uHalf: { value: 2 },
+  uHalf: { value: 2.5 },
   uScale: { value: 2.5 },
   uSteps: { value: 32 },
   uCameraPos: { value: new THREE.Vector3() },
@@ -548,9 +562,9 @@ scene.add(boxHelper);
 const worldGrid = new THREE.Group();
 worldGrid.renderOrder = -1;
 scene.add(worldGrid);
-/** Axis letter sprites — stay on WebGL (billboards); lines depth-test on GPU. */
+/** Axis letter sprites — own overlay canvas so volumes never cover them. */
 const worldLabels = new THREE.Group();
-scene.add(worldLabels);
+labelScene.add(worldLabels);
 
 function makeAxisLabel(text, color, position, labelStroke) {
   // High-res canvas so sprites stay sharp under orbit / retina.
@@ -584,13 +598,14 @@ function makeAxisLabel(text, color, position, labelStroke) {
   const mat = new THREE.SpriteMaterial({
     map: tex,
     transparent: true,
-    depthTest: true,
+    depthTest: false,
     depthWrite: false,
     sizeAttenuation: true,
   });
   const spr = new THREE.Sprite(mat);
   spr.scale.set(0.42, 0.42, 0.42);
   spr.position.copy(position);
+  spr.renderOrder = 10;
   return spr;
 }
 
@@ -964,6 +979,10 @@ function applyDisplaySize(rw, rh, vw, vh, { markClipDirty = true } = {}) {
   canvas.style.height = "100%";
   canvas.style.position = "absolute";
   canvas.style.inset = "0";
+  labelRenderer.setSize(rw, rh, false);
+  const labelCanvas = labelRenderer.domElement;
+  labelCanvas.style.width = "100%";
+  labelCanvas.style.height = "100%";
   if (markClipDirty) clipDirty = true;
   if (els.hud) els.hud.textContent = hudText();
 }
@@ -1036,8 +1055,8 @@ function syncClipPresentation() {
   );
   const gpu = useGpuClipPath() && hasVolume;
   clipQuad.visible = !gpu && hasVolume && Boolean(worldCheb);
-  // Grid/box/labels live on the WebGPU overlay when the volume path is active
-  // so they can depth-test against isosurfaces without a texture copy.
+  // Grid/box depth-test on the WebGPU overlay; axis labels stay on a
+  // higher WebGL canvas so isosurfaces never cover them.
   worldGrid.visible = !gpu;
   boxHelper.visible = !gpu;
   setClipGpuCanvasVisible(isClipBakeGpuReady());
@@ -1697,6 +1716,8 @@ function frame(rafNow) {
       densSubmittedThisFrame = false;
     }
   }
+
+  labelRenderer.render(labelScene, camera);
 
   const dt = performance.now() - t0;
   cpuMsSmooth = cpuMsSmooth * 0.85 + dt * 0.15;

@@ -116,8 +116,9 @@ fn chebIndex(xi: f32) -> f32 {
 
 fn sampleFieldBase(base: u32, p: vec3f) -> f32 {
   let half = draw.half;
-  let xi = p / half;
-  if (abs(xi.x) > 1.0 || abs(xi.y) > 1.0 || abs(xi.z) > 1.0) { return 0.0; }
+  // Clamp to the fit domain instead of returning 0 outside — a hard exterior
+  // zero creates discontinuous normals / grainy isos on the box faces.
+  let xi = clamp(p / half, vec3f(-1.0), vec3f(1.0));
   let fx = chebIndex(xi.x); let fy = chebIndex(xi.y); let fz = chebIndex(xi.z);
   let x0 = i32(floor(fx)); let y0 = i32(floor(fy)); let z0 = i32(floor(fz));
   let tx = clamp(fx - f32(x0), 0.0, 1.0);
@@ -267,11 +268,15 @@ fn fsMain(in: VSOut) -> FSOut {
   let tmin = min(tA, tB); let tmax = max(tA, tB);
   var tEnter = max(max(max(tmin.x, tmin.y), tmin.z), 0.0);
   let tExit = min(min(tmax.x, tmax.y), tmax.z);
-  if (!(tExit > tEnter + 1e-6)) {
+  // Nudge off the faces so we don't march exactly on the discontinuous boundary.
+  let edgeEps = (tExit - tEnter) * 1e-4 + 1e-5;
+  tEnter = tEnter + edgeEps;
+  let tExitIn = tExit - edgeEps;
+  if (!(tExitIn > tEnter + 1e-6)) {
     discard;
     return out;
   }
-  let hit = marchIso(ro, rd, tEnter, tExit);
+  let hit = marchIso(ro, rd, tEnter, tExitIn);
   // Miss: discard so we don't overwrite a closer prior iso's color/depth.
   if (hit.color.a < 0.5) {
     discard;
@@ -336,8 +341,8 @@ fn chebIndex(xi: f32) -> f32 {
   return f32(draw.gridM) / 3.141592653589793 * acos(x) - 0.5;
 }
 fn sampleLayer(base: u32, p: vec3f) -> f32 {
-  let half = draw.half; let xi = p / half;
-  if (abs(xi.x) > 1.0 || abs(xi.y) > 1.0 || abs(xi.z) > 1.0) { return 0.0; }
+  let half = draw.half;
+  let xi = clamp(p / half, vec3f(-1.0), vec3f(1.0));
   let fx = chebIndex(xi.x); let fy = chebIndex(xi.y); let fz = chebIndex(xi.z);
   let x0 = i32(floor(fx)); let y0 = i32(floor(fy)); let z0 = i32(floor(fz));
   let tx = clamp(fx - f32(x0), 0.0, 1.0);
@@ -716,6 +721,8 @@ fn fsMain(in: VSOut) -> @location(0) vec4f {
     let v = posS - pos0;
     let dist = length(v);
     if (dist < 1e-5) { continue; }
+    // Reject silhouette / box-edge samples (large ray-t discontinuity).
+    if (abs(tS - t0) > p.radius * 2.5) { continue; }
     let vn = v / dist;
     // Hemisphere contribution + range falloff (Alchemy-ish).
     let nd = max(dot(n, vn) - p.bias, 0.0);
@@ -821,7 +828,7 @@ let lastPresentAt = 0;
 let profileMethod = "";
 let profileGridM = 0;
 
-const PIPELINE_EPOCH = 21;
+const PIPELINE_EPOCH = 22;
 let builtEpoch = -1;
 
 /**
