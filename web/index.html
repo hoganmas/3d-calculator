@@ -23,18 +23,6 @@
           </div>
           <div class="brand-row-actions">
             <button
-              id="reset"
-              class="icon-btn has-tooltip"
-              type="button"
-              aria-label="Focus view"
-              data-tooltip="Focus view"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75">
-                <circle cx="12" cy="12" r="3" />
-                <path stroke-linecap="round" d="M12 2v4M12 18v4M2 12h4M18 12h4" />
-              </svg>
-            </button>
-            <button
               id="openWebmcpSetup"
               class="icon-btn has-tooltip"
               type="button"
@@ -78,6 +66,33 @@
         tabindex="0"
       ></div>
       <main id="viewport">
+        <div class="viewport-toolbar">
+          <button
+            id="togglePanel"
+            class="icon-btn has-tooltip"
+            type="button"
+            aria-label="Hide sidebar"
+            aria-expanded="true"
+            aria-controls="panel"
+            data-tooltip="Hide sidebar"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75">
+              <path stroke-linecap="round" d="M4 7h16M4 12h16M4 17h16" />
+            </svg>
+          </button>
+          <button
+            id="reset"
+            class="icon-btn has-tooltip"
+            type="button"
+            aria-label="Focus view"
+            data-tooltip="Focus view"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75">
+              <circle cx="12" cy="12" r="3" />
+              <path stroke-linecap="round" d="M12 2v4M12 18v4M2 12h4M18 12h4" />
+            </svg>
+          </button>
+        </div>
         <div id="hud">Laplacian</div>
       </main>
     </div>

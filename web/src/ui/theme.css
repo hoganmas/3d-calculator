@@ -1,9 +1,49 @@
 /* Layout tokens (theme-independent) */
+@property --panel-progress {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
 :root {
   --panel-inset: 12px;
   --panel-radius: 16px;
   --panel-w: 360px;
+  --panel-h: 280px;
   --glass-blur: 22px;
+  --panel-transition-duration: 0.34s;
+  --panel-transition-ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --panel-progress: 0;
+  --panel-cover-w: var(--panel-w);
+  --panel-cover-h: 0px;
+}
+
+html {
+  transition: --panel-progress var(--panel-transition-duration) var(--panel-transition-ease);
+}
+
+html[data-panel-layout="horizontal"] {
+  --panel-cover-w: 0px;
+  --panel-cover-h: calc(var(--panel-h) * (1 - var(--panel-progress)));
+}
+
+html:not([data-panel-layout="horizontal"]) {
+  --panel-cover-w: calc(var(--panel-w) * (1 - var(--panel-progress)));
+  --panel-cover-h: 0px;
+}
+
+html[data-panel-collapsed="true"] {
+  --panel-progress: 1;
+}
+
+html[data-panel-init] {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    transition: none;
+  }
 }
 
 /* Dark — warm purple glass */

@@ -1,5 +1,14 @@
 import { PRESETS } from "../math/fit.js";
 import { getThemePref, setThemePref, type ThemePref } from "../ui/theme.js";
+import {
+  isHorizontalPanelLayout,
+  isPanelCollapsed,
+  panelTransitionMs,
+  PANEL_LAYOUT_MQ,
+  readPanelCollapsedPref,
+  readPanelInset,
+  setPanelCollapsed,
+} from "./panelLayout.js";
 
 function el<T extends HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
@@ -16,6 +25,7 @@ export interface DomElements {
   marchDownscale: HTMLInputElement;
   marchScaleLabel: HTMLElement | null;
   reset: HTMLButtonElement;
+  togglePanel: HTMLButtonElement | null;
   err: HTMLElement;
   viewport: HTMLElement;
   hud: HTMLElement;
@@ -38,6 +48,7 @@ export const els: DomElements = {
   marchDownscale: el("marchDownscale"),
   marchScaleLabel: document.getElementById("marchScaleLabel"),
   reset: el("reset"),
+  togglePanel: document.getElementById("togglePanel") as HTMLButtonElement | null,
   err: el("err"),
   viewport: el("viewport"),
   hud: el("hud"),
@@ -87,25 +98,33 @@ export function closeSettingsDialog() {
   els.settingsDialog.close();
 }
 
-/** Drag the sidebar edge to change --panel-w; persists in localStorage. */
+/** Drag the sidebar edge to change --panel-w (vertical) or --panel-h (horizontal). */
 export function initPanelResize(onResize: () => void) {
   const el = document.getElementById("panelResize");
   if (!el) return;
   const grip: HTMLElement = el;
-  const PANEL_MIN = 240;
-  const PANEL_MAX = 720;
-  const STORAGE_KEY = "poly-cloud-panel-w";
+  const PANEL_W_MIN = 240;
+  const PANEL_W_MAX = 720;
+  const PANEL_H_MIN = 160;
+  const PANEL_H_MAX = 720;
+  const STORAGE_W = "poly-cloud-panel-w";
+  const STORAGE_H = "poly-cloud-panel-h";
 
   function panelInset() {
-    const raw = parseFloat(
-      getComputedStyle(document.documentElement).getPropertyValue("--panel-inset"),
-    );
-    return Number.isFinite(raw) ? raw : 12;
+    return readPanelInset();
   }
 
   function clampW(w: number) {
-    const max = Math.min(PANEL_MAX, Math.max(PANEL_MIN, window.innerWidth - 2 * panelInset() - 160));
-    return Math.round(Math.min(max, Math.max(PANEL_MIN, w)));
+    const max = Math.min(PANEL_W_MAX, Math.max(PANEL_W_MIN, window.innerWidth - 2 * panelInset() - 160));
+    return Math.round(Math.min(max, Math.max(PANEL_W_MIN, w)));
+  }
+
+  function clampH(h: number) {
+    const max = Math.min(
+      PANEL_H_MAX,
+      Math.max(PANEL_H_MIN, window.innerHeight - 2 * panelInset() - 160),
+    );
+    return Math.round(Math.min(max, Math.max(PANEL_H_MIN, h)));
   }
 
   function applyW(w: number) {
@@ -115,22 +134,58 @@ export function initPanelResize(onResize: () => void) {
     return px;
   }
 
+  function applyH(h: number) {
+    const px = clampH(h);
+    document.documentElement.style.setProperty("--panel-h", `${px}px`);
+    grip.setAttribute("aria-valuenow", String(px));
+    return px;
+  }
+
+  function syncGripChrome() {
+    const horizontal = isHorizontalPanelLayout();
+    grip.setAttribute("aria-orientation", horizontal ? "horizontal" : "vertical");
+    document.documentElement.dataset.panelLayout = horizontal ? "horizontal" : "vertical";
+    if (horizontal) {
+      grip.setAttribute("aria-valuemin", String(PANEL_H_MIN));
+      grip.setAttribute("aria-valuemax", String(PANEL_H_MAX));
+      const cur =
+        parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--panel-h")) || 280;
+      grip.setAttribute("aria-valuenow", String(Math.round(cur)));
+    } else {
+      grip.setAttribute("aria-valuemin", String(PANEL_W_MIN));
+      grip.setAttribute("aria-valuemax", String(PANEL_W_MAX));
+      const cur =
+        parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--panel-w")) || 360;
+      grip.setAttribute("aria-valuenow", String(Math.round(cur)));
+    }
+  }
+
   try {
-    const saved = Number(localStorage.getItem(STORAGE_KEY));
-    if (Number.isFinite(saved) && saved > 0) applyW(saved);
+    const savedW = Number(localStorage.getItem(STORAGE_W));
+    if (Number.isFinite(savedW) && savedW > 0) applyW(savedW);
+  } catch {
+    /* ignore */
+  }
+  try {
+    const savedH = Number(localStorage.getItem(STORAGE_H));
+    if (Number.isFinite(savedH) && savedH > 0) applyH(savedH);
   } catch {
     /* ignore */
   }
 
-  grip.setAttribute("aria-valuemin", String(PANEL_MIN));
-  grip.setAttribute("aria-valuemax", String(PANEL_MAX));
+  syncGripChrome();
 
   let dragging = false;
 
   function onMove(ev: PointerEvent | TouchEvent) {
     if (!dragging) return;
-    const x = "touches" in ev ? ev.touches[0].clientX : ev.clientX;
-    applyW(x - panelInset());
+    if (isHorizontalPanelLayout()) {
+      const y = "touches" in ev ? ev.touches[0].clientY : ev.clientY;
+      applyH(y - panelInset());
+    } else {
+      const x = "touches" in ev ? ev.touches[0].clientX : ev.clientX;
+      applyW(x - panelInset());
+    }
     onResize();
   }
 
@@ -143,10 +198,17 @@ export function initPanelResize(onResize: () => void) {
     window.removeEventListener("pointerup", onUp);
     window.removeEventListener("pointercancel", onUp);
     try {
-      const cur = parseFloat(
-        getComputedStyle(document.documentElement).getPropertyValue("--panel-w"),
-      );
-      if (Number.isFinite(cur)) localStorage.setItem(STORAGE_KEY, String(cur));
+      if (isHorizontalPanelLayout()) {
+        const cur = parseFloat(
+          getComputedStyle(document.documentElement).getPropertyValue("--panel-h"),
+        );
+        if (Number.isFinite(cur)) localStorage.setItem(STORAGE_H, String(cur));
+      } else {
+        const cur = parseFloat(
+          getComputedStyle(document.documentElement).getPropertyValue("--panel-w"),
+        );
+        if (Number.isFinite(cur)) localStorage.setItem(STORAGE_W, String(cur));
+      }
     } catch {
       /* ignore */
     }
@@ -154,7 +216,6 @@ export function initPanelResize(onResize: () => void) {
   }
 
   grip.addEventListener("pointerdown", (ev) => {
-    if (window.matchMedia("(max-width: 800px)").matches) return;
     ev.preventDefault();
     dragging = true;
     grip.classList.add("dragging");
@@ -166,9 +227,24 @@ export function initPanelResize(onResize: () => void) {
   });
 
   grip.addEventListener("keydown", (ev) => {
+    const horizontal = isHorizontalPanelLayout();
+    const step = ev.shiftKey ? 40 : 16;
+    if (horizontal) {
+      const cur =
+        parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--panel-h")) || 280;
+      if (ev.key === "ArrowUp") {
+        ev.preventDefault();
+        applyH(cur - step);
+        onResize();
+      } else if (ev.key === "ArrowDown") {
+        ev.preventDefault();
+        applyH(cur + step);
+        onResize();
+      }
+      return;
+    }
     const cur =
       parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--panel-w")) || 360;
-    const step = ev.shiftKey ? 40 : 16;
     if (ev.key === "ArrowLeft") {
       ev.preventDefault();
       applyW(cur - step);
@@ -178,5 +254,54 @@ export function initPanelResize(onResize: () => void) {
       applyW(cur + step);
       onResize();
     }
+  });
+
+  const mq = window.matchMedia(PANEL_LAYOUT_MQ);
+  mq.addEventListener("change", () => {
+    syncGripChrome();
+    onResize();
+  });
+}
+
+function syncPanelToggleChrome(btn: HTMLButtonElement) {
+  const collapsed = isPanelCollapsed();
+  const label = collapsed ? "Show sidebar" : "Hide sidebar";
+  btn.setAttribute("aria-label", label);
+  btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  btn.dataset.tooltip = label;
+}
+
+function runPanelTransition(onResize: () => void) {
+  const duration = panelTransitionMs();
+  if (duration <= 0) {
+    onResize();
+    return;
+  }
+  const start = performance.now();
+  const tick = (now: number) => {
+    onResize();
+    if (now - start < duration + 32) requestAnimationFrame(tick);
+    else onResize();
+  };
+  requestAnimationFrame(tick);
+}
+
+/** Toggle sidebar visibility (wide left dock or narrow top strip). */
+export function initPanelToggle(onResize: () => void) {
+  const btn = els.togglePanel;
+  if (!btn) return;
+
+  const root = document.documentElement;
+  root.dataset.panelInit = "";
+  setPanelCollapsed(readPanelCollapsedPref());
+  syncPanelToggleChrome(btn);
+  requestAnimationFrame(() => {
+    delete root.dataset.panelInit;
+  });
+
+  btn.addEventListener("click", () => {
+    setPanelCollapsed(!isPanelCollapsed());
+    syncPanelToggleChrome(btn);
+    runPanelTransition(onResize);
   });
 }

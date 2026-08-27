@@ -22,6 +22,7 @@ import {
 } from "./scene.js";
 import {
   compositionNdcOffsetX,
+  compositionNdcOffsetY,
   marchFramebufferSize,
   syncClipPresentation,
 } from "./presentation.js";
@@ -97,9 +98,13 @@ export function syncClipFiberUniforms() {
   // CPU/WebGL path draws into the full Three.js canvas — NDC must use that
   // buffer size, not the march-downscale size (that is GPU-canvas only).
   camera.updateMatrixWorld(true);
-  const { vw } = viewportSize();
+  const { vw, vh } = viewportSize();
   const { sx, sy } = perspectiveDirScale(camera);
-  const M = offsetDirMatrix(ndcToDirMatrix(camera, sx, sy), compositionNdcOffsetX(vw));
+  const M = offsetDirMatrix(
+    ndcToDirMatrix(camera, sx, sy),
+    compositionNdcOffsetX(vw),
+    compositionNdcOffsetY(vh),
+  );
   clipUniforms.uFbW.value = Math.max(1, renderer.domElement.width);
   clipUniforms.uFbH.value = Math.max(1, renderer.domElement.height);
   clipUniforms.uDirM.value.set(M[0], M[1], M[2], M[3], M[4], M[5], M[6], M[7], M[8]);
@@ -166,6 +171,7 @@ export function drawClipGpuFrame() {
     scale: clipUniforms.uScale.value,
     steps: clipUniforms.uSteps.value | 0,
     ndcOffsetX: compositionNdcOffsetX(vw),
+    ndcOffsetY: compositionNdcOffsetY(vh),
   });
   const submitMs = performance.now() - t0;
   if (ok) {

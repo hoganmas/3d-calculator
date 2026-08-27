@@ -16,7 +16,7 @@ struct DrawParams {
 
 @group(0) @binding(0) var<uniform> draw: DrawParams;
 @group(0) @binding(1) var<storage, read> volume: array<f32>;
-@group(0) @binding(2) var occlTex: texture_2d<f32>;
+@group(0) @binding(2) var occlIsoTex: texture_2d<f32>;
 @group(0) @binding(3) var<storage, read> layerGrads: array<vec4f>;
 
 {{GRADIENT_WGSL}}
@@ -31,6 +31,13 @@ fn sampleLayerGrad(L: u32, t: f32) -> vec3f {
 }
 
 struct VSOut { @builtin(position) pos: vec4f, }
+
+struct FSOut {
+  @location(0) color: vec4f,
+  @location(1) occl: vec4f,
+}
+
+const OCCL_ALPHA: f32 = 0.15;
 
 @vertex
 fn vsMain(@builtin(vertex_index) vi: u32) -> VSOut {
@@ -64,7 +71,10 @@ fn sampleLayer(base: u32, p: vec3f) -> f32 {
 }
 
 @fragment
-fn fsMain(in: VSOut) -> @location(0) vec4f {
+fn fsMain(in: VSOut) -> FSOut {
+  var out: FSOut;
+  out.occl = vec4f(1.0, 0.0, 0.0, 1.0);
+
   let fbW = f32(draw.fbW); let fbH = f32(draw.fbH);
   let ndcX = -1.0 + 2.0 * in.pos.x / fbW;
   let ndcY = 1.0 - 2.0 * in.pos.y / fbH;
@@ -81,14 +91,21 @@ fn fsMain(in: VSOut) -> @location(0) vec4f {
   let tmin = min(tA, tB); let tmax = max(tA, tB);
   var tEnter = max(max(max(tmin.x, tmin.y), tmin.z), 0.0);
   var tExit = min(min(tmax.x, tmax.y), tmax.z);
-  if (!(tExit > tEnter + 1e-6)) { return vec4f(0.0); }
+  if (!(tExit > tEnter + 1e-6)) {
+    out.color = vec4f(0.0);
+    return out;
+  }
 
   let far = max(tExit, half * 4.0);
   let px = u32(clamp(floor(in.pos.x), 0.0, fbW - 1.0));
   let py = u32(clamp(floor(in.pos.y), 0.0, fbH - 1.0));
-  let dSurf = textureLoad(occlTex, vec2u(px, py), 0).r;
-  if (dSurf < 0.999) { tExit = min(tExit, dSurf * far); }
-  if (!(tExit > tEnter + 1e-6)) { return vec4f(0.0); }
+  let isoD = textureLoad(occlIsoTex, vec2u(px, py), 0).r;
+  if (isoD < 0.999) { tExit = min(tExit, isoD * far); }
+  if (!(tExit > tEnter + 1e-6)) {
+    out.color = vec4f(0.0);
+    out.occl = vec4f(isoD, 0.0, 0.0, 1.0);
+    return out;
+  }
 
   var steps = draw.steps;
   if (steps < 8u) { steps = 8u; }
@@ -100,6 +117,7 @@ fn fsMain(in: VSOut) -> @location(0) vec4f {
   let nLay = min(draw.layerCount, {{MAX_DENS_LAYERS}}u);
 
   var rgb = vec3f(0.0); var T = 1.0; var s = tEnter + 0.5 * dt;
+  var densD = 1.0;
   for (var i: u32 = 0u; i < 96u; i++) {
     if (i >= steps) { break; }
     if (T < 0.002) { break; }
@@ -125,10 +143,19 @@ fn fsMain(in: VSOut) -> @location(0) vec4f {
       // Beer emission + soft ambient so wispy low-density regions stay luminous.
       rgb += T * opacity * col * (1.0 + 0.42);
       T *= absorb;
+      let alpha = 1.0 - T;
+      if (densD >= 0.999 && alpha >= OCCL_ALPHA) {
+        densD = clamp(s / far, 0.0, 0.999);
+      }
     }
     s += dt;
   }
   let a = 1.0 - T;
-  if (a < 0.001) { return vec4f(0.0); }
-  return vec4f(rgb, a);
+  out.occl = vec4f(min(isoD, densD), 0.0, 0.0, 1.0);
+  if (a < 0.001) {
+    out.color = vec4f(0.0);
+    return out;
+  }
+  out.color = vec4f(rgb, a);
+  return out;
 }

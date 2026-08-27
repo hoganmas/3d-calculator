@@ -6,7 +6,7 @@ import { mountExprList } from "./ui/expr-sidebar/mount.js";
 import { setExpressionsOnChange } from "./model/expressions.js";
 import { anyParamAnimating } from "./model/params.js";
 import { syncExprCompileState } from "./app/hud.js";
-import { initDom, els, initPanelResize } from "./app/dom.js";
+import { initDom, els, initPanelResize, initPanelToggle } from "./app/dom.js";
 import { initScene, bindClipUniforms, controls, camera } from "./app/scene.js";
 import { initCompile, applyPreset } from "./app/compile.js";
 import {
@@ -35,6 +35,7 @@ initCompile();
 initKeyframeHandler();
 wirePipelineDom();
 initPanelResize(resize);
+initPanelToggle(resize);
 
 els.preset.addEventListener("change", () => {
   applyPreset(els.preset.value);

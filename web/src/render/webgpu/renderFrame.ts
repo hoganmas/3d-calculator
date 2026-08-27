@@ -40,10 +40,10 @@ function buildRaySetup(
   const handles = acquireMarchGpuHandles();
   if (!handles) return null;
 
-  const { camera, half, fbW, fbH, ndcOffsetX = 0, displayW = 0, displayH = 0 } = params;
+  const { camera, half, fbW, fbH, ndcOffsetX = 0, ndcOffsetY = 0, displayW = 0, displayH = 0 } = params;
   const o = camera.position;
   const { sx, sy } = perspectiveDirScale(camera);
-  const dirMatrix = offsetDirMatrix(ndcToDirMatrix(camera, sx, sy), ndcOffsetX);
+  const dirMatrix = offsetDirMatrix(ndcToDirMatrix(camera, sx, sy), ndcOffsetX, ndcOffsetY);
   const ro: [number, number, number] = [o.x, o.y, o.z];
   const h = half ?? 2;
 
@@ -67,7 +67,7 @@ function clearMarchTargets(
   targets: MarchTargets,
 ): void {
   const sceneView = targets.sceneColorTex.createView();
-  const occlView = targets.occlTex.createView();
+  const occlIsoView = targets.occlIsoTex.createView();
   const depthView = targets.depthTex.createView();
   const normalView = targets.normalTex.createView();
 
@@ -81,7 +81,7 @@ function clearMarchTargets(
         storeOp: "store",
       },
       {
-        view: occlView,
+        view: occlIsoView,
         clearValue: { r: 1, g: 0, b: 0, a: 1 },
         loadOp: "clear",
         storeOp: "store",
@@ -118,7 +118,7 @@ function drawIsoConstraints(
   dirMatrix: ReturnType<typeof offsetDirMatrix>,
 ): void {
   const { device, isoPipeline, drawParamBuf, volumeBuf } = handles;
-  const occlView = targets.occlTex.createView();
+  const occlIsoView = targets.occlIsoTex.createView();
   const depthView = targets.depthTex.createView();
   const normalView = targets.normalTex.createView();
 
@@ -150,7 +150,7 @@ function drawIsoConstraints(
     const pass = enc.beginRenderPass({
       colorAttachments: [
         { view: sceneView, loadOp: "load", storeOp: "store" },
-        { view: occlView, loadOp: "load", storeOp: "store" },
+        { view: occlIsoView, loadOp: "load", storeOp: "store" },
         { view: normalView, loadOp: "load", storeOp: "store" },
       ],
       depthStencilAttachment: {
@@ -179,7 +179,7 @@ function drawSsaoPass(
 ): GPUTextureView {
   const { device, ssaoPipeline, ssaoParamBuf } = handles;
   const aoView = targets.sceneColorAoTex.createView();
-  const occlView = targets.occlTex.createView();
+  const occlIsoView = targets.occlIsoTex.createView();
   const normalView = targets.normalTex.createView();
 
   device.queue.writeBuffer(
@@ -198,7 +198,7 @@ function drawSsaoPass(
     entries: [
       { binding: 0, resource: { buffer: ssaoParamBuf } },
       { binding: 1, resource: sceneView },
-      { binding: 2, resource: occlView },
+      { binding: 2, resource: occlIsoView },
       { binding: 3, resource: normalView },
     ],
   });
@@ -233,7 +233,8 @@ function drawBeerPass(
   dirMatrix: ReturnType<typeof offsetDirMatrix>,
 ): void {
   const { device, beerPipeline, drawParamBufBeer, volumeBuf, colorBuf } = handles;
-  const occlView = targets.occlTex.createView();
+  const occlIsoView = targets.occlIsoTex.createView();
+  const occlSurfView = targets.occlSurfTex.createView();
 
   device.queue.writeBuffer(
     drawParamBufBeer,
@@ -245,13 +246,16 @@ function drawBeerPass(
     entries: [
       { binding: 0, resource: { buffer: drawParamBufBeer } },
       { binding: 1, resource: { buffer: volumeBuf } },
-      { binding: 2, resource: occlView },
+      { binding: 2, resource: occlIsoView },
       { binding: 3, resource: { buffer: colorBuf } },
     ],
   });
   const enc = device.createCommandEncoder();
   const pass = enc.beginRenderPass({
-    colorAttachments: [{ view: sceneView, loadOp: "load", storeOp: "store" }],
+    colorAttachments: [
+      { view: sceneView, loadOp: "load", storeOp: "store" },
+      { view: occlSurfView, loadOp: "clear", clearValue: { r: 1, g: 0, b: 0, a: 1 }, storeOp: "store" },
+    ],
   });
   pass.setPipeline(beerPipeline);
   pass.setBindGroup(0, bg);
@@ -296,7 +300,7 @@ function drawFxaaPass(
 
 function drawGridOverlay(
   handles: MarchGpuHandles,
-  targets: MarchTargets,
+  occlForGrid: GPUTextureView,
   camera: PerspectiveCamera,
   swapView: GPUTextureView,
   half: number,
@@ -308,7 +312,6 @@ function drawGridOverlay(
   if (!gpu.gridVertexBuf || gpu.gridVertexCount <= 0) return;
 
   const { device, gridPipeline, gridParamBuf } = handles;
-  const occlView = targets.occlTex.createView();
 
   camera.updateMatrixWorld(true);
   const viewProj = new Float32Array(16);
@@ -335,7 +338,7 @@ function drawGridOverlay(
     layout: gridPipeline.getBindGroupLayout(0),
     entries: [
       { binding: 0, resource: { buffer: gridParamBuf } },
-      { binding: 1, resource: occlView },
+      { binding: 1, resource: occlForGrid },
     ],
   });
   const enc = device.createCommandEncoder();
@@ -355,7 +358,7 @@ function drawGridOverlay(
         { binding: 0, resource: { buffer: gridParamBuf } },
         { binding: 1, resource: gpu.labelAtlasTex.createView() },
         { binding: 2, resource: gpu.labelAtlasSamp },
-        { binding: 3, resource: occlView },
+        { binding: 3, resource: occlForGrid },
       ],
     });
     pass.setPipeline(labelPipeline);
@@ -397,12 +400,16 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
     sceneView = drawSsaoPass(handles, targets, sceneView, marchW, marchH, half, ro, dirMatrix);
   }
 
-  if (gpu.densLayerCount > 0 && gpu.densPacked) {
+  const ranBeer = gpu.densLayerCount > 0 && gpu.densPacked;
+  if (ranBeer) {
     drawBeerPass(handles, targets, sceneView, marchW, marchH, Mgrid, steps, half, scale, ro, dirMatrix);
   }
 
   drawFxaaPass(handles, sceneView, swapView, marchW, marchH);
-  drawGridOverlay(handles, targets, camera, swapView, half, dirMatrix, ro, outW, outH);
+  const occlForGrid = ranBeer
+    ? targets.occlSurfTex.createView()
+    : targets.occlIsoTex.createView();
+  drawGridOverlay(handles, occlForGrid, camera, swapView, half, dirMatrix, ro, outW, outH);
 
   const submitWallAt = performance.now();
   void device.queue.onSubmittedWorkDone().then(() => {

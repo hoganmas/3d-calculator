@@ -30,11 +30,11 @@
         bottom: var(--panel-inset);
         width: var(--panel-w);
         max-width: calc(100vw - 2 * var(--panel-inset));
-        padding: 12px 12px 16px;
+        padding: 14px 16px 18px;
         overflow: auto;
         display: flex;
         flex-direction: column;
-        gap: 10px;
+        gap: 12px;
         min-width: 0;
         border-radius: var(--panel-radius);
         background: var(--glass-bg);
@@ -43,6 +43,20 @@
         border: none;
         box-shadow: var(--glass-shadow), var(--glass-fresnel);
         transition: box-shadow 0.18s ease;
+        opacity: calc(1 - var(--panel-progress));
+        will-change: transform, opacity;
+      }
+      html:not([data-panel-layout="horizontal"]) #panel,
+      html:not([data-panel-layout="horizontal"]) #panelResize {
+        transform: translateX(calc(-1 * var(--panel-progress) * (var(--panel-w) + var(--panel-inset))));
+      }
+      html[data-panel-layout="horizontal"] #panel,
+      html[data-panel-layout="horizontal"] #panelResize {
+        transform: translateY(calc(-1 * var(--panel-progress) * (var(--panel-h) + var(--panel-inset))));
+      }
+      html[data-panel-collapsed="true"] #panel,
+      html[data-panel-collapsed="true"] #panelResize {
+        pointer-events: none;
       }
       #panelResize {
         position: absolute;
@@ -54,10 +68,17 @@
         cursor: col-resize;
         background: transparent;
         touch-action: none;
+        opacity: calc(1 - var(--panel-progress));
+        will-change: transform, opacity;
       }
       body.panel-resizing {
-        cursor: col-resize;
         user-select: none;
+      }
+      html:not([data-panel-layout="horizontal"]) body.panel-resizing {
+        cursor: col-resize;
+      }
+      html[data-panel-layout="horizontal"] body.panel-resizing {
+        cursor: row-resize;
       }
       #panel:has(+ #panelResize:hover),
       body.panel-resizing #panel {
@@ -66,6 +87,13 @@
           var(--glass-fresnel),
           10px 0 36px var(--accent-ring);
       }
+      html[data-panel-layout="horizontal"] #panel:has(+ #panelResize:hover),
+      html[data-panel-layout="horizontal"] body.panel-resizing #panel {
+        box-shadow:
+          var(--glass-shadow),
+          var(--glass-fresnel),
+          0 10px 36px var(--accent-ring);
+      }
       body.panel-resizing #viewport,
       body.panel-resizing #viewport * {
         pointer-events: none;
@@ -73,9 +101,9 @@
       .expr-list {
         display: flex;
         flex-direction: column;
-        gap: 6px;
-        margin: 0 -4px;
-        padding: 4px 0 28px;
+        gap: 8px;
+        margin: 0;
+        padding: 6px 2px 36px;
         min-height: 48px;
         flex: 1;
       }
@@ -1109,9 +1137,27 @@
         pointer-events: none;
         z-index: 2;
       }
+      .viewport-toolbar {
+        position: absolute;
+        z-index: 3;
+        top: calc(var(--panel-inset) + var(--panel-cover-h) + 8px);
+        left: calc(
+          var(--panel-inset) + var(--panel-cover-w) + 4px + 12px * (1 - var(--panel-progress))
+        );
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        pointer-events: none;
+        will-change: left, top;
+      }
+      .viewport-toolbar .icon-btn {
+        pointer-events: auto;
+      }
       #hud {
         position: absolute;
-        left: calc(var(--panel-inset) + var(--panel-w) + 16px);
+        left: calc(
+          var(--panel-inset) + var(--panel-cover-w) + 4px + 12px * (1 - var(--panel-progress))
+        );
         bottom: 12px;
         font-size: 11px;
         color: var(--muted);
@@ -1124,6 +1170,7 @@
         -webkit-backdrop-filter: blur(12px);
         border: none;
         box-shadow: var(--glass-fresnel-soft);
+        will-change: left;
       }
       #err {
         color: var(--err);
@@ -1190,17 +1237,28 @@
       }
       @media (max-width: 800px) {
         #panel {
-          top: 8px;
-          left: 8px;
-          right: 8px;
+          top: var(--panel-inset);
+          left: var(--panel-inset);
+          right: var(--panel-inset);
           bottom: auto;
           width: auto;
-          max-height: 42vh;
+          height: var(--panel-h);
+          max-height: calc(100vh - var(--panel-inset) - 160px);
         }
         #panelResize {
-          display: none;
+          top: calc(var(--panel-inset) + var(--panel-h) - 6px);
+          left: var(--panel-inset);
+          right: var(--panel-inset);
+          bottom: auto;
+          width: auto;
+          height: 12px;
+          cursor: row-resize;
+        }
+        .viewport-toolbar {
+          top: calc(var(--panel-inset) + var(--panel-cover-h) + 12px);
+          left: calc(var(--panel-inset) + 4px);
         }
         #hud {
-          left: 12px;
+          left: calc(var(--panel-inset) + 4px);
         }
       }
