@@ -107,7 +107,7 @@ export function buildCapabilities() {
     app: {
       name: "Laplacian",
       description:
-        "Multi-expression 3D polynomial calculator. Each field expression is Chebyshev-fitted to a density volume (Beer–Lambert) or isosurface manifold. Shared named parameters animate over time via slider keyframes.",
+        "Multi-expression 3D polynomial calculator. Scalar fields → density clouds or isosurfaces; vector fields → Eulerian flow advection. Shared named parameters animate over time via slider keyframes.",
       pipeline:
         "LaTeX → compile → Chebyshev fit (on structural changes) → IDCT volume → GPU march (every frame). Animated params refit only dirty layers via keyframe blend.",
     },
@@ -129,11 +129,17 @@ export function buildCapabilities() {
           kind: "density",
           description: "Scalar field → volumetric density cloud (Beer–Lambert).",
         },
+        {
+          form: "(Fx,Fy,Fz) or \\grad f",
+          kind: "flow",
+          description: "Vector field → Eulerian dye advection (role Flow or auto-detected tuple/grad).",
+        },
       ],
       roles: {
-        auto: "Infer density vs constraint from syntax.",
+        auto: "Infer cloud / iso / flow from syntax.",
         density: "Force volume rendering.",
         constraint: "Force isosurface manifold.",
+        flow: "Force vector flow advection.",
       },
       freeSymbols:
         "Any identifier not a known function becomes a parameter (auto row inserted). Param names must match /^[A-Za-z][A-Za-z0-9_]*$/ on the LHS of name=value (e.g. a, u, d — not y1 which parses as subscript). Reserved spatial: x, y, z, r, theta, phi, rho.",

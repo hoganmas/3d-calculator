@@ -1,3 +1,7 @@
+/**
+ * WebMCP smoke test (Playwright). Requires dev server: npm run dev
+ * Run: npm run test:integration
+ */
 import { chromium } from "playwright";
 
 const browser = await chromium.launch({ headless: true });

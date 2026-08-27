@@ -163,6 +163,15 @@
           </section>
 
           <section class="settings-section">
+            <p class="settings-section-title">Flow</p>
+            <div class="row3">
+              <label>speed<input id="flowSpeed" type="number" min="0" max="10" step="0.1" value="1" /></label>
+              <label>dissipation<input id="flowDissipation" type="number" min="0" max="0.5" step="0.005" value="0.015" /></label>
+            </div>
+            <button id="reseedFlow" class="secondary" type="button">Re-seed flow dye</button>
+          </section>
+
+          <section class="settings-section">
             <details class="metrics-block" open>
               <summary class="metrics-head">
                 <span>Diagnostics</span>

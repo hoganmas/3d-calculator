@@ -323,7 +323,7 @@ function tools(): ToolDef[] {
           id: { type: "string", description: "Expression row id" },
           latex: { type: "string" },
           enabled: { type: "boolean" },
-          role: { type: "string", enum: ["auto", "density", "constraint"] },
+          role: { type: "string", enum: ["auto", "density", "constraint", "flow"] },
           color: { type: "string", description: "Gradient start hex e.g. #ff4500" },
           color2: { type: "string", description: "Gradient end hex e.g. #ffec00" },
         },

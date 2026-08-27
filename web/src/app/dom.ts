@@ -35,6 +35,9 @@ export interface DomElements {
   closeSettings: HTMLButtonElement | null;
   settingsDialog: HTMLDialogElement | null;
   themePref: HTMLSelectElement | null;
+  flowSpeed: HTMLInputElement | null;
+  flowDissipation: HTMLInputElement | null;
+  reseedFlow: HTMLButtonElement | null;
 }
 
 export const els: DomElements = {
@@ -58,6 +61,9 @@ export const els: DomElements = {
   closeSettings: document.getElementById("closeSettings") as HTMLButtonElement | null,
   settingsDialog: document.getElementById("settingsDialog") as HTMLDialogElement | null,
   themePref: document.getElementById("themePref") as HTMLSelectElement | null,
+  flowSpeed: document.getElementById("flowSpeed") as HTMLInputElement | null,
+  flowDissipation: document.getElementById("flowDissipation") as HTMLInputElement | null,
+  reseedFlow: document.getElementById("reseedFlow") as HTMLButtonElement | null,
 };
 
 export function viewportSize() {

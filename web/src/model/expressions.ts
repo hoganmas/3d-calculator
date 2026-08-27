@@ -3,7 +3,8 @@
  * Parameter rows (`a = …`) share values across all field expressions.
  */
 
-import type { ExprItem, ExprRole } from "../types/models.js";
+import type { ExprItem, ExprRole, LayerRole } from "../types/models.js";
+import { isVectorFieldLatex } from "../math/fitVector.js";
 
 export type { ExprItem, ExprRole, AnimMode } from "../types/models.js";
 
@@ -405,15 +406,15 @@ export function hexToRgb01(hex: string) {
 }
 
 /**
- * Effective role from expression kind.
- * @param {ExprRole} _role
- * @param {"parameter" | "constraint" | "definition" | "bare"} kind
- * @returns {"parameter" | "density" | "constraint"}
+ * Effective role from expression kind and optional vector syntax.
  */
 export function resolveExprRole(
-  _role: ExprRole,
+  role: ExprRole,
   kind: "parameter" | "constraint" | "definition" | "bare",
-): "parameter" | "density" | "constraint" {
+  latex?: string,
+): LayerRole {
   if (kind === "parameter") return "parameter";
+  if (role === "density" || role === "constraint" || role === "flow") return role;
+  if (role === "auto" && latex && isVectorFieldLatex(latex)) return "flow";
   return kind === "constraint" ? "constraint" : "density";
 }

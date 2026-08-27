@@ -1,17 +1,17 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { ExprItem } from "../../types/models.js";
-  import {
-    resolveExprGradient,
-    cssGradientFromColors,
-    getExprWarning,
-    updateExpr,
-    removeExpr,
-    mergeExprIntoPrevious,
-    splitExprAt,
-    listExpressions,
-    commitAutoParams,
-  } from "../../model/expressions.js";
+import type { ExprItem, ExprRole } from "../../types/models.js";
+import {
+  resolveExprGradient,
+  cssGradientFromColors,
+  getExprWarning,
+  updateExpr,
+  removeExpr,
+  mergeExprIntoPrevious,
+  splitExprAt,
+  listExpressions,
+  commitAutoParams,
+} from "../../model/expressions.js";
   import { updateExprSilent } from "../../model/expressions.js";
   import { stopParamAnimation } from "../../model/params.js";
   import {
@@ -74,6 +74,18 @@
   const grad = $derived(resolveExprGradient(item));
   const gradCss = $derived(cssGradientFromColors(grad.colors));
   const swatchDisabled = $derived(isParamDef);
+
+  const ROLE_CYCLE: ExprRole[] = ["auto", "density", "constraint", "flow"];
+  const roleLabel = $derived(
+    ({ auto: "Auto", density: "Cloud", constraint: "Iso", flow: "Flow" } as const)[item.role],
+  );
+
+  function cycleRole() {
+    const i = ROLE_CYCLE.indexOf(item.role);
+    const next = ROLE_CYCLE[(i + 1) % ROLE_CYCLE.length]!;
+    updateExpr(item.id, { role: next });
+    onStructuralChange();
+  }
 
   onMount(() => {
     if (!mfEl) return;
@@ -272,6 +284,16 @@
       />
     {/if}
   </div>
+
+  {#if !isParamDef}
+    <button
+      type="button"
+      class="expr-role secondary has-tooltip"
+      data-tooltip={roleLabel}
+      aria-label={`Role: ${roleLabel}`}
+      onclick={() => cycleRole()}
+    >{roleLabel.slice(0, 1)}</button>
+  {/if}
 
   <button
     type="button"

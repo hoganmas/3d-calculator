@@ -1,11 +1,16 @@
-import type { ConstraintLayer, DensLayer, KeyframeBlend, KeyframeFrame } from "../../types/models.js";
+import type { ConstraintLayer, DensLayer, FlowLayer, KeyframeBlend, KeyframeFrame } from "../../types/models.js";
 import { MAX_DENS_LAYERS, gpu, DEFAULT_DENS_RGB, DEFAULT_DENS_RGB2, type RgbTriplet } from "./gpuState.js";
 import { normalizeRgbStops, writeLayerColors } from "./uniforms.js";
+import { uploadFlowLayers, resetFlowGpuLayers } from "./flowAdvect.js";
+
+const MAX_FLOW_LAYERS = 4;
 
 export interface SceneUploadPayload {
   densLayers?: DensLayer[];
   constraints?: ConstraintLayer[];
+  flowLayers?: FlowLayer[];
   M: number;
+  half?: number;
 }
 
 export interface SceneUploadResult {
@@ -69,9 +74,19 @@ export function uploadSceneVolumes(scene: SceneUploadPayload | null): SceneUploa
   gpu.sceneM = M;
 
   const cons = scene.constraints || [];
-  const dens = (scene.densLayers || []).slice(0, MAX_DENS_LAYERS);
+  const flow = (scene.flowLayers || []).slice(0, MAX_FLOW_LAYERS);
+  const scalarDens = (scene.densLayers || []).slice(0, Math.max(0, MAX_DENS_LAYERS - flow.length));
+  const flowAsDens: DensLayer[] = flow.map((f) => ({
+    id: f.id,
+    dens: f.dye,
+    color: f.color,
+    color2: f.color2,
+    colors: f.colors,
+  }));
+  const dens = [...scalarDens, ...flowAsDens].slice(0, MAX_DENS_LAYERS);
   gpu.densLayerCount = dens.length;
   gpu.densGradStops = dens.map((d) => stopsFromLayer(d));
+  const half = scene.half ?? gpu.flowHalf ?? 2.5;
 
   const consStride = 4;
   let consFloats = 0;
@@ -128,10 +143,18 @@ export function uploadSceneVolumes(scene: SceneUploadPayload | null): SceneUploa
   });
   gpu.densBase = off;
   gpu.densPacked = dens.length > 0;
+  const flowDensOffsets: number[] = [];
   if (gpu.densPacked && gpu.scenePacked) {
     for (let i = 0; i < dens.length; i++) {
-      putVol(dens[i].dens);
+      if (i >= scalarDens.length) flowDensOffsets.push(off);
+      putVol(dens[i]!.dens);
     }
+  }
+
+  if (flow.length) {
+    uploadFlowLayers(flow, M, half, flowDensOffsets);
+  } else {
+    resetFlowGpuLayers();
   }
 
   gpu.sceneEpoch++;
@@ -197,7 +220,10 @@ export function patchConstraintKeyframeFrame(
 }
 
 export function hasUploadedVolume(): boolean {
-  return gpu.sceneM > 0 && (gpu.densLayerCount > 0 || gpu.sceneConstraints.length > 0);
+  return (
+    gpu.sceneM > 0 &&
+    (gpu.densLayerCount > 0 || gpu.sceneConstraints.length > 0 || (gpu.flowGridM ?? 0) > 0)
+  );
 }
 
 export { ensureVolumeBuf };

@@ -1,4 +1,5 @@
 import { compileExpr, classifyExpr, PRESETS, formatParamLatexValue, compileParamLatex } from "../math/fit.js";
+import { compileVectorExpr } from "../math/fitVector.js";
 import {
   syncParamsFromDefinitions,
   applyParamSeed,
@@ -139,10 +140,32 @@ export function compileAllExprs(opts: CompileOpts = {}): CompileAllResult {
       paramRows.push({ item, name });
       continue;
     }
+
+    const role = resolveExprRole(item.role, classified.kind, item.latex);
+
+    if (role === "flow") {
+      try {
+        const vectorCompiled = compileVectorExpr(item.latex);
+        for (const p of vectorCompiled.freeParams) freeSet.add(p);
+        if (!vectorCompiled.usesSpace) continue;
+        layers.push({
+          item,
+          vectorCompiled,
+          role: "flow",
+          vectorFn: vectorCompiled.bind(getParamValues()),
+        });
+      } catch (e) {
+        warnings.push([
+          item.id,
+          e instanceof Error ? e.message : "Invalid flow field",
+        ]);
+      }
+      continue;
+    }
+
     const compiled = compileExpr(item.latex);
     for (const p of compiled.freeParams) freeSet.add(p);
     if (!compiled.usesSpace || compiled.shade === "none") continue;
-    const role = resolveExprRole(item.role, compiled.kind);
     layers.push({
       item,
       compiled,
@@ -202,7 +225,13 @@ export function compileAllExprs(opts: CompileOpts = {}): CompileAllResult {
 
   evalParamEquations();
   const params = getParamValues();
-  for (const L of layers) L.fn = L.compiled.bind(params);
+  for (const L of layers) {
+    if (L.role === "flow" && L.vectorCompiled) {
+      L.vectorFn = L.vectorCompiled.bind(params);
+    } else if (L.compiled) {
+      L.fn = L.compiled.bind(params);
+    }
+  }
 
   if (rebuildUi) {
     if (!state.exprListApi?.syncParamChrome?.()) {
@@ -212,11 +241,12 @@ export function compileAllExprs(opts: CompileOpts = {}): CompileAllResult {
 
   const nCons = layers.filter((L) => L.role === "constraint").length;
   const nDens = layers.filter((L) => L.role === "density").length;
+  const nFlow = layers.filter((L) => L.role === "flow").length;
   state.lastExprMeta = {
-    kind: nCons && nDens ? "mixed" : nCons ? "constraint" : "bare",
-    shade: nCons && !nDens ? "iso" : "volume",
+    kind: nCons && nDens ? "mixed" : nCons ? "constraint" : nFlow ? "bare" : "bare",
+    shade: nCons && !nDens && !nFlow ? "iso" : "volume",
     isoLevel: 0,
-    label: `${nDens} density · ${nCons} manifold`,
+    label: `${nDens} density · ${nCons} manifold · ${nFlow} flow`,
   };
 
   return {

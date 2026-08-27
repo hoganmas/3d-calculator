@@ -42,6 +42,11 @@ export const state = {
   loopFpsFrames: 0,
   loopFpsLast: performance.now(),
   cpuMsSmooth: 0,
+
+  /** Flow advection speed multiplier. */
+  flowSpeed: 1.0,
+  /** Per-frame dye dissipation (0–1). */
+  flowDissipation: 0.015,
 };
 
 export const FIT_DEBOUNCE_MS = 320;

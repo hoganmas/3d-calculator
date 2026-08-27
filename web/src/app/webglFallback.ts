@@ -119,11 +119,14 @@ export function useGpuClipPath() {
 export function ensureDensSumForWebGl() {
   if (!state.lastSceneBake) return null;
   if (state.lastSceneBake.dens) return state.lastSceneBake.dens;
-  const { densLayers, M } = state.lastSceneBake;
-  if (!densLayers?.length) return null;
+  const { densLayers, flowLayers, M } = state.lastSceneBake;
+  if (!densLayers?.length && !flowLayers?.length) return null;
   const densSum = new Float32Array(M * M * M);
-  for (const d of densLayers) {
+  for (const d of densLayers ?? []) {
     for (let i = 0; i < densSum.length; i++) densSum[i] += d.dens[i] || 0;
+  }
+  for (const f of flowLayers ?? []) {
+    for (let i = 0; i < densSum.length; i++) densSum[i] += f.dye[i] || 0;
   }
   state.lastSceneBake.dens = densSum;
   return densSum;
@@ -132,9 +135,9 @@ export function ensureDensSumForWebGl() {
 /** Fit-time: IDCT each expression → GPU scene (manifolds + densities). */
 export function bakeChebVolume() {
   if (!state.lastSceneBake) return null;
-  const { densLayers, constraints, M } = state.lastSceneBake;
+  const { densLayers, constraints, flowLayers, M, half } = state.lastSceneBake;
   if (isClipBakeGpuReady()) {
-    const up = uploadSceneVolumes({ densLayers, constraints, M });
+    const up = uploadSceneVolumes({ densLayers, constraints, flowLayers, M, half });
     if (up) state.bakeMsSmooth = state.bakeMsSmooth * 0.5 + up.bakeMs * 0.5;
   }
   state.lastVolumeM = M;

@@ -23,6 +23,6 @@ export function isClipBakeGpuReady(): boolean {
 export function isClipMarchReady(): boolean {
   return Boolean(
     isClipBakeGpuReady() && gpu.ctx && gpu.sceneM > 1 &&
-    (gpu.densLayerCount > 0 || gpu.sceneConstraints.length > 0),
+    (gpu.densLayerCount > 0 || gpu.sceneConstraints.length > 0 || gpu.flowGridM > 0),
   );
 }

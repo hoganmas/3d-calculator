@@ -166,7 +166,10 @@ export function resize() {
 
 export function syncClipPresentation() {
   const hasVolume = hasUploadedVolume() || Boolean(
-    state.lastSceneBake && (state.lastSceneBake.densLayers.length || state.lastSceneBake.constraints.length),
+    state.lastSceneBake &&
+      (state.lastSceneBake.densLayers.length ||
+        state.lastSceneBake.constraints.length ||
+        (state.lastSceneBake.flowLayers?.length ?? 0) > 0),
   );
   const gpu = useGpuClipPath() && hasVolume;
   clipQuad.visible = !gpu && hasVolume && Boolean(state.worldCheb);

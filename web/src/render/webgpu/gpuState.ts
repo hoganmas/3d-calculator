@@ -99,6 +99,8 @@ export interface GpuState {
   profileGridM: number;
   builtEpoch: number;
   isoInterpHermite: boolean;
+  flowGridM: number;
+  flowHalf: number;
 }
 
 export const gpu: GpuState = {
@@ -173,6 +175,8 @@ export const gpu: GpuState = {
   profileGridM: 0,
   builtEpoch: -1,
   isoInterpHermite: true,
+  flowGridM: 0,
+  flowHalf: 2.5,
 };
 
 export const PIPELINE_EPOCH = 27;

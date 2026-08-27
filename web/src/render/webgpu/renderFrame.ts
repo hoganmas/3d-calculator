@@ -35,7 +35,7 @@ function buildRaySetup(
   outW: number;
   outH: number;
 } | null {
-  if (gpu.densLayerCount < 1 && gpu.sceneConstraints.length < 1) return null;
+  if (gpu.densLayerCount < 1 && gpu.sceneConstraints.length < 1 && !(gpu.flowGridM > 0)) return null;
 
   const handles = acquireMarchGpuHandles();
   if (!handles) return null;

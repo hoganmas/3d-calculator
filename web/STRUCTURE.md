@@ -17,6 +17,7 @@ src/
     loop.ts                 requestAnimationFrame loop
   math/
     fit.ts                  LaTeX compile + Chebyshev least-squares fit
+    fitVector.ts            Vector field tuple/grad parse + fit
     idct.ts                 Separable Chebyshev IDCT → dens grid (+ grad)
     limits.ts               MAX_DEG and shared math constants
   model/
@@ -40,10 +41,12 @@ src/
       gpuState.ts           Shared GPU device / texture state
       uniforms.ts           Draw-param packing + layer color upload
       sceneUpload.ts        Volume upload + keyframe patch
+      flowAdvect.ts         Semi-Lagrangian flow dye advection (compute)
       pipelines.ts          Shader module compile + pipeline creation
       shaders/
         compose.ts          Load .wgls ?raw, inject constants
         common/gradient.wgsl
+        flowAdvect.wgsl
         isoHermite.wgsl
         isoTrilinear.wgsl
         beer.wgsl, grid.wgsl, axisLabel.wgsl, fxaa.wgsl, ssao.wgsl

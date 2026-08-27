@@ -524,6 +524,14 @@ export const PRESETS: Record<string, PresetDef> = {
     label: "Torus (constraint)",
     latex: String.raw`(\rho-0.9)^{2}+z^{2}=0.12`,
   },
+  swirl: {
+    label: "Flow swirl",
+    expressions: [{ latex: String.raw`(-y, x, 0)`, role: "flow" }],
+  },
+  swirlGrad: {
+    label: "Flow (grad r²)",
+    expressions: [{ latex: String.raw`\grad(x^2+y^2+z^2)`, role: "flow" }],
+  },
   lavalamp: {
     label: "Lava lamp (animated blobs)",
     expressions: [

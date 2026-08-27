@@ -1,9 +1,10 @@
 /** Shared domain types for Laplacian (expressions → bake → GPU). */
 
-export type ExprRole = "auto" | "density" | "constraint";
+export type ExprRole = "auto" | "density" | "constraint" | "flow";
 export type AnimMode = "pingpong" | "loop";
 export type ExprKind = "parameter" | "constraint" | "definition" | "bare";
-export type LayerRole = "parameter" | "density" | "constraint";
+export type LayerRole = "parameter" | "density" | "constraint" | "flow";
+export type VectorFieldKind = "tuple" | "gradient" | "reference";
 
 export interface ExprItem {
   id: string;
@@ -80,9 +81,23 @@ export interface ConstraintLayer {
   blend?: KeyframeBlend;
 }
 
+export interface FlowLayer {
+  id?: string;
+  fx: Float32Array;
+  fy: Float32Array;
+  fz: Float32Array;
+  dye: Float32Array;
+  color: number[];
+  color2: number[];
+  colors?: number[][];
+  cheb?: Float32Array;
+  fitRel?: number;
+}
+
 export interface SceneBake {
   densLayers: DensLayer[];
   constraints: ConstraintLayer[];
+  flowLayers: FlowLayer[];
   M: number;
   dens: Float32Array | null;
   deg?: number;
@@ -121,12 +136,42 @@ export interface FitTiming {
 export interface CompiledLayer {
   item: ExprItem;
   role: LayerRole;
-  fn: (x: number, y: number, z: number) => number;
-  compiled: {
-    freeParams: string[];
-    isoLevel?: number;
-    kind?: ExprKind;
-  };
+  compiled?: CompiledExpr;
+  vectorCompiled?: CompiledVectorExpr;
+  fn?: (x: number, y: number, z: number) => number;
+  vectorFn?: (x: number, y: number, z: number) => [number, number, number];
+}
+
+export interface ClassifiedVectorExpr {
+  kind: VectorFieldKind;
+  label: string;
+  /** Tuple: three component LaTeX strings. Gradient: scalar LaTeX. */
+  compileParts: string[];
+}
+
+export interface CompiledVectorExpr {
+  freeParams: string[];
+  usesSpace: boolean;
+  kind: VectorFieldKind;
+  classifyLabel: string;
+  /** Scalar fit path for gradient-sourced fields. */
+  scalarCompileLatex?: string;
+  bind: (
+    params?: Record<string, number>,
+  ) => (x: number, y: number, z: number) => [number, number, number];
+  bindScalar?: (
+    params?: Record<string, number>,
+  ) => (x: number, y: number, z: number) => number;
+}
+
+export interface VectorFitResult {
+  fx: Float32Array;
+  fy: Float32Array;
+  fz: Float32Array;
+  cheb?: Float32Array;
+  fitRel?: number;
+  M: number;
+  source: VectorFieldKind;
 }
 
 export interface ExprListApi {
@@ -223,9 +268,11 @@ export interface IdctGrad3DResult {
 
 export interface CompileLayerResult {
   item: ExprItem;
-  compiled: CompiledExpr;
+  compiled?: CompiledExpr;
+  vectorCompiled?: CompiledVectorExpr;
   role: LayerRole;
-  fn: (x: number, y: number, z: number) => number;
+  fn?: (x: number, y: number, z: number) => number;
+  vectorFn?: (x: number, y: number, z: number) => [number, number, number];
 }
 
 export interface CompileAllResult {
