@@ -987,7 +987,7 @@ function applyCameraComposition(vw, vh) {
   }
 }
 
-/** Clip-grid Beer march internal resolution (CSS-upscaled to the viewport). */
+/** Raymarch internal resolution scale (display canvas stays full viewport). */
 function marchResolutionScale() {
   return 1 / marchDownscale();
 }
@@ -1020,10 +1020,8 @@ function applyDisplaySize(rw, rh, vw, vh, { markClipDirty = true } = {}) {
 function resize() {
   const { vw, vh } = viewportSize();
   applyDisplaySize(vw, vh, vw, vh, { markClipDirty: true });
-  // Keep the WebGPU overlay matched to the viewport CSS box immediately
-  // (buffer stays at march resolution; style fills the viewport).
-  const { mw, mh } = marchFramebufferSize();
-  resizeClipGpuCanvas(mw, mh);
+  // Present canvas at display resolution; raymarch targets stay at mw×mh.
+  resizeClipGpuCanvas(vw, vh);
 }
 
 /** @type {{ densLayers: any[], constraints: any[], M: number, dens: Float32Array | null } | null} */
@@ -1097,23 +1095,25 @@ function syncClipPresentation() {
 /** Per-frame GPU volume march (IDCT bake is fit-time only). */
 function drawClipGpuFrame() {
   densSubmittedThisFrame = false;
+  const { vw, vh } = viewportSize();
   const { mw, mh } = marchFramebufferSize();
   if (!lastSceneBake || !isClipBakeGpuReady()) return false;
   if (!hasUploadedVolume()) {
-    clearClipGpuFrame(mw, mh);
+    clearClipGpuFrame(vw, vh);
     clipDirty = false;
     return true;
   }
   if (!useGpuClipPath()) return false;
 
   camera.updateMatrixWorld(true);
-  const { vw } = viewportSize();
   const t0 = performance.now();
   const ok = renderClipFrameGpu({
     camera,
     half: clipUniforms.uHalf.value,
     fbW: mw,
     fbH: mh,
+    displayW: vw,
+    displayH: vh,
     scale: clipUniforms.uScale.value,
     steps: clipUniforms.uSteps.value | 0,
     ndcOffsetX: compositionNdcOffsetX(vw),
@@ -1192,8 +1192,8 @@ function uploadFit(opts = {}) {
       if (!fromAnim) resize();
       syncClipPresentation();
       if (isClipBakeGpuReady()) {
-        const { mw, mh } = marchFramebufferSize();
-        clearClipGpuFrame(mw, mh);
+        const { vw, vh } = viewportSize();
+        clearClipGpuFrame(vw, vh);
       }
       return;
     }
@@ -1751,8 +1751,8 @@ function frame(rafNow) {
     if (hasUploadedVolume() && useGpuClipPath()) {
       drawClipGpuFrame();
     } else if (!hasUploadedVolume()) {
-      const { mw, mh } = marchFramebufferSize();
-      clearClipGpuFrame(mw, mh);
+      const { vw, vh } = viewportSize();
+      clearClipGpuFrame(vw, vh);
       densSubmittedThisFrame = false;
     }
   }

@@ -729,8 +729,8 @@ fn fsMain(in: VSOut) -> @location(0) vec4f {
 
 /**
  * World reference grid / axes / fit-box edges.
- * Rasterized with a real viewProj, but frag_depth uses the same ray-t / far
- * encoding as the iso pass so we depth-test against isoDepth in-place (no copy).
+ * Soft depth-test against the iso occlusion buffer so this can run at display
+ * resolution while raymarch stays at an independent (often lower) resolution.
  */
 function makeGridWgsl() {
   return /* wgsl */ `
@@ -748,6 +748,7 @@ struct GridParams {
 }
 
 @group(0) @binding(0) var<uniform> u: GridParams;
+@group(0) @binding(1) var occlTex: texture_2d<f32>;
 
 struct VSIn {
   @location(0) pos: vec3f,
@@ -760,11 +761,6 @@ struct VSOut {
   @location(1) color: vec4f,
 }
 
-struct FSOut {
-  @location(0) color: vec4f,
-  @builtin(frag_depth) depth: f32,
-}
-
 @vertex
 fn vsMain(v: VSIn) -> VSOut {
   var o: VSOut;
@@ -775,8 +771,7 @@ fn vsMain(v: VSIn) -> VSOut {
 }
 
 @fragment
-fn fsMain(in: VSOut) -> FSOut {
-  var out: FSOut;
+fn fsMain(in: VSOut) -> @location(0) vec4f {
   let fbW = u.fbW; let fbH = u.fbH;
   let ndcX = -1.0 + 2.0 * in.clip.x / fbW;
   let ndcY = 1.0 - 2.0 * in.clip.y / fbH;
@@ -796,17 +791,20 @@ fn fsMain(in: VSOut) -> FSOut {
   let rd2 = max(dot(rd, rd), 1e-20);
   let t = dot(in.world - ro, rd) / rd2;
   if (!(t > 0.0)) { discard; }
-  out.depth = clamp(t / far, 0.0, 0.999);
-  // Premultiplied
-  out.color = vec4f(in.color.rgb * in.color.a, in.color.a);
-  return out;
+  let myD = clamp(t / far, 0.0, 0.999);
+  let dims = vec2f(textureDimensions(occlTex));
+  let mx = i32(clamp(floor(in.clip.x * dims.x / fbW), 0.0, dims.x - 1.0));
+  let my = i32(clamp(floor(in.clip.y * dims.y / fbH), 0.0, dims.y - 1.0));
+  let isoD = textureLoad(occlTex, vec2i(mx, my), 0).r;
+  if (myD >= isoD - 1e-4) { discard; }
+  return vec4f(in.color.rgb * in.color.a, in.color.a);
 }
 `;
 }
 
 /**
- * Camera-facing axis letter billboards; same ray-t depth encoding as the grid
- * so isosurfaces can occlude them.
+ * Camera-facing axis letter billboards; soft-occlude against iso via occlTex
+ * so labels stay sharp at display resolution.
  */
 function makeAxisLabelWgsl() {
   return /* wgsl */ `
@@ -826,6 +824,7 @@ struct GridParams {
 @group(0) @binding(0) var<uniform> u: GridParams;
 @group(0) @binding(1) var atlas: texture_2d<f32>;
 @group(0) @binding(2) var atlasSamp: sampler;
+@group(0) @binding(3) var occlTex: texture_2d<f32>;
 
 struct VSIn {
   @location(0) pos: vec3f,
@@ -838,11 +837,6 @@ struct VSOut {
   @location(1) uv: vec2f,
 }
 
-struct FSOut {
-  @location(0) color: vec4f,
-  @builtin(frag_depth) depth: f32,
-}
-
 @vertex
 fn vsMain(v: VSIn) -> VSOut {
   var o: VSOut;
@@ -853,8 +847,7 @@ fn vsMain(v: VSIn) -> VSOut {
 }
 
 @fragment
-fn fsMain(in: VSOut) -> FSOut {
-  var out: FSOut;
+fn fsMain(in: VSOut) -> @location(0) vec4f {
   let tex = textureSample(atlas, atlasSamp, in.uv);
   if (tex.a < 0.02) { discard; }
   let fbW = u.fbW; let fbH = u.fbH;
@@ -876,9 +869,13 @@ fn fsMain(in: VSOut) -> FSOut {
   let rd2 = max(dot(rd, rd), 1e-20);
   let t = dot(in.world - ro, rd) / rd2;
   if (!(t > 0.0)) { discard; }
-  out.depth = clamp(t / far, 0.0, 0.999);
-  out.color = vec4f(tex.rgb * tex.a, tex.a);
-  return out;
+  let myD = clamp(t / far, 0.0, 0.999);
+  let dims = vec2f(textureDimensions(occlTex));
+  let mx = i32(clamp(floor(in.clip.x * dims.x / fbW), 0.0, dims.x - 1.0));
+  let my = i32(clamp(floor(in.clip.y * dims.y / fbH), 0.0, dims.y - 1.0));
+  let isoD = textureLoad(occlTex, vec2i(mx, my), 0).r;
+  if (myD >= isoD - 1e-4) { discard; }
+  return vec4f(tex.rgb * tex.a, tex.a);
 }
 `;
 }
@@ -1215,7 +1212,7 @@ let lastPresentAt = 0;
 let profileMethod = "";
 let profileGridM = 0;
 
-const PIPELINE_EPOCH = 23;
+const PIPELINE_EPOCH = 25;
 let builtEpoch = -1;
 
 /**
@@ -1706,12 +1703,16 @@ export function resizeClipGpuCanvas(pixelW, pixelH) {
     });
     canvas._clipConfigured = true;
   }
+  // March targets are sized independently in renderClipFrameGpu.
+  return { w: canvas.width, h: canvas.height };
+}
+
+function ensureMarchTargets(w, h) {
   ensureOcclTex(w, h);
   ensureDepthTex(w, h);
   ensureNormalTex(w, h);
   ensureSceneColorTex(w, h);
   ensureSceneColorAoTex(w, h);
-  return { w: canvas.width, h: canvas.height };
 }
 
 function ensureVolumeBuf(floatCount) {
@@ -2067,11 +2068,6 @@ export async function ensurePipelinesForDegree(_deg) {
       targets: [{ format: canvasFormat, blend: blendPremul }],
     },
     primitive: { topology: "line-list" },
-    depthStencil: {
-      format: "depth32float",
-      depthWriteEnabled: false,
-      depthCompare: "less",
-    },
   });
   {
     const err = await device.popErrorScope();
@@ -2098,11 +2094,6 @@ export async function ensurePipelinesForDegree(_deg) {
       targets: [{ format: canvasFormat, blend: blendPremul }],
     },
     primitive: { topology: "triangle-list" },
-    depthStencil: {
-      format: "depth32float",
-      depthWriteEnabled: false,
-      depthCompare: "less",
-    },
   });
   {
     const err = await device.popErrorScope();
@@ -2174,7 +2165,7 @@ function darken(c, t) {
   return [c[0] * t, c[1] * t, c[2] * t];
 }
 
-export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps, ndcOffsetX = 0 }) {
+export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps, ndcOffsetX = 0, displayW = 0, displayH = 0 }) {
   if (
     !isClipBakeGpuReady() || !ctx || !volumeBuf || !colorBuf ||
     !fxaaParamBuf || !ssaoParamBuf || !fxaaSampler || !gridParamBuf
@@ -2190,12 +2181,12 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps, ndcOf
   const h = half ?? 2;
   const Mgrid = sceneM;
 
-  const { w: marchW, h: marchH } = resizeClipGpuCanvas(fbW, fbH);
-  if (!occlTex) ensureOcclTex(marchW, marchH);
-  if (!depthTex) ensureDepthTex(marchW, marchH);
-  if (!normalTex) ensureNormalTex(marchW, marchH);
-  if (!sceneColorTex) ensureSceneColorTex(marchW, marchH);
-  if (!sceneColorAoTex) ensureSceneColorAoTex(marchW, marchH);
+  const marchW = Math.max(1, fbW | 0);
+  const marchH = Math.max(1, fbH | 0);
+  const outW = Math.max(1, (displayW | 0) || marchW);
+  const outH = Math.max(1, (displayH | 0) || marchH);
+  resizeClipGpuCanvas(outW, outH);
+  ensureMarchTargets(marchW, marchH);
   syncClipGpuWorldGrid(h);
 
   profileMarchFbW = marchW;
@@ -2331,70 +2322,6 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps, ndcOf
     sceneView = aoView;
   }
 
-  // World grid / axes / box / axis labels — depth-test against iso depth in-place.
-  if (gridVertexBuf && gridVertexCount > 0 && gridPipeline) {
-    camera.updateMatrixWorld(true);
-    const viewProj = new Float32Array(16);
-    // Column-major: projection * view (Three stores column-major too).
-    const e = camera.projectionMatrix.elements;
-    const v = camera.matrixWorldInverse.elements;
-    // viewProj = proj * view
-    for (let c = 0; c < 4; c++) {
-      for (let r = 0; r < 4; r++) {
-        viewProj[c * 4 + r] =
-          e[0 * 4 + r] * v[c * 4 + 0] +
-          e[1 * 4 + r] * v[c * 4 + 1] +
-          e[2 * 4 + r] * v[c * 4 + 2] +
-          e[3 * 4 + r] * v[c * 4 + 3];
-      }
-    }
-    device.queue.writeBuffer(
-      gridParamBuf,
-      0,
-      packGridParams(viewProj, ro, h, Mat, marchW, marchH),
-    );
-    const labelVertCount = labelPipeline
-      ? uploadAxisLabelBillboards(camera, h)
-      : 0;
-    const bg = device.createBindGroup({
-      layout: gridPipeline.getBindGroupLayout(0),
-      entries: [{ binding: 0, resource: { buffer: gridParamBuf } }],
-    });
-    const enc = device.createCommandEncoder();
-    const pass = enc.beginRenderPass({
-      colorAttachments: [
-        { view: sceneView, loadOp: "load", storeOp: "store" },
-      ],
-      depthStencilAttachment: {
-        view: depthView,
-        depthLoadOp: "load",
-        depthStoreOp: "store",
-      },
-    });
-    pass.setPipeline(gridPipeline);
-    pass.setBindGroup(0, bg);
-    pass.setVertexBuffer(0, gridVertexBuf);
-    pass.draw(gridVertexCount);
-
-    if (labelPipeline && labelVertexBuf && labelAtlasTex && labelAtlasSamp && labelVertCount > 0) {
-      const labelBg = device.createBindGroup({
-        layout: labelPipeline.getBindGroupLayout(0),
-        entries: [
-          { binding: 0, resource: { buffer: gridParamBuf } },
-          { binding: 1, resource: labelAtlasTex.createView() },
-          { binding: 2, resource: labelAtlasSamp },
-        ],
-      });
-      pass.setPipeline(labelPipeline);
-      pass.setBindGroup(0, labelBg);
-      pass.setVertexBuffer(0, labelVertexBuf);
-      pass.draw(labelVertCount);
-    }
-
-    pass.end();
-    device.queue.submit([enc.finish()]);
-  }
-
   if (densLayerCount > 0 && densPacked) {
     device.queue.writeBuffer(
       drawParamBufBeer,
@@ -2421,7 +2348,7 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps, ndcOf
     device.queue.submit([enc.finish()]);
   }
 
-  // FXAA → swapchain
+  // FXAA → swapchain (upsamples march-res color to display resolution).
   {
     const inv = new Float32Array([1 / marchW, 1 / marchH, 0, 0]);
     device.queue.writeBuffer(fxaaParamBuf, 0, inv);
@@ -2447,6 +2374,67 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps, ndcOf
     pass.setPipeline(fxaaPipeline);
     pass.setBindGroup(0, bg);
     pass.draw(3);
+    pass.end();
+    device.queue.submit([enc.finish()]);
+  }
+
+  // World grid / axes / labels at display res; soft-occlude via march occlTex.
+  if (gridVertexBuf && gridVertexCount > 0 && gridPipeline) {
+    camera.updateMatrixWorld(true);
+    const viewProj = new Float32Array(16);
+    const e = camera.projectionMatrix.elements;
+    const v = camera.matrixWorldInverse.elements;
+    for (let c = 0; c < 4; c++) {
+      for (let r = 0; r < 4; r++) {
+        viewProj[c * 4 + r] =
+          e[0 * 4 + r] * v[c * 4 + 0] +
+          e[1 * 4 + r] * v[c * 4 + 1] +
+          e[2 * 4 + r] * v[c * 4 + 2] +
+          e[3 * 4 + r] * v[c * 4 + 3];
+      }
+    }
+    device.queue.writeBuffer(
+      gridParamBuf,
+      0,
+      packGridParams(viewProj, ro, h, Mat, outW, outH),
+    );
+    const labelVertCount = labelPipeline
+      ? uploadAxisLabelBillboards(camera, h)
+      : 0;
+    const bg = device.createBindGroup({
+      layout: gridPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: gridParamBuf } },
+        { binding: 1, resource: occlView },
+      ],
+    });
+    const enc = device.createCommandEncoder();
+    const pass = enc.beginRenderPass({
+      colorAttachments: [
+        { view: swapView, loadOp: "load", storeOp: "store" },
+      ],
+    });
+    pass.setPipeline(gridPipeline);
+    pass.setBindGroup(0, bg);
+    pass.setVertexBuffer(0, gridVertexBuf);
+    pass.draw(gridVertexCount);
+
+    if (labelPipeline && labelVertexBuf && labelAtlasTex && labelAtlasSamp && labelVertCount > 0) {
+      const labelBg = device.createBindGroup({
+        layout: labelPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: gridParamBuf } },
+          { binding: 1, resource: labelAtlasTex.createView() },
+          { binding: 2, resource: labelAtlasSamp },
+          { binding: 3, resource: occlView },
+        ],
+      });
+      pass.setPipeline(labelPipeline);
+      pass.setBindGroup(0, labelBg);
+      pass.setVertexBuffer(0, labelVertexBuf);
+      pass.draw(labelVertCount);
+    }
+
     pass.end();
     device.queue.submit([enc.finish()]);
   }
