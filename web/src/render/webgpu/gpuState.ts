@@ -52,9 +52,14 @@ export interface GpuState {
   volumeBuf: GPUBuffer | null;
   volumeCapacity: number;
   colorBuf: GPUBuffer | null;
-  occlTex: GPUTexture | null;
-  occlW: number;
-  occlH: number;
+  /** Iso manifold depths (iso write, SSAO + Beer read). */
+  occlIsoTex: GPUTexture | null;
+  occlIsoW: number;
+  occlIsoH: number;
+  /** Combined iso+density depths for grid/axis occlusion (Beer write). */
+  occlSurfTex: GPUTexture | null;
+  occlSurfW: number;
+  occlSurfH: number;
   depthTex: GPUTexture | null;
   depthW: number;
   depthH: number;
@@ -123,9 +128,12 @@ export const gpu: GpuState = {
   volumeBuf: null,
   volumeCapacity: 0,
   colorBuf: null,
-  occlTex: null,
-  occlW: 0,
-  occlH: 0,
+  occlIsoTex: null,
+  occlIsoW: 0,
+  occlIsoH: 0,
+  occlSurfTex: null,
+  occlSurfW: 0,
+  occlSurfH: 0,
   depthTex: null,
   depthW: 0,
   depthH: 0,
@@ -167,7 +175,7 @@ export const gpu: GpuState = {
   isoInterpHermite: true,
 };
 
-export const PIPELINE_EPOCH = 25;
+export const PIPELINE_EPOCH = 27;
 export const labelVertScratch = new Float32Array(18 * 6);
 
 export function resetPipelinesOnDeviceLost(): void {

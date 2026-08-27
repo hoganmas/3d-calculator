@@ -6,17 +6,30 @@ function destroyTexture(tex: GPUTexture | null): void {
   try { tex.destroy(); } catch { /* device lost */ }
 }
 
-function ensureOcclTex(w: number, h: number): void {
-  if (gpu.occlTex && gpu.occlW === w && gpu.occlH === h) return;
-  destroyTexture(gpu.occlTex);
+function ensureOcclIsoTex(w: number, h: number): void {
+  if (gpu.occlIsoTex && gpu.occlIsoW === w && gpu.occlIsoH === h) return;
+  destroyTexture(gpu.occlIsoTex);
   if (!gpu.device) return;
-  gpu.occlTex = gpu.device.createTexture({
+  gpu.occlIsoTex = gpu.device.createTexture({
     size: [w, h],
     format: "rgba16float",
     usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
   });
-  gpu.occlW = w;
-  gpu.occlH = h;
+  gpu.occlIsoW = w;
+  gpu.occlIsoH = h;
+}
+
+function ensureOcclSurfTex(w: number, h: number): void {
+  if (gpu.occlSurfTex && gpu.occlSurfW === w && gpu.occlSurfH === h) return;
+  destroyTexture(gpu.occlSurfTex);
+  if (!gpu.device) return;
+  gpu.occlSurfTex = gpu.device.createTexture({
+    size: [w, h],
+    format: "rgba16float",
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+  });
+  gpu.occlSurfW = w;
+  gpu.occlSurfH = h;
 }
 
 function ensureDepthTex(w: number, h: number): void {
@@ -72,7 +85,8 @@ function ensureSceneColorAoTex(w: number, h: number): void {
 }
 
 export function ensureMarchTargets(w: number, h: number): void {
-  ensureOcclTex(w, h);
+  ensureOcclIsoTex(w, h);
+  ensureOcclSurfTex(w, h);
   ensureDepthTex(w, h);
   ensureNormalTex(w, h);
   ensureSceneColorTex(w, h);

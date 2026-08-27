@@ -35,6 +35,7 @@ export interface RenderClipFrameGpuParams {
   scale: number;
   steps: number;
   ndcOffsetX?: number;
+  ndcOffsetY?: number;
   displayW?: number;
   displayH?: number;
 }
@@ -67,7 +68,8 @@ export interface MarchGpuHandles {
 export interface MarchTargets {
   sceneColorTex: GPUTexture;
   sceneColorAoTex: GPUTexture;
-  occlTex: GPUTexture;
+  occlIsoTex: GPUTexture;
+  occlSurfTex: GPUTexture;
   depthTex: GPUTexture;
   normalTex: GPUTexture;
 }
@@ -113,9 +115,12 @@ export function acquireMarchGpuHandles(): MarchGpuHandles | null {
 export function acquireMarchTargets(): MarchTargets | null {
   const sceneColorTex = gpu.sceneColorTex;
   const sceneColorAoTex = gpu.sceneColorAoTex;
-  const occlTex = gpu.occlTex;
+  const occlIsoTex = gpu.occlIsoTex;
+  const occlSurfTex = gpu.occlSurfTex;
   const depthTex = gpu.depthTex;
   const normalTex = gpu.normalTex;
-  if (!sceneColorTex || !sceneColorAoTex || !occlTex || !depthTex || !normalTex) return null;
-  return { sceneColorTex, sceneColorAoTex, occlTex, depthTex, normalTex };
+  if (!sceneColorTex || !sceneColorAoTex || !occlIsoTex || !occlSurfTex || !depthTex || !normalTex) {
+    return null;
+  }
+  return { sceneColorTex, sceneColorAoTex, occlIsoTex, occlSurfTex, depthTex, normalTex };
 }

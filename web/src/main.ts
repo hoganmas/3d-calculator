@@ -6,7 +6,7 @@ import { mountExprList } from "./ui/expr-sidebar/mount.js";
 import { setExpressionsOnChange } from "./model/expressions.js";
 import { anyParamAnimating } from "./model/params.js";
 import { syncExprCompileState } from "./app/hud.js";
-import { initDom, els, initPanelResize } from "./app/dom.js";
+import { initDom, els, initPanelResize, initPanelToggle } from "./app/dom.js";
 import { initScene, bindClipUniforms, controls, camera } from "./app/scene.js";
 import { initCompile, applyPreset } from "./app/compile.js";
 import {
@@ -21,6 +21,8 @@ import { initPresentation, resize, bindHudText } from "./app/presentation.js";
 import { hudText, copyMetricsToClipboard } from "./app/hud.js";
 import { startRenderLoop } from "./app/loop.js";
 import { state } from "./app/state.js";
+import { initWebMCP } from "./app/webmcp.js";
+import { initWebmcpSetupDialog } from "./app/webmcpSetupDialog.js";
 
 initTheme();
 initDom();
@@ -33,6 +35,7 @@ initCompile();
 initKeyframeHandler();
 wirePipelineDom();
 initPanelResize(resize);
+initPanelToggle(resize);
 
 els.preset.addEventListener("change", () => {
   applyPreset(els.preset.value);
@@ -41,7 +44,7 @@ els.preset.addEventListener("change", () => {
 });
 
 els.reset.addEventListener("click", () => {
-  camera.position.set(3.2, 2.4, 4.2);
+  camera.position.set(5.2, 4.0, 6.8);
   controls.target.set(0, 0, 0);
   controls.update();
   state.clipDirty = true;
@@ -77,6 +80,9 @@ state.exprListApi.render();
 setExpressionsOnChange(() => {
   /* list mutations already call render from UI helpers */
 });
+
+initWebmcpSetupDialog();
+void initWebMCP();
 
 if (els.hud) els.hud.textContent = "clip-grid · idct volume";
 uploadFit();

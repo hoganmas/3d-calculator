@@ -85,7 +85,10 @@ export async function ensurePipelinesForDegree(_deg: number): Promise<PipelineBu
     fragment: {
       module: beerMod,
       entryPoint: "fsMain",
-      targets: [{ format: gpu.canvasFormat, blend: blendPremul }],
+      targets: [
+        { format: gpu.canvasFormat, blend: blendPremul },
+        { format: "rgba16float" },
+      ],
     },
     primitive: { topology: "triangle-list" },
   });

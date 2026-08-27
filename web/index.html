@@ -23,23 +23,24 @@
           </div>
           <div class="brand-row-actions">
             <button
-              id="reset"
-              class="icon-btn"
+              id="openWebmcpSetup"
+              class="icon-btn has-tooltip"
               type="button"
-              aria-label="Reset view"
-              title="Reset view"
+              aria-label="Setup MCP"
+              data-tooltip="Setup MCP"
             >
-              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75">
-                <circle cx="12" cy="12" r="3" />
-                <path stroke-linecap="round" d="M12 2v4M12 18v4M2 12h4M18 12h4" />
+              <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+                <path
+                  d="M13.85 0a4.16 4.16 0 0 0-2.95 1.217L1.456 10.66a.835.835 0 0 0 0 1.18.835.835 0 0 0 1.18 0l9.442-9.442a2.49 2.49 0 0 1 3.541 0 2.49 2.49 0 0 1 0 3.541L8.59 12.97l-.1.1a.835.835 0 0 0 0 1.18.835.835 0 0 0 1.18 0l.1-.098 7.03-7.034a2.49 2.49 0 0 1 3.542 0l.049.05a2.49 2.49 0 0 1 0 3.54l-8.54 8.54a1.96 1.96 0 0 0 0 2.755l1.753 1.753a.835.835 0 0 0 1.18 0 .835.835 0 0 0 0-1.18l-1.753-1.753a.266.266 0 0 1 0-.394l8.54-8.54a4.185 4.185 0 0 0 0-5.9l-.05-.05a4.16 4.16 0 0 0-2.95-1.218c-.2 0-.401.02-.6.048a4.17 4.17 0 0 0-1.17-3.552A4.16 4.16 0 0 0 13.85 0m0 3.333a.84.84 0 0 0-.59.245L6.275 10.56a4.186 4.186 0 0 0 0 5.902 4.186 4.186 0 0 0 5.902 0L19.16 9.48a.835.835 0 0 0 0-1.18.835.835 0 0 0-1.18 0l-6.985 6.984a2.49 2.49 0 0 1-3.54 0 2.49 2.49 0 0 1 0-3.54l6.983-6.985a.835.835 0 0 0 0-1.18.84.84 0 0 0-.59-.245"
+                />
               </svg>
             </button>
             <button
               id="openSettings"
-              class="icon-btn"
+              class="icon-btn has-tooltip"
               type="button"
-              aria-label="Open settings"
-              title="Settings"
+              aria-label="Settings"
+              data-tooltip="Settings"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75">
                 <circle cx="12" cy="12" r="3" />
@@ -65,6 +66,33 @@
         tabindex="0"
       ></div>
       <main id="viewport">
+        <div class="viewport-toolbar">
+          <button
+            id="togglePanel"
+            class="icon-btn has-tooltip"
+            type="button"
+            aria-label="Hide sidebar"
+            aria-expanded="true"
+            aria-controls="panel"
+            data-tooltip="Hide sidebar"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75">
+              <path stroke-linecap="round" d="M4 7h16M4 12h16M4 17h16" />
+            </svg>
+          </button>
+          <button
+            id="reset"
+            class="icon-btn has-tooltip"
+            type="button"
+            aria-label="Focus view"
+            data-tooltip="Focus view"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75">
+              <circle cx="12" cy="12" r="3" />
+              <path stroke-linecap="round" d="M12 2v4M12 18v4M2 12h4M18 12h4" />
+            </svg>
+          </button>
+        </div>
         <div id="hud">Laplacian</div>
       </main>
     </div>
@@ -143,6 +171,31 @@
               <textarea id="metricsDump" readonly spellcheck="false"></textarea>
             </details>
           </section>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="webmcpSetupDialog" class="settings-dialog webmcp-setup-dialog" aria-labelledby="webmcpSetupTitle">
+      <div class="settings-sheet">
+        <header class="settings-head">
+          <h2 id="webmcpSetupTitle">MCP Setup</h2>
+          <button id="closeWebmcpSetup" class="icon-btn" type="button" aria-label="Close" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75">
+              <path stroke-linecap="round" d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </header>
+        <div class="settings-body">
+          <p class="webmcp-setup-lead">
+            Laplacian lets external agents help you write expressions and tune render settings.
+          </p>
+          <label>
+            MCP config
+            <textarea id="webmcpConfigSnippet" class="webmcp-config-snippet" readonly spellcheck="false" rows="14"></textarea>
+          </label>
+          <div class="webmcp-setup-actions">
+            <button id="copyWebmcpConfig" class="secondary" type="button">Copy config</button>
+          </div>
         </div>
       </div>
     </dialog>

@@ -30,15 +30,27 @@ export function perspectiveDirScale(camera: PerspectiveCamera): { sx: number; sy
 }
 
 /**
- * Shift ray matrix so NDC x=0 aims through the composition center
- * (e.g. middle of the canvas region not covered by an overlay panel).
+ * Shift ray matrix so NDC (0,0) aims through the composition center
+ * (region not covered by an overlay panel).
  */
-export function offsetDirMatrix(M: DirMatrix, ndcOffsetX: number): DirMatrix {
-  const o = Number(ndcOffsetX) || 0;
-  if (!(Math.abs(o) > 1e-12)) return M;
+export function offsetDirMatrix(
+  M: DirMatrix,
+  ndcOffsetX = 0,
+  ndcOffsetY = 0,
+): DirMatrix {
+  const ox = Number(ndcOffsetX) || 0;
+  const oy = Number(ndcOffsetY) || 0;
+  if (!(Math.abs(ox) > 1e-12) && !(Math.abs(oy) > 1e-12)) return M;
   const out = M instanceof Float64Array ? new Float64Array(M) : new Float32Array(M);
-  out[2] -= o * out[0];
-  out[5] -= o * out[3];
-  out[8] -= o * out[6];
+  if (Math.abs(ox) > 1e-12) {
+    out[2] -= ox * out[0];
+    out[5] -= ox * out[3];
+    out[8] -= ox * out[6];
+  }
+  if (Math.abs(oy) > 1e-12) {
+    out[2] -= oy * out[1];
+    out[5] -= oy * out[4];
+    out[8] -= oy * out[7];
+  }
   return out;
 }

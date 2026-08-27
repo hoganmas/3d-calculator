@@ -22,6 +22,8 @@ npm run preview
 
 Requires a WebGPU-capable browser for the full multi-layer / manifold path. Without WebGPU, a single summed density volume still marches in WebGL.
 
+**MCP setup:** click **Setup MCP** in the app header — see [web/README.md — MCP setup](web/README.md#mcp-setup).
+
 ## Architecture
 
 ```

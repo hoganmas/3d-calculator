@@ -9,6 +9,12 @@ import {
 import { els, viewportSize } from "./dom.js";
 import { state, MARCH_DOWNSCALE_MIN, MARCH_DOWNSCALE_MAX, MARCH_DOWNSCALE_LABELS } from "./state.js";
 import {
+  isHorizontalPanelLayout,
+  readPanelCoverHeight,
+  readPanelCoverWidth,
+  readPanelInset,
+} from "./panelLayout.js";
+import {
   renderer,
   labelRenderer,
   camera,
@@ -60,16 +66,18 @@ export function marchDownscale() {
   return readMarchDownscale();
 }
 
-/** CSS px covered by the floating sidebar (0 on narrow layouts). */
+/** CSS px covered by the floating sidebar along the dock axis (0 on narrow full-width layouts). */
 export function compositionCoveredWidth(vw: number) {
-  if (typeof window !== "undefined" && window.matchMedia("(max-width: 800px)").matches) {
-    return 0;
-  }
-  const cs = getComputedStyle(document.documentElement);
-  const inset = parseFloat(cs.getPropertyValue("--panel-inset"));
-  const pw = parseFloat(cs.getPropertyValue("--panel-w"));
-  const covered = (Number.isFinite(inset) ? inset : 12) + (Number.isFinite(pw) ? pw : 360);
+  if (isHorizontalPanelLayout()) return 0;
+  const covered = readPanelInset() + readPanelCoverWidth();
   return Math.min(Math.max(0, covered), Math.max(0, vw - 160));
+}
+
+/** CSS px covered by a top-docked panel strip (0 in vertical layout). */
+export function compositionCoveredHeight(vh: number) {
+  if (!isHorizontalPanelLayout()) return 0;
+  const covered = readPanelInset() + readPanelCoverHeight();
+  return Math.min(Math.max(0, covered), Math.max(0, vh - 160));
 }
 
 /** NDC x of the free-region center (0 when the panel does not inset composition). */
@@ -79,19 +87,29 @@ export function compositionNdcOffsetX(vw: number) {
   return covered / vw;
 }
 
+/** NDC y of the free-region center (0 when the panel does not inset composition). */
+export function compositionNdcOffsetY(vh: number) {
+  const covered = compositionCoveredHeight(vh);
+  if (covered <= 1 || vh <= covered + 40) return 0;
+  // Top panel → free region sits below viewport center → negative NDC y.
+  return -covered / vh;
+}
+
 export function applyCameraComposition(vw: number, vh: number) {
   // Keep projection in sync with offsetDirMatrix used by volume rays:
-  // rays aim forward at NDC x = +offset (free-region center to the right of the panel),
-  // so world points on the view axis must project to that same NDC x.
+  // rays aim forward at the free-region center (right of a left panel, or below a top panel).
   if (typeof camera.clearViewOffset === "function") camera.clearViewOffset();
   camera.aspect = vw / Math.max(vh, 1);
   camera.updateProjectionMatrix();
-  const o = compositionNdcOffsetX(vw);
-  if (Math.abs(o) > 1e-12) {
+  const ox = compositionNdcOffsetX(vw);
+  const oy = compositionNdcOffsetY(vh);
+  if (Math.abs(ox) > 1e-12 || Math.abs(oy) > 1e-12) {
     const e = camera.projectionMatrix.elements;
-    // Left-multiply by translate(x' = x + o*w): column c, row 0 += o * row 3.
-    for (let c = 0; c < 4; c++) {
-      e[c * 4 + 0] += o * e[c * 4 + 3];
+    if (Math.abs(ox) > 1e-12) {
+      for (let c = 0; c < 4; c++) e[c * 4 + 0] += ox * e[c * 4 + 3];
+    }
+    if (Math.abs(oy) > 1e-12) {
+      for (let c = 0; c < 4; c++) e[c * 4 + 1] += oy * e[c * 4 + 3];
     }
     camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
   }

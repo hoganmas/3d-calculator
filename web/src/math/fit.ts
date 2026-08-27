@@ -524,6 +524,61 @@ export const PRESETS: Record<string, PresetDef> = {
     label: "Torus (constraint)",
     latex: String.raw`(\rho-0.9)^{2}+z^{2}=0.12`,
   },
+  lavalamp: {
+    label: "Lava lamp (animated blobs)",
+    expressions: [
+      {
+        latex: "u=0.5",
+        autoParam: true,
+        sliderMin: -0.85,
+        sliderMax: 0.85,
+        sliderSpeed: 0.12,
+        sliderAnimating: true,
+        sliderAnimMode: "loop",
+        sliderPhase: 0.1,
+      },
+      {
+        latex: "v=-0.4",
+        autoParam: true,
+        sliderMin: -0.9,
+        sliderMax: 0.9,
+        sliderSpeed: 0.14,
+        sliderAnimating: true,
+        sliderAnimMode: "loop",
+        sliderPhase: 0.55,
+      },
+      {
+        latex: "w=0.1",
+        autoParam: true,
+        sliderMin: -0.8,
+        sliderMax: 0.8,
+        sliderSpeed: 0.11,
+        sliderAnimating: true,
+        sliderAnimMode: "loop",
+        sliderPhase: 0.85,
+      },
+      {
+        latex: String.raw`\exp(-5((x-0.45)^2+(y-u)^2+(z+0.25)^2))`,
+        color: "#ff4500",
+        color2: "#ffec00",
+      },
+      {
+        latex: String.raw`\exp(-4((x+0.35)^2+(y-v)^2+(z-0.3)^2))`,
+        color: "#ff6b4a",
+        color2: "#ffb0d8",
+      },
+      {
+        latex: String.raw`\exp(-4.5((x-0.15)^2+(y-w)^2+(z-0.45)^2))`,
+        color: "#ff1493",
+        color2: "#7b2fff",
+      },
+    ],
+    params: {
+      u: { value: 0.5, min: -0.85, max: 0.85, animate: true, speed: 0.12, animMode: "loop", phase: 0.1 },
+      v: { value: -0.4, min: -0.9, max: 0.9, animate: true, speed: 0.14, animMode: "loop", phase: 0.55 },
+      w: { value: 0.1, min: -0.8, max: 0.8, animate: true, speed: 0.11, animMode: "loop", phase: 0.85 },
+    },
+  },
 };
 
 function fromUnit(u: number, a: number, b: number) {
