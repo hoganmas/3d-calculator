@@ -406,8 +406,15 @@ fn shadeIso(p: vec3f, rd: vec3f, n: vec3f) -> vec4f {
   let ndotv = max(dot(n, V), 0.0);
 
   let tBase = isoGradientT(p, n, draw.half);
-  let tLight = mix(0.04, 0.96, pow(ndotl, 0.7));
-  let t = clamp(mix(tBase, tLight, 0.7), 0.0, 1.0);
+  // Full-hemisphere wrap so the dark side still has variation (not clamped to 0).
+  let wrapped = clamp(0.5 + 0.5 * dot(n, L), 0.0, 1.0);
+  // Fold: midtones → one gradient end; darkest + lightest → the other.
+  let lit = pow(wrapped, 0.85);
+  let tFold = 1.0 - abs(2.0 * lit - 1.0);
+  let tLight = mix(0.04, 0.96, tFold);
+  // Lean a bit more on spatial/normal base in deep shadow so backsides aren't flat.
+  let shadeW = mix(0.48, 0.72, ndotl);
+  let t = clamp(mix(tBase, tLight, shadeW), 0.0, 1.0);
   var rgb = sampleGradStops(&stops, t);
 
   let nStops = max(min(u32(draw.gradCount), MAX_GRAD_STOPS), 1u);
