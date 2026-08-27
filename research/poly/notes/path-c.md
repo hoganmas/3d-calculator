@@ -1,6 +1,6 @@
 # Path C — Chebyshev optical-depth transmittance (archived)
 
-> **Status:** Removed from `web/poly-cloud`. Prefer **clip-grid** (GPU dens atlas + Beer–Lambert raymarch). This note keeps the design for reference.
+> **Status:** Removed from `web/`. Prefer **clip-grid** (GPU dens atlas + Beer–Lambert raymarch). This note keeps the design for reference.
 
 Related golden-path dens bake: [`clip-space-babbage.md`](./clip-space-babbage.md).
 
@@ -10,7 +10,7 @@ Related golden-path dens bake: [`clip-space-babbage.md`](./clip-space-babbage.md
 
 **Path C** approximates transmittance along a primary ray by fitting a low-degree Chebyshev model to optical depth \(\tau\), then setting \(T=\exp(-\hat\tau)\).
 
-Pipeline (formerly in `web/poly-cloud/src/shaders.js`, `uMode == 1`):
+Pipeline (formerly in `web/src/shaders.js`, `uMode == 1`):
 
 1. **Per pixel:** nested Horner contraction of the world monomial tensor → univariate \(\gamma(u)\) on the box segment (degree \(\le 3N\)). Cost \(\Theta(N^3)\) per ray.
 2. **Trapezoid-integrate** \(\sigma(u)=\max(0,s\cdot\gamma(u))\) on a fixed \(u\)-grid to accumulate \(\tau\) at Chebyshev nodes of the first kind.
