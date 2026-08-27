@@ -940,6 +940,42 @@
         height: 18px;
         display: block;
       }
+      .has-tooltip {
+        position: relative;
+      }
+      .has-tooltip::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 50%;
+        transform: translateX(-50%) translateY(-2px);
+        padding: 4px 8px;
+        border-radius: 6px;
+        border: 1px solid var(--stroke);
+        background: var(--glass-bg-strong);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        color: var(--text);
+        font-family: "IBM Plex Sans", system-ui, sans-serif;
+        font-size: 11px;
+        font-weight: 500;
+        line-height: 1.2;
+        white-space: nowrap;
+        pointer-events: none;
+        opacity: 0;
+        visibility: hidden;
+        transition:
+          opacity 0.12s ease,
+          transform 0.12s ease,
+          visibility 0.12s ease;
+        z-index: 20;
+      }
+      .has-tooltip:hover::after,
+      .has-tooltip:focus-visible::after {
+        opacity: 1;
+        visibility: visible;
+        transform: translateX(-50%) translateY(0);
+      }
       .settings-dialog {
         border: none;
         border-radius: 16px;
@@ -1031,6 +1067,31 @@
       .settings-dialog .row3 {
         display: grid;
         grid-template-columns: 1fr 1fr 1fr;
+        gap: 8px;
+      }
+      .webmcp-setup-dialog {
+        max-width: min(520px, calc(100vw - 28px));
+      }
+      .webmcp-setup-lead {
+        margin: 0;
+        font-size: 13px;
+        line-height: 1.45;
+        color: var(--text);
+      }
+      .webmcp-setup-lead strong {
+        font-weight: 600;
+      }
+      .webmcp-config-snippet {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 11px;
+        line-height: 1.45;
+        min-height: 220px;
+        resize: vertical;
+        tab-size: 2;
+      }
+      .webmcp-setup-actions {
+        display: flex;
+        justify-content: flex-end;
         gap: 8px;
       }
       #viewport canvas {

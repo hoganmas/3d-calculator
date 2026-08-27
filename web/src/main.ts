@@ -21,6 +21,8 @@ import { initPresentation, resize, bindHudText } from "./app/presentation.js";
 import { hudText, copyMetricsToClipboard } from "./app/hud.js";
 import { startRenderLoop } from "./app/loop.js";
 import { state } from "./app/state.js";
+import { initWebMCP } from "./app/webmcp.js";
+import { initWebmcpSetupDialog } from "./app/webmcpSetupDialog.js";
 
 initTheme();
 initDom();
@@ -41,7 +43,7 @@ els.preset.addEventListener("change", () => {
 });
 
 els.reset.addEventListener("click", () => {
-  camera.position.set(3.2, 2.4, 4.2);
+  camera.position.set(5.2, 4.0, 6.8);
   controls.target.set(0, 0, 0);
   controls.update();
   state.clipDirty = true;
@@ -77,6 +79,9 @@ state.exprListApi.render();
 setExpressionsOnChange(() => {
   /* list mutations already call render from UI helpers */
 });
+
+initWebmcpSetupDialog();
+void initWebMCP();
 
 if (els.hud) els.hud.textContent = "clip-grid · idct volume";
 uploadFit();

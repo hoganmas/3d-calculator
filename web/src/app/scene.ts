@@ -37,7 +37,7 @@ applyClipGpuTheme(themeColors);
 export const scene = new THREE.Scene();
 scene.add(lavaBg.mesh);
 export const camera = new THREE.PerspectiveCamera(50, 1, 0.05, 100);
-camera.position.set(3.2, 2.4, 4.2);
+camera.position.set(5.2, 4.0, 6.8);
 
 export const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;

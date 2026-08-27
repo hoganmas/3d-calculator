@@ -226,3 +226,6 @@ __marimo__/
 # Node / Vite viewer
 node_modules/
 web/dist/
+
+# Cursor IDE — personal MCP config, rules, etc.
+.cursor/
