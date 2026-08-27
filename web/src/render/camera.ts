@@ -3,7 +3,7 @@
  */
 import type { Camera, PerspectiveCamera } from "three";
 
-type DirMatrix = Float64Array | Float32Array | number[];
+export type DirMatrix = Float64Array | Float32Array | number[];
 
 /**
  * Map NDC (x, y, 1) → world dir_raw = R · (sx x, sy y, −1).

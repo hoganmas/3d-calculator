@@ -29,7 +29,14 @@ src/
     webgl/
       marchShaders.ts       WebGL Beer–Lambert fallback GLSL
     webgpu/
-      march.ts              WebGPU init, frame graph, public exports
+      march.ts              Public API (re-exports)
+      marchTypes.ts         Shared march types + GPU handle guards
+      marchReadiness.ts     Ready checks + iso interp mode
+      marchProfile.ts       GPU timing / profiling
+      marchCanvas.ts        Overlay canvas + offscreen targets
+      marchInit.ts          Device init + pipeline bootstrap
+      gridOverlay.ts        World grid, axes, axis-label billboards
+      renderFrame.ts        Per-frame iso / SSAO / Beer / FXAA pass graph
       gpuState.ts           Shared GPU device / texture state
       uniforms.ts           Draw-param packing + layer color upload
       sceneUpload.ts        Volume upload + keyframe patch
