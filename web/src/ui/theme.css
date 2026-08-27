@@ -1,0 +1,181 @@
+/* Layout tokens (theme-independent) */
+:root {
+  --panel-inset: 12px;
+  --panel-radius: 16px;
+  --panel-w: 360px;
+  --glass-blur: 22px;
+}
+
+/* Dark — warm purple glass */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #1a1228;
+  --panel: #241836;
+
+  --glass-bg: rgba(48, 32, 72, 0.46);
+  --glass-bg-strong: rgba(56, 38, 82, 0.64);
+  --glass-bg-elevated: rgba(255, 230, 210, 0.05);
+  --glass-stroke: rgba(255, 220, 200, 0.14);
+  --glass-highlight: rgba(255, 230, 210, 0.09);
+  --glass-rim: rgba(255, 235, 220, 0.22);
+  --glass-rim-soft: rgba(255, 230, 210, 0.07);
+  --glass-rim-outer: rgba(255, 220, 200, 0.1);
+  --glass-shadow: 0 16px 48px rgba(12, 4, 28, 0.48);
+  --glass-shadow-dialog: 0 18px 48px rgba(12, 4, 28, 0.52);
+  /* Soft fresnel edge: bright top catch + soft all-around rim + faint outer halo */
+  --glass-fresnel:
+    inset 0 1.5px 0 rgba(255, 240, 230, 0.32),
+    inset 0 -1px 0 rgba(255, 220, 200, 0.08),
+    inset 0 0 0 1.5px var(--glass-rim-soft),
+    inset 0 0 12px 2px rgba(255, 230, 210, 0.1),
+    inset 0 0 36px 4px rgba(255, 230, 210, 0.05),
+    0 0 0 1.5px var(--glass-rim-outer),
+    0 0 18px 2px rgba(255, 220, 200, 0.07),
+    0 0 40px 6px rgba(255, 220, 200, 0.04);
+  --glass-fresnel-soft:
+    inset 0 1px 0 rgba(255, 240, 230, 0.22),
+    inset 0 0 0 1.5px rgba(255, 230, 210, 0.07),
+    inset 0 0 14px 2px rgba(255, 230, 210, 0.06),
+    0 0 0 1.5px rgba(255, 220, 200, 0.08),
+    0 0 16px 2px rgba(255, 220, 200, 0.05);
+
+  --expr-glass-bg: transparent;
+  --expr-glass-bg-hover: transparent;
+  --expr-glass-bg-selected: transparent;
+  --expr-glass-bg-focus: transparent;
+  --expr-glass-highlight: transparent;
+  --expr-glass-blur: 0px;
+
+  --stroke: rgba(255, 220, 200, 0.12);
+  --text: #f5ebe0;
+  --muted: #b8a9c9;
+  --accent: #e8a87c;
+  --accent-soft: rgba(232, 168, 124, 0.1);
+  --accent-soft-strong: rgba(232, 168, 124, 0.18);
+  --accent-border: rgba(232, 168, 124, 0.48);
+  --accent-ring: rgba(232, 168, 124, 0.28);
+  --accent-focus: rgba(232, 168, 124, 0.35);
+
+  --err: #ff8a7a;
+  --err-border: #e07070;
+  --ok: #6ecf8a;
+  --warn: #f5a524;
+
+  --grid-major: #6b5a82;
+  --grid-minor: #3d2f55;
+  --box-edge: #5a4a72;
+  --axis-x: #e85d66;
+  --axis-y: #5ecf7a;
+  --axis-z: #c9a8e8;
+  --label-stroke: rgba(26, 18, 40, 0.58);
+
+  --lava-1: #2a1840;
+  --lava-2: #3a2848;
+  --lava-3: #524058;
+
+  --iso-absorb-r: 0.22;
+  --iso-absorb-g: 0.14;
+  --iso-absorb-b: 0.28;
+  --iso-emit-r: 0.92;
+  --iso-emit-g: 0.66;
+  --iso-emit-b: 0.48;
+
+  --beer-absorb-r: 0.18;
+  --beer-absorb-g: 0.12;
+  --beer-absorb-b: 0.22;
+  --beer-emit-r: 0.85;
+  --beer-emit-g: 0.62;
+  --beer-emit-b: 0.45;
+
+  --dialog-backdrop: rgba(20, 10, 36, 0.48);
+  --math-highlight: rgba(232, 168, 124, 0.14);
+  --btn-on-accent: #1a1228;
+}
+
+/* Light — warm cream glass */
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f7efe6;
+  --panel: #fff8f0;
+
+  --glass-bg: rgba(255, 252, 248, 0.58);
+  --glass-bg-strong: rgba(255, 250, 244, 0.78);
+  --glass-bg-elevated: rgba(255, 255, 255, 0.42);
+  --glass-stroke: rgba(120, 80, 60, 0.14);
+  --glass-highlight: rgba(255, 255, 255, 0.72);
+  --glass-rim: rgba(255, 255, 255, 0.78);
+  --glass-rim-soft: rgba(255, 255, 255, 0.42);
+  --glass-rim-outer: rgba(120, 80, 60, 0.08);
+  --glass-shadow: 0 14px 40px rgba(80, 50, 30, 0.12);
+  --glass-shadow-dialog: 0 18px 48px rgba(80, 50, 30, 0.16);
+  --glass-fresnel:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.32),
+    inset 0 0 0 1.5px rgba(255, 255, 255, 0.4),
+    inset 0 0 12px 2px rgba(255, 255, 255, 0.18),
+    inset 0 0 36px 4px rgba(255, 255, 255, 0.1),
+    0 0 0 1.5px var(--glass-rim-outer),
+    0 0 18px 2px rgba(255, 255, 255, 0.22),
+    0 0 40px 6px rgba(255, 255, 255, 0.12);
+  --glass-fresnel-soft:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    inset 0 0 0 1.5px rgba(255, 255, 255, 0.32),
+    inset 0 0 14px 2px rgba(255, 255, 255, 0.14),
+    0 0 0 1.5px rgba(120, 80, 60, 0.07),
+    0 0 16px 2px rgba(255, 255, 255, 0.16);
+
+  --expr-glass-bg: transparent;
+  --expr-glass-bg-hover: transparent;
+  --expr-glass-bg-selected: transparent;
+  --expr-glass-bg-focus: transparent;
+  --expr-glass-highlight: transparent;
+  --expr-glass-blur: 0px;
+
+  --stroke: rgba(120, 80, 60, 0.16);
+  --text: #2c1810;
+  --muted: #7a6558;
+  --accent: #c4703a;
+  --accent-soft: rgba(196, 112, 58, 0.1);
+  --accent-soft-strong: rgba(196, 112, 58, 0.16);
+  --accent-border: rgba(196, 112, 58, 0.42);
+  --accent-ring: rgba(196, 112, 58, 0.24);
+  --accent-focus: rgba(196, 112, 58, 0.32);
+
+  --err: #c44a3a;
+  --err-border: #d06050;
+  --ok: #3a9a58;
+  --warn: #c48020;
+
+  --grid-major: #a89888;
+  --grid-minor: #d4c8bc;
+  --box-edge: #9a8878;
+  --axis-x: #c44a52;
+  --axis-y: #3a9a58;
+  --axis-z: #7a58a8;
+  --label-stroke: rgba(255, 252, 248, 0.75);
+
+  --lava-1: #f5e6d8;
+  --lava-2: #efe0d4;
+  --lava-3: #e6d0c0;
+
+  --iso-absorb-r: 0.42;
+  --iso-absorb-g: 0.28;
+  --iso-absorb-b: 0.22;
+  --iso-emit-r: 0.72;
+  --iso-emit-g: 0.38;
+  --iso-emit-b: 0.22;
+
+  --beer-absorb-r: 0.35;
+  --beer-absorb-g: 0.22;
+  --beer-absorb-b: 0.15;
+  --beer-emit-r: 0.78;
+  --beer-emit-g: 0.48;
+  --beer-emit-b: 0.28;
+
+  --dialog-backdrop: rgba(44, 24, 16, 0.22);
+  --math-highlight: rgba(196, 112, 58, 0.12);
+  --btn-on-accent: #fffaf5;
+}

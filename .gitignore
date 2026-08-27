@@ -225,4 +225,4 @@ __marimo__/
 
 # Node / Vite viewer
 node_modules/
-web/*/dist/
+web/dist/
