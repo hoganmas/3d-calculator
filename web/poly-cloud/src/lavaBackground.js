@@ -4,7 +4,7 @@
 import * as THREE from "three";
 
 const SKY_RADIUS = 80;
-const BLOB_COUNT = 5;
+const BLOB_COUNT = 10;
 
 const vertexShader = /* glsl */ `
 varying vec3 vWorldDir;
@@ -102,8 +102,8 @@ void main() {
   }
 
   // Threshold tuned for angular metaballs (~50% wax coverage).
-  float wax = smoothstep(0.62, 1.28, f);
-  float hot = smoothstep(1.08, 2.35, f);
+  float wax = smoothstep(0.7, 1.4, f);
+  float hot = smoothstep(1.2, 2.55, f);
 
   // Subtle tint toward the upper hemisphere (world +Y).
   float heightGrad = smoothstep(-0.35, 0.9, dir.y);
