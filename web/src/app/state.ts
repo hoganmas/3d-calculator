@@ -1,25 +1,23 @@
 /** Shared mutable app state — no imports from app/. */
 
+import type { ExprListApi, ExprMeta, FitTiming, SceneBake } from "../types/models.js";
+
 export const state = {
   /** Preset param defaults applied on next successful compile/sync. */
-  pendingParamSeed: {},
+  pendingParamSeed: {} as Record<string, unknown>,
 
-  /** @type {{ render: () => void, syncAllParamSliders?: () => void, syncParamChrome?: () => boolean } | null} */
-  exprListApi: null,
+  exprListApi: null as ExprListApi | null,
 
-  /** Last successful classify/compile summary. */
   lastExprMeta: {
     kind: "bare",
     shade: "volume",
     isoLevel: 0,
     label: "expression → volume",
-  },
+  } as ExprMeta,
 
-  /** @type {{ densLayers: any[], constraints: any[], M: number, dens: Float32Array | null } | null} */
-  lastSceneBake: null,
+  lastSceneBake: null as SceneBake | null,
 
-  /** @type {Float32Array | null} */
-  worldCheb: null,
+  worldCheb: null as Float32Array | null,
 
   fitDeg: 20,
   clipDirty: true,
@@ -31,16 +29,14 @@ export const state = {
   lastVolumeM: 0,
   lastMetricsText: "",
   copyMetricsResetTimer: 0,
-  /** Last CPU Chebyshev→monomial fit breakdown (ms). */
-  lastFitTiming: null,
+  lastFitTiming: null as FitTiming | null,
   lastFitRel: NaN,
   lastNCoeff: 0,
 
   fitTimer: 0,
   lastAnimFitAt: 0,
 
-  /** @type {{ fromAnim?: boolean }} */
-  pendingFitOpts: {},
+  pendingFitOpts: {} as { fromAnim?: boolean },
 
   loopFps: 0,
   loopFpsFrames: 0,

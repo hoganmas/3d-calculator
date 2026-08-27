@@ -6,11 +6,11 @@ Vite entry: [`index.html`](index.html) → [`src/main.js`](src/main.js) (thin bo
 src/
   main.js                 Wire modules, mount expression list, start loop
   app/
-    state.js              Shared mutable runtime state
+    state.ts              Shared mutable runtime state
     dom.js                  DOM refs, settings dialog, panel resize
     scene.js                THREE scene, camera, grid, lava background
     compile.js              Expression compile + preset helpers
-    pipeline.js             uploadFit, bakeChebVolume, keyframes
+    pipeline.ts             uploadFit, bakeChebVolume, keyframes
     webglFallback.js        WebGL Beer march (no WebGPU)
     presentation.js         Resize, march downscale, GPU/CPU presentation
     hud.js                  Metrics HUD + compile status
@@ -20,8 +20,8 @@ src/
     idct.js                 Separable Chebyshev IDCT → dens grid (+ grad)
     limits.js               MAX_DEG and shared math constants
   model/
-    expressions.js          Expression list state, colors, roles
-    params.js               Free-parameter values + animation
+    expressions.ts          Expression list state, colors, roles
+    params.ts               Free-parameter values + animation
     keyframes.js            Animated-param keyframe cache + GPU blend
   render/
     camera.js               NDC → world ray helpers
@@ -40,16 +40,28 @@ src/
         isoHermite.wgsl
         isoTrilinear.wgsl
         beer.wgsl, grid.wgsl, axisLabel.wgsl, fxaa.wgsl, ssao.wgsl
+  types/
+    models.ts               Shared TS domain types (ExprItem, SceneBake, …)
   ui/
-    expressionList.js       Sidebar: MathLive rows, sliders, play
+    expr-sidebar/           Svelte expression list (MathLive, drag, popovers)
+      mount.ts              Public mountExprList API
+      ExprSidebar.svelte    List host: render/sync API, drag controller
+      ExprRow.svelte        Single expression row + math-field
+      ParamRail.svelte      Parameter slider / animate controls
+      helpers.ts            MathLive + row helpers
+      popovers.ts           Gradient / animation popovers
+      dragReorder.ts        Pointer drag-reorder controller
+    expressionList.js       Re-export mountExprList
+    popover.ts              Floating UI popover helper
     liquidSlider.js         Glass-style range slider thumbs
+    app.css                 Panel / expr-list / settings layout styles
     theme.js / theme.css
 ```
 
 ## Data flow
 
 ```
-MathLive (ui/expressionList)
+MathLive (ui/expr-sidebar)
   → compile + classify (app/compile, math/fit)
   → fit Chebyshev coeffs (math/fit)
   → IDCT volumes (math/idct)

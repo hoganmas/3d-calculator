@@ -4,28 +4,10 @@
  */
 
 import { compileParamLatex, formatParamLatexValue } from "../math/fit.js";
-
-/**
- * @typedef {"pingpong" | "loop"} AnimMode
- * @typedef {{
- *   value: number,
- *   min: number,
- *   max: number,
- *   step: number,
- *   animating: boolean,
- *   speed: number,
- *   phase: number,
- *   animMode: AnimMode,
- *   latex: string,
- *   exprId: string | null,
- *   driven: boolean,
- *   freeParams: string[],
- *   error: string | null,
- * }} ParamState
- */
+import type { AnimMode, ParamState } from "../types/models.js";
 
 /** @type {Map<string, ParamState>} */
-const params = new Map();
+const params = new Map<string, ParamState>();
 
 const DEFAULT_MIN = -10;
 const DEFAULT_MAX = 10;

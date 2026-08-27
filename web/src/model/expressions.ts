@@ -3,6 +3,10 @@
  * Parameter rows (`a = …`) share values across all field expressions.
  */
 
+import type { ExprItem, ExprRole } from "../types/models.js";
+
+export type { ExprItem, ExprRole, AnimMode } from "../types/models.js";
+
 let nextId = 1;
 
 /** Max / min stops in a layer gradient. */
@@ -91,44 +95,24 @@ export function nextExprGradient() {
   return { ...g, colors: [g.color, g.color2] };
 }
 
-/**
- * @typedef {"auto" | "density" | "constraint"} ExprRole
- * @typedef {{
- *   id: string,
- *   latex: string,
- *   color: string,
- *   color2: string,
- *   colors: string[],
- *   role: ExprRole,
- *   enabled: boolean,
- *   sliderMin: number,
- *   sliderMax: number,
- *   sliderSpeed: number,
- *   sliderAnimating: boolean,
- *   sliderPhase: number,
- *   sliderAnimMode: "pingpong" | "loop",
- *   autoParam: boolean,
- * }} ExprItem
- */
-
 /** @type {ExprItem[]} */
-let items = [];
+let items: ExprItem[] = [];
 
 /** @type {string | null} */
-let selectedId = null;
+let selectedId: string | null = null;
 
 /** @type {(() => void) | null} */
-let onChange = null;
+let onChange: (() => void) | null = null;
 
-/** Per-row compile warnings (e.g. duplicate variable). @type {Map<string, string>} */
-let exprWarnings = new Map();
+/** Per-row compile warnings (e.g. duplicate variable). */
+let exprWarnings = new Map<string, string>();
 
-export function setExpressionsOnChange(fn) {
+export function setExpressionsOnChange(fn: (() => void) | null) {
   onChange = fn;
 }
 
 /** @param {[string, string][] | Map<string, string> | Iterable<[string, string]>} entries */
-export function replaceExprWarnings(entries) {
+export function replaceExprWarnings(entries: Iterable<[string, string]>) {
   exprWarnings = new Map(entries);
 }
 
@@ -175,7 +159,15 @@ function clampInsertIndex(at, init) {
  * @param {Partial<ExprItem> & { animate?: boolean, min?: number, max?: number, speed?: number, value?: number }} [init]
  * @returns {ExprItem}
  */
-export function createExprItem(init = {}) {
+export function createExprItem(
+  init: Partial<ExprItem> & {
+    animate?: boolean;
+    min?: number;
+    max?: number;
+    speed?: number;
+    value?: number;
+  } = {},
+): ExprItem {
   const id = init.id ?? `e${nextId++}`;
   let sliderMin = Number.isFinite(init.sliderMin)
     ? init.sliderMin
@@ -235,7 +227,7 @@ export function selectExpr(id) {
  * Replace the whole list (e.g. preset / reset).
  * @param {Partial<ExprItem>[]} list
  */
-export function setExpressions(list) {
+export function setExpressions(list: Partial<ExprItem>[]) {
   items = list.map((init, i) =>
     createExprItem({
       ...init,
@@ -251,7 +243,7 @@ export function setExpressions(list) {
  * @param {number} index
  * @param {Partial<ExprItem>} [init]
  */
-export function insertExprAt(index, init = {}) {
+export function insertExprAt(index: number, init: Partial<ExprItem> = {}) {
   const at = clampInsertIndex(index, init);
   const row = createExprItem({
     ...init,
@@ -297,7 +289,7 @@ export function commitAutoParams() {
  * @param {string | null} beforeId
  * @returns {boolean} true if order changed
  */
-export function moveExpr(id, beforeId) {
+export function moveExpr(id: string, beforeId: string | null) {
   const from = items.findIndex((e) => e.id === id);
   if (from < 0) return false;
   if (beforeId === id) return false;
@@ -333,7 +325,7 @@ export function mergeExprIntoPrevious(id) {
  * Split row `id` at a latex boundary into left (same row) + right (new row below).
  * @returns {{ id: string, caretOffset: number } | null}
  */
-export function splitExprAt(id, leftLatex, rightLatex) {
+export function splitExprAt(id: string, leftLatex: string, rightLatex: string) {
   const idx = items.findIndex((e) => e.id === id);
   if (idx < 0) return null;
   items[idx].latex = leftLatex ?? "";
@@ -354,7 +346,7 @@ export function splitExprAt(id, leftLatex, rightLatex) {
  * @param {string} id
  * @param {Partial<ExprItem>} patch
  */
-export function updateExpr(id, patch) {
+export function updateExpr(id: string, patch: Partial<ExprItem>) {
   const row = items.find((e) => e.id === id);
   if (!row) return null;
   Object.assign(row, patch);
@@ -373,7 +365,7 @@ export function updateExpr(id, patch) {
 }
 
 /** Like updateExpr but does not notify listeners (animation / silent latex sync). */
-export function updateExprSilent(id, patch) {
+export function updateExprSilent(id: string, patch: Partial<ExprItem>) {
   const row = items.find((e) => e.id === id);
   if (!row) return null;
   Object.assign(row, patch);
@@ -409,7 +401,10 @@ export function hexToRgb01(hex) {
  * @param {"parameter" | "constraint" | "definition" | "bare"} kind
  * @returns {"parameter" | "density" | "constraint"}
  */
-export function resolveExprRole(_role, kind) {
+export function resolveExprRole(
+  _role: ExprRole,
+  kind: "parameter" | "constraint" | "definition" | "bare",
+): "parameter" | "density" | "constraint" {
   if (kind === "parameter") return "parameter";
   return kind === "constraint" ? "constraint" : "density";
 }

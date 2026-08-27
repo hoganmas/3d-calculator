@@ -2,7 +2,7 @@ import "mathlive";
 import "mathlive/static.css";
 import "./ui/theme.css";
 import { initTheme } from "./ui/theme.js";
-import { mountExprList } from "./ui/expressionList.js";
+import { mountExprList } from "./ui/expr-sidebar/mount.ts";
 import { setExpressionsOnChange } from "./model/expressions.js";
 import { anyParamAnimating } from "./model/params.js";
 import { syncExprCompileState } from "./app/hud.js";

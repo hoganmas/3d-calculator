@@ -1,3 +1,4 @@
+// @ts-nocheck — incremental TS migration; DOM refs and keyframe cache shapes still JS.
 import { MAX_DEG } from "../math/limits.js";
 import { fitChebyshev3D } from "../math/fit.js";
 import { idctCheb3D, idctChebGrad3D } from "../math/idct.js";
@@ -30,6 +31,7 @@ import { compileExpr, classifyExpr } from "../math/fit.js";
 import { listExpressions, resolveExprRole } from "../model/expressions.js";
 import { els, viewportSize } from "./dom.js";
 import { state, FIT_DEBOUNCE_MS } from "./state.js";
+import type { ConstraintLayer, DensLayer, SceneBake } from "../types/models.js";
 import { setBoxSize } from "./scene.js";
 import { compileAllExprs, layerRgbFromItem } from "./compile.js";
 import {
@@ -67,7 +69,7 @@ export function tickGpuKeyframeBlends() {
   return true;
 }
 
-export function uploadFit(opts = {}) {
+export function uploadFit(opts: { fromAnim?: boolean } = {}) {
   const fromAnim = !!opts.fromAnim;
   setErr("");
   try {
@@ -110,8 +112,8 @@ export function uploadFit(opts = {}) {
       return;
     }
 
-    const densLayers = [];
-    const constraints = [];
+    const densLayers: DensLayer[] = [];
+    const constraints: ConstraintLayer[] = [];
     let cheb = null;
     let fitRel = NaN;
     let timingAcc = { sampleMs: 0, chebMs: 0, monoMs: 0, l2Ms: 0, totalMs: 0 };
@@ -127,8 +129,8 @@ export function uploadFit(opts = {}) {
     if (fromAnim) beginKeyframePass();
     else clearKeyframeCaches();
 
-    /** @type {Map<string, any>} */
-    const prevById = new Map();
+    /** @type {Map<string, Record<string, unknown>>} */
+    const prevById = new Map<string, Record<string, unknown>>();
     const canReuseCache =
       fromAnim &&
       dirty &&
