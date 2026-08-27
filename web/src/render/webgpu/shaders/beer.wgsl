@@ -1,0 +1,134 @@
+struct DrawParams {
+  fbW: u32,
+  fbH: u32,
+  gridM: u32,
+  steps: u32,
+  half: f32,
+  scale: f32,
+  densBase: f32,
+  layerCount: u32,
+  ro: vec3f,
+  _p1: f32,
+  m0: vec4f,
+  m1: vec4f,
+  m2: vec4f,
+}
+
+@group(0) @binding(0) var<uniform> draw: DrawParams;
+@group(0) @binding(1) var<storage, read> volume: array<f32>;
+@group(0) @binding(2) var occlTex: texture_2d<f32>;
+@group(0) @binding(3) var<storage, read> layerGrads: array<vec4f>;
+
+{{GRADIENT_WGSL}}
+
+fn sampleLayerGrad(L: u32, t: f32) -> vec3f {
+  let base = L * MAX_GRAD_STOPS;
+  var stops: array<vec4f, {{MAX_GRAD_STOPS}}>;
+  for (var i: u32 = 0u; i < MAX_GRAD_STOPS; i++) {
+    stops[i] = layerGrads[base + i];
+  }
+  return sampleGradStops(&stops, t);
+}
+
+struct VSOut { @builtin(position) pos: vec4f, }
+
+@vertex
+fn vsMain(@builtin(vertex_index) vi: u32) -> VSOut {
+  var p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
+  var o: VSOut; o.pos = vec4f(p[vi], 0.0, 1.0); return o;
+}
+
+fn densAtBase(base: u32, ix: i32, iy: i32, iz: i32) -> f32 {
+  let M = i32(draw.gridM);
+  let x = clamp(ix, 0, M - 1); let y = clamp(iy, 0, M - 1); let z = clamp(iz, 0, M - 1);
+  return volume[base + u32(x) + u32(y) * draw.gridM + u32(z) * draw.gridM * draw.gridM];
+}
+fn chebIndex(xi: f32) -> f32 {
+  let x = clamp(xi, -1.0, 1.0);
+  return f32(draw.gridM) / 3.141592653589793 * acos(x) - 0.5;
+}
+fn sampleLayer(base: u32, p: vec3f) -> f32 {
+  let half = draw.half;
+  let xi = clamp(p / half, vec3f(-1.0), vec3f(1.0));
+  let fx = chebIndex(xi.x); let fy = chebIndex(xi.y); let fz = chebIndex(xi.z);
+  let x0 = i32(floor(fx)); let y0 = i32(floor(fy)); let z0 = i32(floor(fz));
+  let tx = clamp(fx - f32(x0), 0.0, 1.0);
+  let ty = clamp(fy - f32(y0), 0.0, 1.0);
+  let tz = clamp(fz - f32(z0), 0.0, 1.0);
+  let c000 = densAtBase(base, x0, y0, z0); let c100 = densAtBase(base, x0 + 1, y0, z0);
+  let c010 = densAtBase(base, x0, y0 + 1, z0); let c110 = densAtBase(base, x0 + 1, y0 + 1, z0);
+  let c001 = densAtBase(base, x0, y0, z0 + 1); let c101 = densAtBase(base, x0 + 1, y0, z0 + 1);
+  let c011 = densAtBase(base, x0, y0 + 1, z0 + 1); let c111 = densAtBase(base, x0 + 1, y0 + 1, z0 + 1);
+  return mix(mix(mix(c000, c100, tx), mix(c010, c110, tx), ty),
+              mix(mix(c001, c101, tx), mix(c011, c111, tx), ty), tz);
+}
+
+@fragment
+fn fsMain(in: VSOut) -> @location(0) vec4f {
+  let fbW = f32(draw.fbW); let fbH = f32(draw.fbH);
+  let ndcX = -1.0 + 2.0 * in.pos.x / fbW;
+  let ndcY = 1.0 - 2.0 * in.pos.y / fbH;
+  let xy1 = vec3f(ndcX, ndcY, 1.0);
+  let rd = vec3f(dot(draw.m0.xyz, xy1), dot(draw.m1.xyz, xy1), dot(draw.m2.xyz, xy1));
+  let ro = draw.ro; let half = draw.half;
+  let invRd = vec3f(
+    select(1e15, 1.0 / rd.x, abs(rd.x) >= 1e-15),
+    select(1e15, 1.0 / rd.y, abs(rd.y) >= 1e-15),
+    select(1e15, 1.0 / rd.z, abs(rd.z) >= 1e-15),
+  );
+  let tA = (-vec3f(half) - ro) * invRd;
+  let tB = (vec3f(half) - ro) * invRd;
+  let tmin = min(tA, tB); let tmax = max(tA, tB);
+  var tEnter = max(max(max(tmin.x, tmin.y), tmin.z), 0.0);
+  var tExit = min(min(tmax.x, tmax.y), tmax.z);
+  if (!(tExit > tEnter + 1e-6)) { return vec4f(0.0); }
+
+  let far = max(tExit, half * 4.0);
+  let px = u32(clamp(floor(in.pos.x), 0.0, fbW - 1.0));
+  let py = u32(clamp(floor(in.pos.y), 0.0, fbH - 1.0));
+  let dSurf = textureLoad(occlTex, vec2u(px, py), 0).r;
+  if (dSurf < 0.999) { tExit = min(tExit, dSurf * far); }
+  if (!(tExit > tEnter + 1e-6)) { return vec4f(0.0); }
+
+  var steps = draw.steps;
+  if (steps < 8u) { steps = 8u; }
+  if (steps > 96u) { steps = 96u; }
+  let dt = (tExit - tEnter) / f32(steps);
+  let ds = length(rd) * dt;
+  let volN = draw.gridM * draw.gridM * draw.gridM;
+  let densBase = u32(draw.densBase);
+  let nLay = min(draw.layerCount, {{MAX_DENS_LAYERS}}u);
+
+  var rgb = vec3f(0.0); var T = 1.0; var s = tEnter + 0.5 * dt;
+  for (var i: u32 = 0u; i < 96u; i++) {
+    if (i >= steps) { break; }
+    if (T < 0.002) { break; }
+    let p = ro + rd * s;
+    var sigma = 0.0; var emitAcc = vec3f(0.0);
+    for (var L: u32 = 0u; L < {{MAX_DENS_LAYERS}}u; L++) {
+      if (L >= nLay) { break; }
+      var dval = sampleLayer(densBase + L * volN, p);
+      if (dval != dval) { dval = 0.0; }
+      dval = clamp(dval, -4.0, 8.0);
+      let sig = min(max(0.0, draw.scale * dval), 40.0);
+      if (sig > 1e-8) {
+        let gt = gradientT(p, half);
+        let col = sampleLayerGrad(L, gt);
+        sigma += sig;
+        emitAcc += col * sig;
+      }
+    }
+    if (sigma > 1e-8) {
+      let absorb = exp(-sigma * ds);
+      let opacity = 1.0 - absorb;
+      let col = emitAcc / sigma;
+      // Beer emission + soft ambient so wispy low-density regions stay luminous.
+      rgb += T * opacity * col * (1.0 + 0.42);
+      T *= absorb;
+    }
+    s += dt;
+  }
+  let a = 1.0 - T;
+  if (a < 0.001) { return vec4f(0.0); }
+  return vec4f(rgb, a);
+}

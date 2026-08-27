@@ -1,43 +1,62 @@
 # Source layout (`src/`)
 
-Vite entry: [`index.html`](index.html) → [`src/main.js`](src/main.js).
+Vite entry: [`index.html`](index.html) → [`src/main.js`](src/main.js) (thin bootstrap).
 
 ```
 src/
-  main.js                 App orchestrator (scene, fit pipeline, render loop, HUD)
+  main.js                 Wire modules, mount expression list, start loop
+  app/
+    state.js              Shared mutable runtime state
+    dom.js                  DOM refs, settings dialog, panel resize
+    scene.js                THREE scene, camera, grid, lava background
+    compile.js              Expression compile + preset helpers
+    pipeline.js             uploadFit, bakeChebVolume, keyframes
+    webglFallback.js        WebGL Beer march (no WebGPU)
+    presentation.js         Resize, march downscale, GPU/CPU presentation
+    hud.js                  Metrics HUD + compile status
+    loop.js                 requestAnimationFrame loop
   math/
-    fit.js                LaTeX compile + Chebyshev least-squares fit
-    idct.js               Separable Chebyshev IDCT → dens grid (+ grad for isos)
-    limits.js             Shared constants (e.g. MAX_DEG)
+    fit.js                  LaTeX compile + Chebyshev least-squares fit
+    idct.js                 Separable Chebyshev IDCT → dens grid (+ grad)
+    limits.js               MAX_DEG and shared math constants
   model/
-    expressions.js        Expression list state, colors, roles (manifold vs dens)
-    params.js             Free-parameter values, sliders, ping-pong / loop animation
-    keyframes.js          Animated-param keyframe cache + GPU blend sampling
+    expressions.js          Expression list state, colors, roles
+    params.js               Free-parameter values + animation
+    keyframes.js            Animated-param keyframe cache + GPU blend
   render/
-    camera.js             NDC → world ray helpers for volume march
-    background.js         Three.js fullscreen backdrop shader
+    camera.js               NDC → world ray helpers
+    background.js           Three.js fullscreen backdrop shader
     webgl/
-      marchShaders.js     WebGL Beer–Lambert fallback (single summed dens texture)
+      marchShaders.js       WebGL Beer–Lambert fallback GLSL
     webgpu/
-      march.js            WebGPU iso manifolds + multi-layer dens march
+      march.js              WebGPU init, frame graph, public exports
+      gpuState.js           Shared GPU device / texture state
+      uniforms.js           Draw-param packing + layer color upload
+      sceneUpload.js        Volume upload + keyframe patch
+      pipelines.js          Shader module compile + pipeline creation
+      shaders/
+        compose.js          Load .wgsl ?raw, inject constants
+        common/gradient.wgsl
+        isoHermite.wgsl
+        isoTrilinear.wgsl
+        beer.wgsl, grid.wgsl, axisLabel.wgsl, fxaa.wgsl, ssao.wgsl
   ui/
-    expressionList.js     Sidebar: MathLive rows, param sliders, play controls
-    liquidSlider.js       Glass-style range slider thumbs
-    theme.js              Light / dark / system theme + CSS variables
-    theme.css
+    expressionList.js       Sidebar: MathLive rows, sliders, play
+    liquidSlider.js         Glass-style range slider thumbs
+    theme.js / theme.css
 ```
 
 ## Data flow
 
 ```
 MathLive (ui/expressionList)
-  → compile + classify (math/fit)
+  → compile + classify (app/compile, math/fit)
   → fit Chebyshev coeffs (math/fit)
   → IDCT volumes (math/idct)
-  → upload + march (render/webgpu/march, or render/webgl fallback)
+  → upload + march (app/pipeline → render/webgpu/march, or app/webglFallback)
 ```
 
-Animated free parameters bake keyframes in `model/keyframes.js` (cold fit, hot GPU lerp). Expression and param state live in `model/`; rendering code reads baked volumes and colors only.
+Animated free parameters bake keyframes in `model/keyframes.js` (cold fit, hot GPU lerp).
 
 ## Layer rules
 
@@ -45,14 +64,15 @@ Animated free parameters bake keyframes in `model/keyframes.js` (cold fit, hot G
 |---|---|
 | `math/` | npm deps only |
 | `model/` | `math/` |
-| `render/` | `math/`, `model/` (colors), `render/camera.js` |
+| `render/` | `math/`, `model/`, sibling render modules |
 | `ui/` | `math/`, `model/`, sibling `ui/` |
-| `main.js` | all of the above |
+| `app/` | all of the above (orchestration) |
+| `main.js` | `app/`, `ui/` |
 
-Avoid importing `ui/` or `main.js` from lower layers.
+Avoid importing `app/` or `main.js` from `math/`, `model/`, `render/`, or `ui/`.
 
 ## Notes
 
-- **`main.js` is large** — scene setup, `uploadFit`, WebGL fallback wiring, settings, and the animation loop still live here. A future split into `src/app/` is optional.
-- **Legacy names in code** — some internals still say `clip*` (e.g. `clipQuad`, `[clip-grid]` logs); file paths use the names above.
+- **WGSL lives in `.wgsl` files** under `render/webgpu/shaders/`; Hermite vs trilinear iso uses two separate shaders selected at pipeline build.
+- **Legacy names** — some internals still say `clip*` (e.g. `clipQuad`, `[clip-grid]` logs).
 - **Pipeline write-up** — [`research/poly/notes/cheb-idct-volume.md`](../research/poly/notes/cheb-idct-volume.md).

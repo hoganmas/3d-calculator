@@ -33,7 +33,7 @@ Pipeline notes: [`research/poly/notes/cheb-idct-volume.md`](research/poly/notes/
 ## Layout
 
 ```
-web/                Laplacian app (Vite + Three.js + WebGPU) — see web/STRUCTURE.md
+web/                Laplacian app — see [web/STRUCTURE.md](web/STRUCTURE.md)
 research/
   gaussian/         Gaussian-mixture transmittance experiments (Python)
   poly/             Polynomial density / transmittance track (Python + notes)
