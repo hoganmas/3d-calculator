@@ -8,6 +8,8 @@ Multi-expression 3D polynomial calculator (Three.js + WebGPU).
 
 Details: [`research/poly/notes/cheb-idct-volume.md`](../research/poly/notes/cheb-idct-volume.md).
 
+Source layout: [`STRUCTURE.md`](STRUCTURE.md).
+
 ## Run locally
 
 ```bash

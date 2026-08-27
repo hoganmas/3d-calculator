@@ -1,10 +1,6 @@
 /**
  * Camera / NDC helpers for the volume march.
- * Soft degree cap for fit UI; volume grid is M = deg + 1.
  */
-
-/** Soft cap for fit / UI. Volume grid is M = deg + 1. */
-export const MAX_DEG = 128;
 
 /**
  * Map NDC (x, y, 1) → world dir_raw = R · (sx x, sy y, −1).

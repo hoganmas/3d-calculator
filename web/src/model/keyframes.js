@@ -4,8 +4,8 @@
  * Hot: GPU blends adjacent frames (no DCT / no N³ upload).
  */
 
-import { fitChebyshev3D } from "./fit.js";
-import { idctCheb3D, idctChebGrad3D } from "./chebIdct.js";
+import { fitChebyshev3D } from "../math/fit.js";
+import { idctCheb3D, idctChebGrad3D } from "../math/idct.js";
 import { getParam } from "./params.js";
 
 export const DEFAULT_KEYFRAME_K = 8;

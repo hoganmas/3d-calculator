@@ -2,11 +2,12 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import "mathlive";
 import "mathlive/static.css";
-import "./theme.css";
-import { initTheme, onThemeChange, readThemeColors, getThemePref, setThemePref } from "./theme.js";
-import { createLavaBackground } from "./lavaBackground.js";
-import { mountLiquidThumb, syncLiquidThumb } from "./liquidSlider.js";
-import { compileExpr, classifyExpr, fitChebyshev3D, PRESETS, formatParamLatexValue, compileParamLatex } from "./fit.js";
+import "./ui/theme.css";
+import { initTheme, onThemeChange, readThemeColors, getThemePref, setThemePref } from "./ui/theme.js";
+import { createLavaBackground } from "./render/background.js";
+import { mountLiquidThumb, syncLiquidThumb } from "./ui/liquidSlider.js";
+import { compileExpr, classifyExpr, fitChebyshev3D, PRESETS, formatParamLatexValue, compileParamLatex } from "./math/fit.js";
+import { MAX_DEG } from "./math/limits.js";
 import {
   syncParamsFromDefinitions,
   applyParamSeed,
@@ -18,7 +19,7 @@ import {
   tickParamAnimation,
   collectAnimDirtyParams,
   anyParamAnimating,
-} from "./params.js";
+} from "./model/params.js";
 import {
   listExpressions,
   setExpressions,
@@ -33,11 +34,11 @@ import {
   commitAutoParams,
   resolveExprGradient,
   color2ForPrimary,
-} from "./expressions.js";
-import { mountExprList } from "./exprListUi.js";
-import { clipGridVertex, clipGridFragment } from "./clipShaders.js";
-import { ndcToDirMatrix, perspectiveDirScale, offsetDirMatrix, MAX_DEG } from "./clipGrid.js";
-import { idctCheb3D, idctChebGrad3D } from "./chebIdct.js";
+} from "./model/expressions.js";
+import { mountExprList } from "./ui/expressionList.js";
+import { clipGridVertex, clipGridFragment } from "./render/webgl/marchShaders.js";
+import { ndcToDirMatrix, perspectiveDirScale, offsetDirMatrix } from "./render/camera.js";
+import { idctCheb3D, idctChebGrad3D } from "./math/idct.js";
 import {
   beginKeyframePass,
   clearKeyframeCaches,
@@ -49,7 +50,7 @@ import {
   ensureLayerKeyframes,
   sampleLayerKeyframes,
   peekKeyframeBlend,
-} from "./animKeyframes.js";
+} from "./model/keyframes.js";
 import {
   initClipBakeGpu,
   isClipBakeGpuReady,
@@ -70,7 +71,7 @@ import {
   applyClipGpuTheme,
   getIsoInterpHermite,
   setIsoInterpHermite,
-} from "./clipBakeGpu.js";
+} from "./render/webgpu/march.js";
 
 initTheme();
 

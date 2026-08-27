@@ -1,8 +1,8 @@
 /**
  * WebGPU volume march: IDCT dens grids + iso manifolds + multi-layer Beer.
  */
-import { ndcToDirMatrix, perspectiveDirScale, offsetDirMatrix } from "./clipGrid.js";
-import { hexToRgb01, EXPR_GRADIENTS, MAX_GRAD_STOPS } from "./expressions.js";
+import { ndcToDirMatrix, perspectiveDirScale, offsetDirMatrix } from "../camera.js";
+import { hexToRgb01, EXPR_GRADIENTS, MAX_GRAD_STOPS } from "../../model/expressions.js";
 
 export const MAX_DENS_LAYERS = 8;
 

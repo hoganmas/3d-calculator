@@ -1,7 +1,7 @@
 /** Density expression (MathLive/LaTeX via Compute Engine) + 3D Chebyshev fit → IDCT dens. */
 
 import { compile, ComputeEngine } from "@cortex-js/compute-engine";
-import { MAX_DEG } from "./clipGrid.js";
+import { MAX_DEG } from "./limits.js";
 
 const ce = new ComputeEngine();
 

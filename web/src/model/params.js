@@ -3,7 +3,7 @@
  * RHS may reference other params.
  */
 
-import { compileParamLatex, formatParamLatexValue } from "./fit.js";
+import { compileParamLatex, formatParamLatexValue } from "../math/fit.js";
 
 /**
  * @typedef {"pingpong" | "loop"} AnimMode

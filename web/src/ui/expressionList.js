@@ -22,8 +22,8 @@ import {
   normalizeGradColors,
   MAX_GRAD_STOPS,
   MIN_GRAD_STOPS,
-} from "./expressions.js";
-import { classifyExpr } from "./fit.js";
+} from "../model/expressions.js";
+import { classifyExpr } from "../math/fit.js";
 import { mountLiquidThumb, syncLiquidThumb } from "./liquidSlider.js";
 import {
   getParam,
@@ -34,7 +34,7 @@ import {
   stopParamAnimation,
   phaseForValue,
   normalizeAnimMode,
-} from "./params.js";
+} from "../model/params.js";
 
 const ANIM_OPTS_ICON = `<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 3.2a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Zm0 3.7a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Zm0 3.7a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Z"/></svg>`;
 
