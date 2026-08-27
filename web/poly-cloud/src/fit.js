@@ -650,7 +650,7 @@ export function evalMonomial3D(mono, deg, x, y, z) {
 
 /**
  * Fit f on [-half,half]^3 with tensor Chebyshev, convert to world monomials.
- * @param {{ skipL2?: boolean }} [opts]
+ * @param {{ skipL2?: boolean, skipMono?: boolean }} [opts]
  */
 export function fitChebyshev3D(fn, half, deg, opts = {}) {
   const tAll = performance.now();
@@ -686,13 +686,22 @@ export function fitChebyshev3D(fn, half, deg, opts = {}) {
   const cheb = chebDCT3DSeparable(vals, n, uNodes);
   const chebMs = performance.now() - t0;
 
-  t0 = performance.now();
-  const mono = chebToMonomial3D(cheb, N, half);
-  const monoMs = performance.now() - t0;
+  let mono = null;
+  let monoMs = 0;
+  if (!opts.skipMono) {
+    t0 = performance.now();
+    mono = chebToMonomial3D(cheb, N, half);
+    monoMs = performance.now() - t0;
+  }
 
   let fitRelL2 = NaN;
   let l2Ms = 0;
   if (!opts.skipL2) {
+    if (!mono) {
+      t0 = performance.now();
+      mono = chebToMonomial3D(cheb, N, half);
+      monoMs += performance.now() - t0;
+    }
     t0 = performance.now();
     const M = 10;
     let num = 0;

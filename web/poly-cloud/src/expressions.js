@@ -115,6 +115,7 @@ export function nextExprColor() {
  *   sliderSpeed: number,
  *   sliderAnimating: boolean,
  *   sliderPhase: number,
+ *   sliderAnimMode: "pingpong" | "loop",
  *   autoParam: boolean,
  * }} ExprItem
  */
@@ -219,6 +220,7 @@ export function createExprItem(init = {}) {
           : 0.35,
     sliderAnimating: !!(init.sliderAnimating ?? init.animate),
     sliderPhase: Number.isFinite(init.sliderPhase) ? init.sliderPhase : Math.random(),
+    sliderAnimMode: init.sliderAnimMode === "loop" ? "loop" : "pingpong",
     autoParam: !!init.autoParam,
   };
 }

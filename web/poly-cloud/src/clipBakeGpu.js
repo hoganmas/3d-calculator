@@ -1870,6 +1870,43 @@ export function setConstraintKeyframeBlends(blends) {
   }
 }
 
+/**
+ * Patch a single constraint keyframe slot in the uploaded volume buffer (async fill).
+ * @param {string} layerId
+ * @param {number} frameIndex
+ * @param {{ dens?: Float32Array, gx?: Float32Array, gy?: Float32Array, gz?: Float32Array }} frame
+ * @returns {boolean}
+ */
+export function patchConstraintKeyframeFrame(layerId, frameIndex, frame) {
+  if (!device || !volumeBuf || !scenePacked || !frame) return false;
+  const c = sceneConstraints.find((x) => x.id === layerId);
+  if (!c || !(c.K > 1)) return false;
+  const k = frameIndex | 0;
+  if (k < 0 || k >= c.K) return false;
+  const volN = sceneM * sceneM * sceneM;
+  const stride = c.frameStride || 4 * volN;
+  const base = c.base + k * stride;
+  if (base + stride > scenePacked.length) return false;
+
+  const put = (src, slot) => {
+    const off = base + slot * volN;
+    if (src && src.length) {
+      scenePacked.set(src.length >= volN ? src.subarray(0, volN) : src, off);
+    } else {
+      scenePacked.fill(0, off, off + volN);
+    }
+  };
+  put(frame.dens, 0);
+  put(frame.gx, 1);
+  put(frame.gy, 2);
+  put(frame.gz, 3);
+
+  const byteOffset = base * 4;
+  const view = scenePacked.subarray(base, base + stride);
+  device.queue.writeBuffer(volumeBuf, byteOffset, view);
+  return true;
+}
+
 export function hasUploadedVolume() {
   return sceneM > 0 && (densLayerCount > 0 || sceneConstraints.length > 0);
 }

@@ -32,8 +32,15 @@ import {
   updateParam,
   toggleParamAnimate,
   stopParamAnimation,
+  phaseForValue,
+  normalizeAnimMode,
 } from "./params.js";
 
+const ANIM_OPTS_ICON = `<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 3.2a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Zm0 3.7a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Zm0 3.7a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Z"/></svg>`;
+
+const ANIM_SPEED_MIN = 0.05;
+const ANIM_SPEED_MAX = 2;
+const ANIM_SPEED_STEP = 0.05;
 function readFieldLatex(mf) {
   return typeof mf.getValue === "function" ? String(mf.getValue("latex") || "") : String(mf.value || "");
 }
@@ -62,18 +69,22 @@ function isCursorAtStart(mf) {
 }
 
 function focusFieldAt(root, id, offset) {
-  const mf = root.querySelector(`.expr-row[data-id="${id}"] math-field`);
-  if (!mf) return;
+  const mf = root.querySelector(`.expr-row[data-id="${CSS.escape(id)}"] math-field`);
+  if (!mf) return false;
   selectExpr(id);
   root.querySelectorAll(".expr-row").forEach((r) => {
     r.classList.toggle("selected", r.dataset.id === id);
   });
-  mf.focus?.();
+  try {
+    mf.focus?.({ preventScroll: true });
+  } catch (_) {
+    mf.focus?.();
+  }
   const end = getLastOffset(mf);
   const pos = Math.max(0, Math.min(offset | 0, end));
   if (typeof mf.position === "number") {
     mf.position = pos;
-    return;
+    return true;
   }
   if (mf.selection) {
     try {
@@ -82,6 +93,7 @@ function focusFieldAt(root, id, offset) {
       /* ignore */
     }
   }
+  return true;
 }
 
 function latexAroundCaret(mf) {
@@ -249,6 +261,8 @@ export function mountExprList(opts) {
 
   /** @type {HTMLElement | null} */
   let openGradPopover = null;
+  /** @type {HTMLElement | null} */
+  let openAnimPopover = null;
 
   function closeGradPopover() {
     if (openGradPopover) {
@@ -258,11 +272,31 @@ export function mountExprList(opts) {
     document.removeEventListener("pointerdown", onGradOutside, true);
   }
 
+  function closeAnimPopover() {
+    if (openAnimPopover) {
+      openAnimPopover.remove();
+      openAnimPopover = null;
+    }
+    document.removeEventListener("pointerdown", onAnimOutside, true);
+  }
+
+  function closeAllPopovers() {
+    closeGradPopover();
+    closeAnimPopover();
+  }
+
   function onGradOutside(ev) {
     if (!(ev.target instanceof Node)) return;
     if (openGradPopover?.contains(ev.target)) return;
     if (ev.target instanceof Element && ev.target.closest(".expr-color")) return;
     closeGradPopover();
+  }
+
+  function onAnimOutside(ev) {
+    if (!(ev.target instanceof Node)) return;
+    if (openAnimPopover?.contains(ev.target)) return;
+    if (ev.target instanceof Element && ev.target.closest(".expr-param-anim-opts")) return;
+    closeAnimPopover();
   }
 
   /**
@@ -271,7 +305,7 @@ export function mountExprList(opts) {
    * @param {HTMLElement} row
    */
   function openGradientEditor(anchor, item, row) {
-    closeGradPopover();
+    closeAllPopovers();
     const grad = resolveExprGradient(item);
     let draft = grad.colors.slice();
 
@@ -373,6 +407,146 @@ export function mountExprList(opts) {
     document.addEventListener("pointerdown", onGradOutside, true);
   }
 
+  /**
+   * @param {number} speed
+   */
+  function fmtAnimSpeed(speed) {
+    const s = Math.round(speed * 100) / 100;
+    return Number.isInteger(s) ? String(s) : s.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+  }
+
+  /**
+   * @param {HTMLElement} anchor
+   * @param {any} item
+   * @param {HTMLElement} row
+   * @param {string} paramName
+   */
+  function openAnimOptions(anchor, item, row, paramName) {
+    closeAllPopovers();
+    const p = getParam(paramName);
+    if (!p || p.driven) return;
+
+    const pop = document.createElement("div");
+    pop.className = "anim-popover";
+    pop.dataset.param = paramName;
+    pop.setAttribute("role", "dialog");
+    pop.setAttribute("aria-label", "Animation options");
+
+    const head = document.createElement("div");
+    head.className = "anim-popover-head";
+    head.textContent = "Animation";
+
+    const modes = document.createElement("div");
+    modes.className = "anim-popover-modes";
+    modes.setAttribute("role", "group");
+    modes.setAttribute("aria-label", "Curve");
+
+    /** @type {{ mode: "pingpong" | "loop", label: string }[]} */
+    const modeDefs = [
+      { mode: "pingpong", label: "Back & forth" },
+      { mode: "loop", label: "Loop" },
+    ];
+    /** @type {HTMLButtonElement[]} */
+    const modeBtns = [];
+    for (const def of modeDefs) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = def.label;
+      btn.dataset.mode = def.mode;
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        applyAnimPatch({ animMode: def.mode });
+      });
+      modeBtns.push(btn);
+      modes.append(btn);
+    }
+
+    const speedBlock = document.createElement("div");
+    speedBlock.className = "anim-popover-speed";
+
+    const speedRow = document.createElement("div");
+    speedRow.className = "anim-popover-speed-row";
+    const speedLabel = document.createElement("span");
+    speedLabel.textContent = "Speed";
+    const speedVal = document.createElement("span");
+    speedVal.className = "anim-popover-speed-val";
+
+    const speedTrack = document.createElement("div");
+    speedTrack.className = "anim-popover-speed-track expr-param-track";
+
+    const speed = document.createElement("input");
+    speed.type = "range";
+    speed.className = "expr-param-slider";
+    speed.min = String(ANIM_SPEED_MIN);
+    speed.max = String(ANIM_SPEED_MAX);
+    speed.step = String(ANIM_SPEED_STEP);
+    speed.title = "Cycles per second";
+    speed.addEventListener("input", () => {
+      const n = Number(speed.value);
+      if (!Number.isFinite(n) || n <= 0) return;
+      applyAnimPatch({ speed: n });
+    });
+    speed.addEventListener("click", (ev) => ev.stopPropagation());
+
+    speedTrack.append(speed);
+    mountLiquidThumb(speedTrack, speed);
+
+    speedRow.append(speedLabel, speedVal);
+    speedBlock.append(speedRow, speedTrack);
+    pop.append(head, modes, speedBlock);
+
+    /**
+     * @param {{ animMode?: "pingpong" | "loop", speed?: number }} patch
+     */
+    function applyAnimPatch(patch) {
+      const cur = getParam(paramName);
+      if (!cur) return;
+      const timeSec = performance.now() / 1000;
+      const nextMode = patch.animMode != null ? normalizeAnimMode(patch.animMode) : cur.animMode;
+      const nextSpeed =
+        Number.isFinite(patch.speed) && patch.speed > 0 ? patch.speed : cur.speed;
+      const next = updateParam(paramName, {
+        animMode: nextMode,
+        speed: nextSpeed,
+        phase: phaseForValue(
+          { ...cur, animMode: nextMode, speed: nextSpeed },
+          timeSec,
+        ),
+      });
+      if (!next) return;
+      updateExprSilent(item.id, {
+        sliderAnimMode: next.animMode,
+        sliderSpeed: next.speed,
+        sliderPhase: next.phase,
+      });
+      syncParamSlider(row, paramName);
+      syncPopoverFromParam(next);
+      paramNotify();
+    }
+
+    /**
+     * @param {{ value: number, min: number, max: number, speed: number, animMode: string }} st
+     */
+    function syncPopoverFromParam(st) {
+      const mode = normalizeAnimMode(st.animMode);
+      for (const btn of modeBtns) {
+        btn.classList.toggle("on", btn.dataset.mode === mode);
+      }
+      if (document.activeElement !== speed) speed.value = String(st.speed);
+      speedVal.textContent = `${fmtAnimSpeed(st.speed)}×`;
+      syncLiquidThumb(speed);
+    }
+
+    syncPopoverFromParam(p);
+
+    const rect = anchor.getBoundingClientRect();
+    pop.style.left = `${Math.min(window.innerWidth - 240, Math.max(8, rect.right - 220))}px`;
+    pop.style.top = `${Math.min(window.innerHeight - 200, rect.bottom + 6)}px`;
+    document.body.append(pop);
+    openAnimPopover = pop;
+    document.addEventListener("pointerdown", onAnimOutside, true);
+  }
+
   function syncParamSlider(row, name) {
     const p = getParam(name);
     if (!p || !row) return;
@@ -381,6 +555,7 @@ export function mountExprList(opts) {
     const minEl = block.querySelector(".expr-param-min");
     const maxEl = block.querySelector(".expr-param-max");
     const play = block.querySelector(".expr-param-play");
+    const opts = block.querySelector(".expr-param-anim-opts");
     const mf = row.querySelector("math-field");
     if (slider instanceof HTMLInputElement) {
       slider.min = String(p.min);
@@ -415,6 +590,13 @@ export function mountExprList(opts) {
         : p.animating
           ? "Pause animation"
           : "Animate between min and max";
+    }
+    if (opts instanceof HTMLButtonElement) {
+      opts.disabled = !!p.driven;
+      const mode = normalizeAnimMode(p.animMode);
+      opts.title = p.driven
+        ? "Driven by equation"
+        : `Animation options (${mode === "loop" ? "loop" : "back & forth"}, ${fmtAnimSpeed(p.speed)}×)`;
     }
     if (mf && document.activeElement !== mf && !p.driven) {
       const cur = readFieldLatex(mf);
@@ -544,7 +726,23 @@ export function mountExprList(opts) {
       }
     });
 
-    rail.append(minEl, trackWrap, maxEl, play);
+    const opts = document.createElement("button");
+    opts.type = "button";
+    opts.className = "expr-param-anim-opts";
+    opts.innerHTML = ANIM_OPTS_ICON;
+    opts.setAttribute("aria-label", "Animation options");
+    opts.title = "Animation options";
+    opts.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      if (openAnimPopover) {
+        const same = openAnimPopover.dataset.param === paramName;
+        closeAnimPopover();
+        if (same) return;
+      }
+      openAnimOptions(opts, item, row, paramName);
+    });
+
+    rail.append(minEl, trackWrap, maxEl, play, opts);
     block.appendChild(rail);
     mid.appendChild(block);
     queueMicrotask(() => syncParamSlider(row, paramName));
@@ -580,11 +778,31 @@ export function mountExprList(opts) {
     return null;
   }
 
-  function restoreFocus(snap) {
+  /** Invalidates in-flight restoreFocus from an older render. */
+  let focusEpoch = 0;
+  /**
+   * Survives compile/auto-param rebuilds that bump focusEpoch after Enter/merge.
+   * Cleared once a restore for this target successfully runs.
+   * @type {{ id: string, pos: number } | null}
+   */
+  let pendingFocus = null;
+
+  /**
+   * @param {{ id: string, pos?: number } | null | undefined} snap
+   * @param {number} [epoch]
+   */
+  function restoreFocus(snap, epoch = focusEpoch) {
     if (!snap?.id) return;
-    const apply = () => focusFieldAt(root, snap.id, snap.pos);
-    queueMicrotask(apply);
-    requestAnimationFrame(() => requestAnimationFrame(apply));
+    const id = snap.id;
+    const pos = snap.pos | 0;
+    const apply = (clearPending) => {
+      if (epoch !== focusEpoch) return;
+      focusFieldAt(root, id, pos);
+      if (clearPending && pendingFocus?.id === id) pendingFocus = null;
+    };
+    // Microtask: ASAP after DOM swap. rAF: MathLive custom elements often need a frame.
+    queueMicrotask(() => apply(false));
+    requestAnimationFrame(() => requestAnimationFrame(() => apply(true)));
   }
 
   /** Params needed under a row: owning `a=…` declaration only. */
@@ -970,11 +1188,22 @@ export function mountExprList(opts) {
     return handle;
   }
 
-  function render() {
-    closeGradPopover();
+  /**
+   * @param {{ id: string, pos?: number } | null} [focusOverride]
+   *        When set (e.g. after Enter split), restore this instead of the
+   *        pre-rebuild caret — which is still on the row being left.
+   */
+  function render(focusOverride = null) {
+    closeAllPopovers();
     beginSuppressAutoCommit();
+    if (focusOverride?.id != null) {
+      pendingFocus = { id: String(focusOverride.id), pos: focusOverride.pos | 0 };
+    }
+    const epoch = ++focusEpoch;
     try {
-      const focusSnap = captureFocus();
+      // Prefer sticky Enter/merge target over captureFocus — a follow-up compile
+      // re-render often runs before the new math-field has taken focus.
+      const focusSnap = pendingFocus ?? captureFocus();
       const items = listExpressions();
       const selected = getSelectedId();
       root.replaceChildren();
@@ -1076,8 +1305,7 @@ export function mountExprList(opts) {
               const merged = mergeExprIntoPrevious(item.id);
               if (merged) {
                 onStructuralChange();
-                render();
-                queueMicrotask(() => focusFieldAt(root, merged.id, merged.caretOffset));
+                render({ id: merged.id, pos: merged.caretOffset });
               }
             }
           }
@@ -1095,10 +1323,9 @@ export function mountExprList(opts) {
         updateExpr(item.id, { latex: left });
         const split = splitExprAt(item.id, left, right);
         onStructuralChange();
-        render();
-        if (split) {
-          queueMicrotask(() => focusFieldAt(root, split.id, 0));
-        }
+        // Pass explicit focus — render's capture would still see this field, and its
+        // delayed restoreFocus would yank the caret back after we move to the new row.
+        render(split ? { id: split.id, pos: 0 } : null);
       });
 
       fieldRow.appendChild(mf);
@@ -1157,7 +1384,7 @@ export function mountExprList(opts) {
       root.appendChild(row);
       }
 
-      restoreFocus(focusSnap);
+      restoreFocus(focusSnap, epoch);
     } finally {
       endSuppressAutoCommit();
     }

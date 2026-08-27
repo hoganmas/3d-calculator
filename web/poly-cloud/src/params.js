@@ -6,6 +6,7 @@
 import { compileParamLatex, formatParamLatexValue } from "./fit.js";
 
 /**
+ * @typedef {"pingpong" | "loop"} AnimMode
  * @typedef {{
  *   value: number,
  *   min: number,
@@ -14,6 +15,7 @@ import { compileParamLatex, formatParamLatexValue } from "./fit.js";
  *   animating: boolean,
  *   speed: number,
  *   phase: number,
+ *   animMode: AnimMode,
  *   latex: string,
  *   exprId: string | null,
  *   hosted: boolean,
@@ -30,6 +32,31 @@ const DEFAULT_MIN = -10;
 const DEFAULT_MAX = 10;
 const DEFAULT_VALUE = 1;
 const DEFAULT_SPEED = 0.35;
+/** @type {AnimMode} */
+const DEFAULT_ANIM_MODE = "pingpong";
+
+/**
+ * @param {unknown} mode
+ * @returns {AnimMode}
+ */
+export function normalizeAnimMode(mode) {
+  return mode === "loop" ? "loop" : "pingpong";
+}
+
+/**
+ * Phase so `tickParamAnimation(timeSec)` yields the current value.
+ * @param {Pick<ParamState, "value" | "min" | "max" | "speed" | "animMode">} p
+ * @param {number} timeSec
+ */
+export function phaseForValue(p, timeSec) {
+  const span = Math.max(1e-9, p.max - p.min);
+  const u = Math.min(1, Math.max(0, (p.value - p.min) / span));
+  if (normalizeAnimMode(p.animMode) === "loop") {
+    return Math.min(0.999999, u) - timeSec * p.speed;
+  }
+  const s = Math.min(1, Math.max(-1, (u - 0.5) / 0.5));
+  return Math.asin(s) / (2 * Math.PI) - timeSec * p.speed;
+}
 
 /**
  * @param {string} name
@@ -59,6 +86,7 @@ function makeParam(name, init = {}) {
     animating: !!(init.animating ?? init.animate),
     speed: Number.isFinite(init.speed) && init.speed > 0 ? init.speed : DEFAULT_SPEED,
     phase: Number.isFinite(init.phase) ? init.phase : Math.random(),
+    animMode: normalizeAnimMode(init.animMode),
     latex,
     exprId: typeof init.exprId === "string" ? init.exprId : null,
     hosted: !!init.hosted,
@@ -135,6 +163,7 @@ export function collectAnimDirtyParams() {
  *   speed?: number,
  *   animating?: boolean,
  *   phase?: number,
+ *   animMode?: AnimMode,
  *   value?: number,
  * }[]} defs
  * @param {Record<string, Partial<ParamState> & { animate?: boolean }>} [seed]
@@ -160,6 +189,7 @@ export function syncParamsFromDefinitions(defs, seed = {}) {
           speed: d.speed ?? s.speed,
           animating: d.animating ?? s.animating ?? s.animate,
           phase: d.phase ?? s.phase,
+          animMode: d.animMode ?? s.animMode,
           value: d.value ?? s.value,
         }),
       );
@@ -175,6 +205,7 @@ export function syncParamsFromDefinitions(defs, seed = {}) {
       speed: Number.isFinite(d.speed) && d.speed > 0 ? d.speed : cur.speed,
       animating: typeof d.animating === "boolean" ? d.animating : cur.animating,
       phase: Number.isFinite(d.phase) ? d.phase : cur.phase,
+      animMode: d.animMode != null ? normalizeAnimMode(d.animMode) : cur.animMode,
     });
   }
 }
@@ -222,6 +253,7 @@ export function updateParam(name, patch) {
     latex,
     step: Number.isFinite(patch.step) && patch.step > 0 ? patch.step : cur.step,
     speed: Number.isFinite(patch.speed) && patch.speed > 0 ? patch.speed : cur.speed,
+    animMode: patch.animMode != null ? normalizeAnimMode(patch.animMode) : cur.animMode,
   };
   params.set(name, next);
   return next;
@@ -336,16 +368,14 @@ export function toggleParamAnimate(name, timeSec = performance.now() / 1000) {
   if (!cur || cur.driven) return cur;
   const next = { ...cur, animating: !cur.animating };
   if (next.animating) {
-    const u = (cur.value - cur.min) / Math.max(1e-9, cur.max - cur.min);
-    const s = Math.min(1, Math.max(-1, (u - 0.5) / 0.5));
-    next.phase = Math.asin(s) / (2 * Math.PI) - timeSec * next.speed;
+    next.phase = phaseForValue(next, timeSec);
   }
   params.set(name, next);
   return next;
 }
 
 /**
- * Permanently stop cosine animation for a param (e.g. when editing its LaTeX).
+ * Permanently stop parameter animation (e.g. when editing its LaTeX).
  * @param {string} name
  * @returns {ParamState | null}
  */
@@ -365,7 +395,13 @@ export function tickParamAnimation(timeSec) {
   let changed = false;
   for (const [name, p] of params) {
     if (!p.animating || p.driven) continue;
-    const u = 0.5 + 0.5 * Math.sin(2 * Math.PI * (timeSec * p.speed + p.phase));
+    const tau = timeSec * p.speed + p.phase;
+    let u;
+    if (normalizeAnimMode(p.animMode) === "loop") {
+      u = ((tau % 1) + 1) % 1;
+    } else {
+      u = 0.5 + 0.5 * Math.sin(2 * Math.PI * tau);
+    }
     const value = p.min + (p.max - p.min) * u;
     if (Math.abs(value - p.value) > 1e-12) {
       params.set(name, {

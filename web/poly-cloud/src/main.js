@@ -18,6 +18,7 @@ import {
   tickParamAnimation,
   anyParamNeedsTick,
   collectAnimDirtyParams,
+  anyParamAnimating,
 } from "./params.js";
 import {
   listExpressions,
@@ -42,6 +43,8 @@ import {
   beginKeyframePass,
   clearKeyframeCaches,
   getKeyframeMetrics,
+  logKeyframeBake,
+  setKeyframeProgressHandler,
   keyframeAnimParam,
   noteKeyframeLayer,
   ensureLayerKeyframes,
@@ -61,6 +64,7 @@ import {
   uploadSceneColors,
   hasUploadedVolume,
   setConstraintKeyframeBlends,
+  patchConstraintKeyframeFrame,
   resizeClipGpuCanvas,
   clearClipGpuFrame,
   syncClipGpuWorldGrid,
@@ -142,6 +146,7 @@ function ensureParamExprRows(names) {
       sliderSpeed: seed.speed,
       sliderAnimating: !!(seed.animate ?? seed.animating),
       sliderPhase: seed.phase,
+      sliderAnimMode: seed.animMode === "loop" ? "loop" : "pingpong",
       autoParam: true,
     });
   }
@@ -272,6 +277,7 @@ function compileAllExprs(opts = {}) {
     speed: item.sliderSpeed,
     animating: item.sliderAnimating,
     phase: item.sliderPhase,
+    animMode: item.sliderAnimMode,
   }));
 
   syncParamsFromDefinitions(defs, pendingParamSeed);
@@ -304,6 +310,7 @@ function compileAllExprs(opts = {}) {
         sliderSpeed: p.speed,
         sliderAnimating: p.animating,
         sliderPhase: p.phase,
+        sliderAnimMode: p.animMode,
       });
     }
     pendingParamSeed = {};
@@ -420,7 +427,10 @@ exprListApi = mountExprList({
   },
   onParamChange: () => {
     syncExprCompileState();
-    scheduleUploadFit(80);
+    // Play starts animation: bake keyframes immediately (fromAnim).
+    // Avoid a non-anim fit that would clear the keyframe cache first.
+    const animating = anyParamAnimating();
+    scheduleUploadFit(animating ? 0 : 80, { fromAnim: animating });
   },
   onColorChange: () => {
     // Colors only — skip Chebyshev refit; push RGB to GPU dens layers + constraints.
@@ -474,6 +484,23 @@ exprListApi = mountExprList({
 exprListApi.render();
 setExpressionsOnChange(() => {
   /* list mutations already call render from UI helpers */
+});
+
+/** Async keyframe fills: patch GPU slot + keep lastSceneBake in sync. */
+setKeyframeProgressHandler(({ layerId, index, frame, readyCount, K, done }) => {
+  if (index >= 0 && frame && lastSceneBake?.constraints) {
+    const c = lastSceneBake.constraints.find((x) => x.id === layerId);
+    if (c && Array.isArray(c.keyframes) && index < c.keyframes.length) {
+      c.keyframes[index] = frame;
+    }
+    if (isClipBakeGpuReady()) {
+      patchConstraintKeyframeFrame(layerId, index, frame);
+      clipDirty = true;
+    }
+  }
+  if (done) {
+    console.log(`[keyframes] async complete · ${layerId} · ${readyCount}/${K}`);
+  }
 });
 
 const renderer = new THREE.WebGLRenderer({
@@ -1428,7 +1455,14 @@ function uploadFit(opts = {}) {
       kfBakeMs: kf.bakeMs,
       kfLerpMs: kf.lerpMs,
       kfK: kf.K,
+      kfSampleMs: kf.stages?.sampleMs,
+      kfChebMs: kf.stages?.chebMs,
+      kfIdctMs: kf.stages?.idctMs,
+      kfGradMs: kf.stages?.gradMs,
     };
+    if (keyframeBaked) {
+      logKeyframeBake(fromAnim ? "play/anim" : "bake");
+    }
     lastNCoeff = (deg + 1) ** 3 * layers.length;
     if (Number.isFinite(fitRel)) lastFitRel = fitRel;
 
@@ -1504,12 +1538,18 @@ function tickGpuKeyframeBlends() {
   return true;
 }
 
-function scheduleUploadFit(delay = FIT_DEBOUNCE_MS) {
+/** @type {{ fromAnim?: boolean }} */
+let pendingFitOpts = {};
+
+function scheduleUploadFit(delay = FIT_DEBOUNCE_MS, opts = {}) {
+  pendingFitOpts = opts && typeof opts === "object" ? opts : {};
   if (fitTimer) clearTimeout(fitTimer);
   fitTimer = window.setTimeout(() => {
     fitTimer = 0;
+    const fitOpts = pendingFitOpts;
+    pendingFitOpts = {};
     if (!syncExprCompileState()) return;
-    uploadFit();
+    uploadFit(fitOpts);
   }, delay);
 }
 
@@ -1708,6 +1748,8 @@ function frame(rafNow) {
               latex: p.latex,
               sliderAnimating: p.animating,
               sliderPhase: p.phase,
+              sliderSpeed: p.speed,
+              sliderAnimMode: p.animMode,
             });
           }
         }
