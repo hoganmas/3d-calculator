@@ -1,4 +1,4 @@
-import type { ConstraintLayer, DensLayer, FlowLayer, KeyframeBlend, KeyframeFrame } from "../../types/models.js";
+import type { CloudLayer, FlowLayer, IsosurfaceLayer, KeyframeBlend, KeyframeFrame } from "../../types/models.js";
 import { MAX_DENS_LAYERS, gpu, DEFAULT_DENS_RGB, DEFAULT_DENS_RGB2, type RgbTriplet } from "./gpuState.js";
 import { normalizeRgbStops, writeLayerColors } from "./uniforms.js";
 import { uploadFlowLayers, resetFlowGpuLayers } from "./flowAdvect.js";
@@ -6,8 +6,8 @@ import { uploadFlowLayers, resetFlowGpuLayers } from "./flowAdvect.js";
 const MAX_FLOW_LAYERS = 4;
 
 export interface SceneUploadPayload {
-  densLayers?: DensLayer[];
-  constraints?: ConstraintLayer[];
+  cloudLayers?: CloudLayer[];
+  isosurfaceLayers?: IsosurfaceLayer[];
   flowLayers?: FlowLayer[];
   M: number;
   half?: number;
@@ -44,7 +44,7 @@ function ensureVolumeBuf(floatCount: number): void {
   }
 }
 
-function stopsFromLayer(d: Pick<DensLayer, "color" | "color2" | "colors"> | undefined): RgbTriplet[] {
+function stopsFromLayer(d: Pick<CloudLayer, "color" | "color2" | "colors"> | undefined): RgbTriplet[] {
   if (Array.isArray(d?.colors) && d.colors.length) {
     return d.colors.map((c) => [c[0], c[1], c[2]]);
   }
@@ -73,10 +73,10 @@ export function uploadSceneVolumes(scene: SceneUploadPayload | null): SceneUploa
   const volN = M * M * M;
   gpu.sceneM = M;
 
-  const cons = scene.constraints || [];
+  const cons = scene.isosurfaceLayers || [];
   const flow = (scene.flowLayers || []).slice(0, MAX_FLOW_LAYERS);
-  const scalarDens = (scene.densLayers || []).slice(0, Math.max(0, MAX_DENS_LAYERS - flow.length));
-  const flowAsDens: DensLayer[] = flow.map((f) => ({
+  const scalarDens = (scene.cloudLayers || []).slice(0, Math.max(0, MAX_DENS_LAYERS - flow.length));
+  const flowAsDens: CloudLayer[] = flow.map((f) => ({
     id: f.id,
     dens: f.dye,
     color: f.color,

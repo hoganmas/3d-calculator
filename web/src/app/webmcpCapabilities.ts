@@ -121,25 +121,27 @@ export function buildCapabilities() {
         },
         {
           form: "A=B",
-          kind: "constraint",
+          kind: "isosurface",
           description: "Implicit manifold → opaque isosurface at residual zero.",
         },
         {
           form: "bare expression or f=…",
-          kind: "density",
+          kind: "cloud",
           description: "Scalar field → volumetric density cloud (Beer–Lambert).",
         },
         {
           form: "(Fx,Fy,Fz) or \\grad f",
           kind: "flow",
-          description: "Vector field → Eulerian dye advection (role Flow or auto-detected tuple/grad).",
+          description: "Vector field → Eulerian dye advection (role flow or auto-detected tuple/grad).",
         },
       ],
       roles: {
-        auto: "Infer cloud / iso / flow from syntax.",
-        density: "Force volume rendering.",
-        constraint: "Force isosurface manifold.",
+        auto: "Infer cloud / isosurface / flow from syntax.",
+        cloud: "Force volumetric cloud rendering.",
+        isosurface: "Force isosurface manifold.",
         flow: "Force vector flow advection.",
+        density: "Legacy alias for cloud.",
+        constraint: "Legacy alias for isosurface.",
       },
       freeSymbols:
         "Any identifier not a known function becomes a parameter (auto row inserted). Param names must match /^[A-Za-z][A-Za-z0-9_]*$/ on the LHS of name=value (e.g. a, u, d — not y1 which parses as subscript). Reserved spatial: x, y, z, r, theta, phi, rho.",

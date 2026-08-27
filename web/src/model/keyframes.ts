@@ -19,7 +19,7 @@ interface BakeStages {
 interface BakeFrameOpts {
   layerId: string;
   latex: string;
-  role: "density" | "constraint";
+  role: "cloud" | "isosurface";
   isoLevel: number;
   paramName: string;
   compiled: { bind: CompiledExpr["bind"] };
@@ -38,7 +38,7 @@ interface LayerKeyframeCache {
   K: number;
   deg: number;
   half: number;
-  role: "density" | "constraint";
+  role: "cloud" | "isosurface";
   isoLevel: number;
   latex: string;
   frames: (KeyframeFrame | null)[];
@@ -60,7 +60,7 @@ interface KeyframeProgressInfo {
 interface EnsureKeyframesOpts {
   layerId: string;
   latex: string;
-  role: "density" | "constraint";
+  role: "cloud" | "isosurface";
   isoLevel: number;
   paramName: string;
   compiled: { bind: CompiledExpr["bind"] };
@@ -264,7 +264,7 @@ function bakeFrameAt(opts: BakeFrameOpts, k: number, stages: BakeStages | null):
   const idct = idctCheb3D(fit.cheb, fit.deg, fit.deg + 1);
   if (stages) stages.idctMs += performance.now() - tStage;
   const frame: KeyframeFrame = { dens: idct.dens, cheb: fit.cheb, fitRel: fit.fitRelL2 };
-  if (opts.role === "constraint") {
+  if (opts.role === "isosurface") {
     tStage = performance.now();
     const grad = idctChebGrad3D(fit.cheb, fit.deg, fit.deg + 1);
     if (stages) stages.gradMs += performance.now() - tStage;
@@ -400,7 +400,7 @@ function scheduleAsyncFill(layerId: string, cache: LayerKeyframeCache) {
  * @param {{
  *   layerId: string,
  *   latex: string,
- *   role: "density" | "constraint",
+ *   role: "cloud" | "isosurface",
  *   isoLevel: number,
  *   paramName: string,
  *   compiled: { bind: (params: Record<string, number>) => (x:number,y:number,z:number)=>number },
@@ -496,7 +496,7 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
   if (proto && (!cache.scratch.dens || cache.scratch.dens.length !== proto.dens.length)) {
     const n = proto.dens.length;
     cache.scratch = { dens: new Float32Array(n) };
-    if (opts.role === "constraint") {
+    if (opts.role === "isosurface") {
       cache.scratch.gx = new Float32Array(n);
       cache.scratch.gy = new Float32Array(n);
       cache.scratch.gz = new Float32Array(n);

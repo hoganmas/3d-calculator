@@ -8,7 +8,7 @@ import { chebWorld, densIndex } from "../helpers/grid.ts";
 import { runSuite } from "../helpers/runner.ts";
 
 export async function run() {
-  return runSuite("scalar / cheb-fit (cloud)", [
+  return runSuite("cloud / cheb-fit", [
     {
       name: "quadratic sphere relative L2",
       fn: () => {

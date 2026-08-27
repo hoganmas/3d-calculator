@@ -7,7 +7,7 @@ import { assert, assertNear } from "../helpers/assert.ts";
 import { runSuite } from "../helpers/runner.ts";
 
 export async function run() {
-  return runSuite("vector / parse", [
+  return runSuite("flow / parse", [
     {
       name: "tuple (-y, x, 0) classifies and evaluates",
       fn: () => {

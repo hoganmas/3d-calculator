@@ -4,7 +4,7 @@ import { chebWorld, densIndex } from "../helpers/grid.ts";
 import { runSuite } from "../helpers/runner.ts";
 
 export async function run() {
-  return runSuite("vector / fit", [
+  return runSuite("flow / fit", [
     {
       name: "grad field matches analytic",
       fn: () => {

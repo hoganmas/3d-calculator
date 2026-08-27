@@ -33,8 +33,8 @@ import { els, viewportSize } from "./dom.js";
 import { state, FIT_DEBOUNCE_MS } from "./state.js";
 import type {
   ChebFitTiming,
-  ConstraintLayer,
-  DensLayer,
+  CloudLayer,
+  IsosurfaceLayer,
   FlowLayer,
   KeyframeBlend,
   KeyframeFrame,
@@ -60,7 +60,7 @@ import {
 } from "./hud.js";
 
 interface CachedLayer {
-  kind: "density" | "constraint" | "flow";
+  kind: "cloud" | "isosurface" | "flow";
   dens?: Float32Array;
   dye?: Float32Array;
   fx?: Float32Array;
@@ -88,11 +88,11 @@ export function reseedFlowDye() {
 }
 
 export function tickGpuKeyframeBlends() {
-  const cons = state.lastSceneBake?.constraints;
-  if (!cons?.length || !isClipBakeGpuReady()) return false;
+  const isoLayers = state.lastSceneBake?.isosurfaceLayers;
+  if (!isoLayers?.length || !isClipBakeGpuReady()) return false;
   /** @type {{ id: string, i0: number, i1: number, t: number }[]} */
   const blends = [];
-  for (const c of cons) {
+  for (const c of isoLayers) {
     if (!c?.id || !Array.isArray(c.keyframes) || !c.keyframes.length) continue;
     const b = peekKeyframeBlend(c.id);
     if (!b) continue;
@@ -130,14 +130,14 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
     // No visible / non-empty expressions → clear volume, draw nothing.
     if (!layers.length) {
       clearKeyframeCaches();
-      state.lastSceneBake = { densLayers: [], constraints: [], flowLayers: [], M: Math.max(2, deg + 1), dens: null };
+      state.lastSceneBake = { cloudLayers: [], isosurfaceLayers: [], flowLayers: [], M: Math.max(2, deg + 1), dens: null };
       state.lastFitTiming = null;
       state.lastNCoeff = 0;
       state.lastFitRel = NaN;
       state.worldCheb = null;
       state.fitDeg = deg;
       if (isClipBakeGpuReady()) {
-        uploadSceneVolumes({ densLayers: [], constraints: [], flowLayers: [], M: state.lastSceneBake.M });
+        uploadSceneVolumes({ cloudLayers: [], isosurfaceLayers: [], flowLayers: [], M: state.lastSceneBake.M });
       }
       clipUniforms.uScale.value = densScale;
       clipUniforms.uSteps.value = steps;
@@ -153,8 +153,8 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
       return;
     }
 
-    const densLayers: DensLayer[] = [];
-    const constraints: ConstraintLayer[] = [];
+    const cloudLayers: CloudLayer[] = [];
+    const isosurfaceLayers: IsosurfaceLayer[] = [];
     const flowLayers: FlowLayer[] = [];
     let cheb: Float32Array | null = null;
     let fitRel = NaN;
@@ -180,11 +180,11 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
       lastBake.deg === deg &&
       Math.abs((lastBake.half ?? NaN) - half) < 1e-12;
     if (canReuseCache && lastBake) {
-      for (const d of lastBake.densLayers) {
-        if (d.id) prevById.set(d.id, { kind: "density", ...d });
+      for (const d of lastBake.cloudLayers) {
+        if (d.id) prevById.set(d.id, { kind: "cloud", ...d });
       }
-      for (const c of lastBake.constraints) {
-        if (c.id) prevById.set(c.id, { kind: "constraint", ...c });
+      for (const c of lastBake.isosurfaceLayers) {
+        if (c.id) prevById.set(c.id, { kind: "isosurface", ...c });
       }
       for (const f of lastBake.flowLayers ?? []) {
         if (f.id) prevById.set(f.id, { kind: "flow", ...f, dens: f.dye });
@@ -204,7 +204,7 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
       const prevHasKf =
         prev && Array.isArray(prev.keyframes) && prev.keyframes.length > 0;
       const reuseKind =
-        L.role === "constraint" ? "constraint" : L.role === "flow" ? "flow" : "density";
+        L.role === "isosurface" ? "isosurface" : L.role === "flow" ? "flow" : "cloud";
       const reuseDens =
         prev &&
         prev.kind === reuseKind &&
@@ -220,9 +220,9 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
         } else if (prev.dye) {
           M = Math.round(Math.cbrt(prev.dye.length)) || M;
         }
-        if (L.role === "constraint") {
+        if (L.role === "isosurface") {
           if (prevHasKf) {
-            constraints.push({
+            isosurfaceLayers.push({
               id: L.item.id,
               keyframes: prev.keyframes,
               blend: prev.blend ?? { i0: 0, i1: 0, t: 0 },
@@ -234,7 +234,7 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
               fitRel: prev.fitRel,
             });
           } else {
-            constraints.push({
+            isosurfaceLayers.push({
               id: L.item.id,
               dens: prev.dens,
               gx: prev.gx,
@@ -260,7 +260,7 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
             fitRel: prev.fitRel,
           });
         } else {
-          densLayers.push({ id: L.item.id, dens: prev.dens!, color, color2, colors });
+          cloudLayers.push({ id: L.item.id, dens: prev.dens!, color, color2, colors });
         }
         if (!cheb && prev.cheb) {
           cheb = prev.cheb;
@@ -277,11 +277,11 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
       if (kfParam && L.compiled && L.fn) {
         noteKeyframeLayer();
         keyframedCount++;
-        if (L.role === "constraint") {
+        if (L.role === "isosurface") {
           const sample = ensureLayerKeyframes({
             layerId: L.item.id,
             latex: L.item.latex,
-            role: "constraint",
+            role: "isosurface",
             isoLevel: L.compiled?.isoLevel ?? 0,
             paramName: kfParam,
             compiled: L.compiled,
@@ -291,7 +291,7 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
           });
           if (sample.baked) keyframeBaked = true;
           M = sample.M || M;
-          constraints.push({
+          isosurfaceLayers.push({
             id: L.item.id,
             keyframes: sample.frames,
             blend: sample.blend,
@@ -310,7 +310,7 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
           const sample = sampleLayerKeyframes({
             layerId: L.item.id,
             latex: L.item.latex,
-            role: "density",
+            role: "cloud",
             isoLevel: L.compiled?.isoLevel ?? 0,
             paramName: kfParam,
             compiled: L.compiled,
@@ -320,7 +320,7 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
           });
           if (sample.baked) keyframeBaked = true;
           M = sample.M || M;
-          densLayers.push({
+          cloudLayers.push({
             id: L.item.id,
             dens: sample.dens.slice(),
             color,
@@ -377,9 +377,9 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
       fittedCount++;
       const idct = idctCheb3D(fit.cheb, fit.deg, fit.deg + 1);
       M = idct.M;
-      if (L.role === "constraint") {
+      if (L.role === "isosurface") {
         const grad = idctChebGrad3D(fit.cheb, fit.deg, fit.deg + 1);
-        constraints.push({
+        isosurfaceLayers.push({
           id: L.item.id,
           dens: idct.dens,
           gx: grad.gx,
@@ -393,7 +393,7 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
           fitRel: fit.fitRelL2,
         });
       } else {
-        densLayers.push({
+        cloudLayers.push({
           id: L.item.id,
           dens: idct.dens,
           color,
@@ -412,18 +412,18 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
       }
     }
 
-    // WebGL preview texture: sum of density layers (skipped when WebGPU is active).
+    // WebGL preview texture: sum of cloud layers (skipped when WebGPU is active).
     let densSum = null;
-    if (densLayers.length && !useGpuClipPath()) {
+    if (cloudLayers.length && !useGpuClipPath()) {
       densSum = new Float32Array(M * M * M);
-      for (const d of densLayers) {
+      for (const d of cloudLayers) {
         for (let i = 0; i < densSum.length; i++) densSum[i] += d.dens[i] || 0;
       }
     }
 
     state.lastSceneBake = {
-      densLayers,
-      constraints,
+      cloudLayers,
+      isosurfaceLayers,
       flowLayers,
       M,
       dens: densSum,
@@ -464,7 +464,7 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
       bakeChebVolume();
     } else if (keyframedCount > 0) {
       setConstraintKeyframeBlends(
-        constraints
+        isosurfaceLayers
           .filter((c) => c.blend && c.id != null)
           .map((c) => ({
             id: c.id!,
@@ -529,8 +529,8 @@ export function applyRenderHyperparams() {
 export function initKeyframeHandler() {
   /** Async keyframe fills: patch GPU slot + keep lastSceneBake in sync. */
   setKeyframeProgressHandler(({ layerId, index, frame, readyCount, K, done }) => {
-    if (index >= 0 && frame && state.lastSceneBake?.constraints) {
-      const c = state.lastSceneBake.constraints.find((x) => x.id === layerId);
+    if (index >= 0 && frame && state.lastSceneBake?.isosurfaceLayers) {
+      const c = state.lastSceneBake.isosurfaceLayers.find((x) => x.id === layerId);
       if (c && Array.isArray(c.keyframes) && index < c.keyframes.length) {
         c.keyframes[index] = frame;
       }
@@ -572,11 +572,11 @@ export function wirePipelineDom() {
 }
 
 export function handleColorChange() {
-  // Colors only — skip Chebyshev refit; push RGB to GPU dens layers + constraints.
+  // Colors only — skip Chebyshev refit; push RGB to GPU cloud + isosurface layers.
   if (state.lastSceneBake) {
     const items = listExpressions().filter((e) => e.enabled && String(e.latex || "").trim());
-    const densCols: ReturnType<typeof layerRgbFromItem>[] = [];
-    const consCols: ReturnType<typeof layerRgbFromItem>[] = [];
+    const cloudCols: ReturnType<typeof layerRgbFromItem>[] = [];
+    const isoCols: ReturnType<typeof layerRgbFromItem>[] = [];
     const flowCols: ReturnType<typeof layerRgbFromItem>[] = [];
     for (const item of items) {
       let classified;
@@ -588,7 +588,7 @@ export function handleColorChange() {
       }
       const role = resolveExprRole(item.role, classified.kind, item.latex);
       const rgb = layerRgbFromItem(item);
-      if (role === "constraint") consCols.push(rgb);
+      if (role === "isosurface") isoCols.push(rgb);
       else if (role === "flow") flowCols.push(rgb);
       else {
         let compiled;
@@ -598,21 +598,21 @@ export function handleColorChange() {
           continue;
         }
         if (!compiled.usesSpace) continue;
-        densCols.push(rgb);
+        cloudCols.push(rgb);
       }
     }
-    for (let i = 0; i < state.lastSceneBake.densLayers.length; i++) {
-      if (densCols[i]) {
-        state.lastSceneBake.densLayers[i].color = densCols[i].color;
-        state.lastSceneBake.densLayers[i].color2 = densCols[i].color2;
-        state.lastSceneBake.densLayers[i].colors = densCols[i].colors;
+    for (let i = 0; i < state.lastSceneBake.cloudLayers.length; i++) {
+      if (cloudCols[i]) {
+        state.lastSceneBake.cloudLayers[i].color = cloudCols[i].color;
+        state.lastSceneBake.cloudLayers[i].color2 = cloudCols[i].color2;
+        state.lastSceneBake.cloudLayers[i].colors = cloudCols[i].colors;
       }
     }
-    for (let i = 0; i < state.lastSceneBake.constraints.length; i++) {
-      if (consCols[i]) {
-        state.lastSceneBake.constraints[i].color = consCols[i].color;
-        state.lastSceneBake.constraints[i].color2 = consCols[i].color2;
-        state.lastSceneBake.constraints[i].colors = consCols[i].colors;
+    for (let i = 0; i < state.lastSceneBake.isosurfaceLayers.length; i++) {
+      if (isoCols[i]) {
+        state.lastSceneBake.isosurfaceLayers[i].color = isoCols[i].color;
+        state.lastSceneBake.isosurfaceLayers[i].color2 = isoCols[i].color2;
+        state.lastSceneBake.isosurfaceLayers[i].colors = isoCols[i].colors;
       }
     }
     for (let i = 0; i < (state.lastSceneBake.flowLayers?.length ?? 0); i++) {
@@ -623,14 +623,14 @@ export function handleColorChange() {
       }
     }
     const allDensCols = [
-      ...state.lastSceneBake.densLayers.map((d) => d.colors || [d.color, d.color2]),
+      ...state.lastSceneBake.cloudLayers.map((d) => d.colors || [d.color, d.color2]),
       ...(state.lastSceneBake.flowLayers ?? []).map((f) => f.colors || [f.color, f.color2]),
     ];
     uploadSceneColors(allDensCols);
     if (isClipBakeGpuReady()) {
       uploadSceneVolumes({
-        densLayers: state.lastSceneBake.densLayers,
-        constraints: state.lastSceneBake.constraints,
+        cloudLayers: state.lastSceneBake.cloudLayers,
+        isosurfaceLayers: state.lastSceneBake.isosurfaceLayers,
         flowLayers: state.lastSceneBake.flowLayers,
         M: state.lastSceneBake.M,
         half: state.lastSceneBake.half,

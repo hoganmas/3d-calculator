@@ -8,7 +8,7 @@ import { chebWorld, densIndex } from "../helpers/grid.ts";
 import { runSuite } from "../helpers/runner.ts";
 
 export async function run() {
-  return runSuite("iso / gradient", [
+  return runSuite("isosurface / gradient", [
     {
       name: "grad of x^2+y^2+z^2 on Cheb grid",
       fn: () => {

@@ -75,9 +75,9 @@ import {
   const gradCss = $derived(cssGradientFromColors(grad.colors));
   const swatchDisabled = $derived(isParamDef);
 
-  const ROLE_CYCLE: ExprRole[] = ["auto", "density", "constraint", "flow"];
+  const ROLE_CYCLE: ExprRole[] = ["auto", "cloud", "isosurface", "flow"];
   const roleLabel = $derived(
-    ({ auto: "Auto", density: "Cloud", constraint: "Iso", flow: "Flow" } as const)[item.role],
+    ({ auto: "Auto", cloud: "Cloud", isosurface: "Isosurface", flow: "Flow" } as const)[item.role],
   );
 
   function cycleRole() {

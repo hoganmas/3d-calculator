@@ -11,9 +11,9 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "tsx tests/run.mjs",
-    "test:vector": "tsx tests/run.mjs vector",
-    "test:scalar": "tsx tests/run.mjs scalar",
-    "test:iso": "tsx tests/run.mjs iso",
+    "test:flow": "tsx tests/run.mjs flow",
+    "test:cloud": "tsx tests/run.mjs cloud",
+    "test:isosurface": "tsx tests/run.mjs isosurface",
     "test:integration": "tsx tests/integration/webmcp.test.mjs"
   },
   "dependencies": {

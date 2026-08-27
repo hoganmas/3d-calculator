@@ -2,7 +2,7 @@
  * Discover and run all *.test.ts suites under tests/.
  * Usage: npm test [filter]
  *   npm test           — all suites
- *   npm test vector    — only paths containing "vector"
+ *   npm test flow      — only paths containing "flow"
  */
 import { readdirSync } from "node:fs";
 import { dirname, join, relative } from "node:path";

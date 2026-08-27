@@ -167,8 +167,8 @@ export function resize() {
 export function syncClipPresentation() {
   const hasVolume = hasUploadedVolume() || Boolean(
     state.lastSceneBake &&
-      (state.lastSceneBake.densLayers.length ||
-        state.lastSceneBake.constraints.length ||
+      (state.lastSceneBake.cloudLayers.length ||
+        state.lastSceneBake.isosurfaceLayers.length ||
         (state.lastSceneBake.flowLayers?.length ?? 0) > 0),
   );
   const gpu = useGpuClipPath() && hasVolume;

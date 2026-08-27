@@ -23,9 +23,9 @@ Simulation correctness (fit → IDCT → volume) runs in Node — no browser nee
 
 ```bash
 npm test              # all suites
-npm test vector       # flow parse + fit
-npm test scalar       # cloud density
-npm test iso          # isosurface gradients
+npm test flow         # flow parse + fit
+npm test cloud        # cloud density
+npm test isosurface   # isosurface gradients
 ```
 
 See [`tests/README.md`](tests/README.md) for layout. Integration smoke tests (`test:integration`) need `npm run dev` running.
@@ -53,7 +53,7 @@ Optional dev CLI: `node scripts/webmcp-relay-call.mjs laplacian_setup_lava_lamp`
 
 ## Controls
 
-- **Expressions** — Enter splits / adds a row. Free symbols get a slider on that same row; write `a=…` for an explicit parameter equation. `A=B` → iso; bare / `f=…` → cloud; `(Fx,Fy,Fz)` or `\grad f` → flow. Use the row role button (A/C/I/F) to override.
+- **Expressions** — Enter splits / adds a row. Free symbols get a slider on that same row; write `a=…` for an explicit parameter equation. `A=B` → isosurface; bare / `f=…` → cloud; `(Fx,Fy,Fz)` or `\grad f` → flow. Use the row role button (A/C/I/F) to override.
 - **Focus view** (crosshair icon, header) — reset camera to the default view.
 - **Setup MCP** (chain icon, header) — copy server config for the current page.
 - **Settings** (gear) — appearance (theme), preset, poly deg / scale / steps / box size, march downscale, diagnostics.

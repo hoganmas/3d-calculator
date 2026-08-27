@@ -1,9 +1,9 @@
 /** Shared domain types for Laplacian (expressions → bake → GPU). */
 
-export type ExprRole = "auto" | "density" | "constraint" | "flow";
+export type ExprRole = "auto" | "cloud" | "isosurface" | "flow";
 export type AnimMode = "pingpong" | "loop";
 export type ExprKind = "parameter" | "constraint" | "definition" | "bare";
-export type LayerRole = "parameter" | "density" | "constraint" | "flow";
+export type LayerRole = "parameter" | "cloud" | "isosurface" | "flow";
 export type VectorFieldKind = "tuple" | "gradient" | "reference";
 
 export interface ExprItem {
@@ -54,7 +54,7 @@ export interface KeyframeFrame {
   fitRel?: number;
 }
 
-export interface DensLayer {
+export interface CloudLayer {
   id?: string;
   dens: Float32Array;
   color: number[];
@@ -65,7 +65,7 @@ export interface DensLayer {
   keyframes?: KeyframeFrame[];
 }
 
-export interface ConstraintLayer {
+export interface IsosurfaceLayer {
   id?: string;
   dens?: Float32Array;
   gx?: Float32Array;
@@ -95,8 +95,8 @@ export interface FlowLayer {
 }
 
 export interface SceneBake {
-  densLayers: DensLayer[];
-  constraints: ConstraintLayer[];
+  cloudLayers: CloudLayer[];
+  isosurfaceLayers: IsosurfaceLayer[];
   flowLayers: FlowLayer[];
   M: number;
   dens: Float32Array | null;

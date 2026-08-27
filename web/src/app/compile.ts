@@ -239,14 +239,14 @@ export function compileAllExprs(opts: CompileOpts = {}): CompileAllResult {
     }
   }
 
-  const nCons = layers.filter((L) => L.role === "constraint").length;
-  const nDens = layers.filter((L) => L.role === "density").length;
+  const nIso = layers.filter((L) => L.role === "isosurface").length;
+  const nCloud = layers.filter((L) => L.role === "cloud").length;
   const nFlow = layers.filter((L) => L.role === "flow").length;
   state.lastExprMeta = {
-    kind: nCons && nDens ? "mixed" : nCons ? "constraint" : nFlow ? "bare" : "bare",
-    shade: nCons && !nDens && !nFlow ? "iso" : "volume",
+    kind: nIso && nCloud ? "mixed" : nIso ? "constraint" : nFlow ? "bare" : "bare",
+    shade: nIso && !nCloud && !nFlow ? "iso" : "volume",
     isoLevel: 0,
-    label: `${nDens} density · ${nCons} manifold · ${nFlow} flow`,
+    label: `${nCloud} cloud · ${nIso} isosurface · ${nFlow} flow`,
   };
 
   return {

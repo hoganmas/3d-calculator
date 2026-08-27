@@ -1,5 +1,5 @@
 /**
- * Expression list: density / constraint fields and optional named parameters.
+ * Expression list: cloud / isosurface / flow fields and optional named parameters.
  * Parameter rows (`a = …`) share values across all field expressions.
  */
 
@@ -7,6 +7,17 @@ import type { ExprItem, ExprRole, LayerRole } from "../types/models.js";
 import { isVectorFieldLatex } from "../math/fitVector.js";
 
 export type { ExprItem, ExprRole, AnimMode } from "../types/models.js";
+
+const LEGACY_EXPR_ROLES: Record<string, ExprRole> = {
+  density: "cloud",
+  constraint: "isosurface",
+};
+
+/** Map stored/MCP role strings to current primitive names. */
+export function normalizeExprRole(role: string | undefined): ExprRole {
+  if (!role) return "auto";
+  return LEGACY_EXPR_ROLES[role] ?? (role as ExprRole);
+}
 
 let nextId = 1;
 
@@ -199,7 +210,7 @@ export function createExprItem(
     color: grad.color,
     color2: grad.color2,
     colors: grad.colors,
-    role: init.role ?? "auto",
+    role: normalizeExprRole(init.role as string | undefined),
     enabled: init.enabled !== false,
     sliderMin,
     sliderMax,
@@ -359,6 +370,7 @@ export function splitExprAt(id: string, leftLatex: string, rightLatex: string) {
 export function updateExpr(id: string, patch: Partial<ExprItem>) {
   const row = items.find((e) => e.id === id);
   if (!row) return null;
+  if (patch.role != null) patch.role = normalizeExprRole(patch.role as string);
   Object.assign(row, patch);
   if (patch.colors || patch.color != null || patch.color2 != null) {
     const g = resolveExprGradient({
@@ -413,8 +425,9 @@ export function resolveExprRole(
   kind: "parameter" | "constraint" | "definition" | "bare",
   latex?: string,
 ): LayerRole {
+  const r = normalizeExprRole(role as string);
   if (kind === "parameter") return "parameter";
-  if (role === "density" || role === "constraint" || role === "flow") return role;
-  if (role === "auto" && latex && isVectorFieldLatex(latex)) return "flow";
-  return kind === "constraint" ? "constraint" : "density";
+  if (r === "cloud" || r === "isosurface" || r === "flow") return r;
+  if (r === "auto" && latex && isVectorFieldLatex(latex)) return "flow";
+  return kind === "constraint" ? "isosurface" : "cloud";
 }
