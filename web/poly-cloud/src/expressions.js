@@ -146,7 +146,37 @@ export function getExprWarning(id) {
 }
 
 function emit() {
+  ensureTrailingEmptyExpr();
   if (onChange) onChange();
+}
+
+function isEmptyLatex(latex) {
+  return !String(latex ?? "").trim();
+}
+
+/** Keep at least one blank row at the end (Desmos-style). */
+function ensureTrailingEmptyExpr() {
+  if (!items.length || !isEmptyLatex(items[items.length - 1].latex)) {
+    items.push(createExprItem({ latex: "" }));
+  }
+}
+
+/**
+ * Prefer inserting before the trailing blank when appending a non-empty row.
+ * @param {number} at
+ * @param {Partial<ExprItem>} init
+ */
+function clampInsertIndex(at, init) {
+  let i = Math.max(0, Math.min(items.length, at | 0));
+  if (
+    items.length &&
+    isEmptyLatex(items[items.length - 1].latex) &&
+    !isEmptyLatex(init.latex) &&
+    i >= items.length - 1
+  ) {
+    i = items.length - 1;
+  }
+  return i;
 }
 
 /**
@@ -230,12 +260,11 @@ export function setExpressions(list) {
 
 /**
  * Insert a row at `index` without selecting it or notifying listeners.
- * Used when auto-creating parameter declarations during compile.
  * @param {number} index
  * @param {Partial<ExprItem>} [init]
  */
 export function insertExprAt(index, init = {}) {
-  const at = Math.max(0, Math.min(items.length, index | 0));
+  const at = clampInsertIndex(index, init);
   const row = createExprItem({
     ...init,
     color: init.color ?? colorForIndex(at),
@@ -251,7 +280,7 @@ export function insertExprAt(index, init = {}) {
  */
 export function insertExprAfter(afterId = selectedId, init = {}) {
   const idx = afterId ? items.findIndex((e) => e.id === afterId) : items.length - 1;
-  const at = idx >= 0 ? idx + 1 : items.length;
+  const at = clampInsertIndex(idx >= 0 ? idx + 1 : items.length, init);
   const row = createExprItem({
     ...init,
     color: init.color ?? colorForIndex(at),
@@ -270,15 +299,10 @@ export function removeExpr(id) {
   if (selectedId === id) {
     selectedId = items[Math.min(idx, items.length - 1)]?.id ?? null;
   }
-  if (items.length === 0) {
-    const row = createExprItem({ latex: "" });
-    items.push(row);
-    selectedId = row.id;
-  }
   emit();
 }
 
-/** Remove without notifying listeners (compile-time auto-param prune). */
+/** Remove without notifying listeners. */
 export function removeExprSilent(id) {
   const idx = items.findIndex((e) => e.id === id);
   if (idx < 0) return false;
@@ -286,11 +310,7 @@ export function removeExprSilent(id) {
   if (selectedId === id) {
     selectedId = items[Math.min(idx, items.length - 1)]?.id ?? null;
   }
-  if (items.length === 0) {
-    const row = createExprItem({ latex: "" });
-    items.push(row);
-    selectedId = row.id;
-  }
+  ensureTrailingEmptyExpr();
   return true;
 }
 
@@ -354,7 +374,10 @@ export function splitExprAt(id, leftLatex, rightLatex) {
   items.splice(idx + 1, 0, row);
   selectedId = row.id;
   emit();
-  return { id: row.id, caretOffset: 0 };
+  // emit() may append a trailing blank; focus the row created by the split.
+  const focus = items[idx + 1] ?? row;
+  selectedId = focus.id;
+  return { id: focus.id, caretOffset: 0 };
 }
 
 /**
@@ -393,6 +416,9 @@ export function updateExprSilent(id, patch) {
     row.colors = g.colors;
     row.color = g.color;
     row.color2 = g.color2;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "latex")) {
+    ensureTrailingEmptyExpr();
   }
   return row;
 }

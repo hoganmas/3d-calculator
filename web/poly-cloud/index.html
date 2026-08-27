@@ -110,7 +110,7 @@
         position: relative;
         transition: box-shadow 0.18s ease;
       }
-      .expr-row:hover:not(.is-dragging) {
+      .expr-row:hover:not(.is-drag-floating) {
         box-shadow: var(--glass-fresnel);
       }
       .expr-row.selected {
@@ -120,44 +120,27 @@
           0 0 18px var(--accent-ring);
         background: transparent;
       }
-      .expr-row.is-dragging {
-        opacity: 0.35;
-      }
-      .expr-row-ghost {
-        position: fixed;
-        top: 0;
-        left: 0;
+      .expr-row.is-drag-floating {
         z-index: 10000;
-        margin: 0;
-        opacity: 0.78;
-        pointer-events: none;
         box-shadow: var(--glass-shadow), var(--glass-fresnel);
         background: var(--glass-bg-strong);
         backdrop-filter: blur(var(--expr-glass-blur)) saturate(1.25);
         -webkit-backdrop-filter: blur(var(--expr-glass-blur)) saturate(1.25);
         will-change: transform;
       }
-      .expr-row.drag-over-before::before,
-      .expr-row.drag-over-after::after {
-        content: "";
-        position: absolute;
-        left: 4px;
-        right: 4px;
-        height: 2px;
-        border-radius: 1px;
-        background: var(--accent);
+      .expr-row-placeholder {
+        border-radius: 10px;
+        box-shadow: inset 0 0 0 1.5px var(--accent-ring);
+        background: var(--accent-soft);
+        flex-shrink: 0;
         pointer-events: none;
-        z-index: 2;
-      }
-      .expr-row.drag-over-before::before {
-        top: -1px;
-      }
-      .expr-row.drag-over-after::after {
-        bottom: -1px;
       }
       .expr-list.is-reordering {
         cursor: grabbing;
         user-select: none;
+      }
+      .expr-list.is-reordering .expr-row:not(.is-drag-floating) {
+        will-change: transform;
       }
       .expr-drag {
         width: 16px;
@@ -614,7 +597,7 @@
         z-index: 0;
         opacity: 0.85;
       }
-      /* Glass range controls (expr params + settings) */
+      /* Glass range track + hidden native thumb (liquid overlay draws the knob) */
       .expr-param-slider,
       input[type="range"] {
         -webkit-appearance: none;
@@ -628,7 +611,7 @@
         border-radius: 0;
         cursor: pointer;
         position: relative;
-        z-index: 1;
+        z-index: 2;
       }
       .expr-param-slider:disabled,
       input[type="range"]:disabled {
@@ -670,97 +653,156 @@
       input[type="range"]::-webkit-slider-thumb {
         -webkit-appearance: none;
         appearance: none;
-        width: 16px;
-        height: 16px;
-        margin-top: -4px;
+        width: 18px;
+        height: 18px;
+        margin-top: -5px;
         border-radius: 50%;
-        background:
-          linear-gradient(
-            160deg,
-            rgba(255, 245, 235, 0.55) 0%,
-            var(--accent-soft-strong) 42%,
-            var(--accent) 100%
-          );
-        border: 1px solid var(--glass-rim);
-        box-shadow:
-          inset 0 1.5px 0 rgba(255, 245, 235, 0.65),
-          inset 0 -1px 0 rgba(0, 0, 0, 0.12),
-          0 0 0 1px var(--glass-rim-outer),
-          0 2px 10px rgba(12, 4, 28, 0.28),
-          0 0 12px var(--accent-ring);
+        background: transparent;
+        border: none;
+        box-shadow: none;
         cursor: pointer;
-        transition: box-shadow 0.15s ease, transform 0.15s ease;
       }
       .expr-param-slider::-moz-range-thumb,
       input[type="range"]::-moz-range-thumb {
-        width: 16px;
-        height: 16px;
+        width: 18px;
+        height: 18px;
         border-radius: 50%;
+        background: transparent;
+        border: none;
+        box-shadow: none;
+        cursor: pointer;
+      }
+      .liquid-range:focus {
+        outline: none;
+      }
+      .liquid-track {
+        --thumb-size: 18px;
+      }
+      .liquid-thumb {
+        position: absolute;
+        top: 50%;
+        left: calc(var(--t, 0) * (100% - var(--thumb-size)) + var(--thumb-size) / 2);
+        width: var(--thumb-size);
+        height: var(--thumb-size);
+        translate: calc(-50% + var(--dx, 0px)) calc(-50% + var(--dy, 0px));
+        transform: skewX(var(--skew-x, 0deg)) skewY(var(--skew-y, 0deg));
+        transform-origin: center center;
+        pointer-events: none;
+        z-index: 3;
+        transition: transform 0.08s linear, translate 0.08s linear;
+        will-change: transform, left, translate;
+      }
+      .liquid-thumb.is-dragging {
+        transition: none;
+      }
+      .liquid-thumb-halo,
+      .liquid-thumb-core,
+      .liquid-thumb-sheen {
+        position: absolute;
+        inset: 0;
+        border-radius: 42% 58% 55% 45% / 48% 42% 58% 52%;
+        animation: liquid-goop 4.2s ease-in-out infinite;
+      }
+      .liquid-thumb.is-dragging .liquid-thumb-halo,
+      .liquid-thumb.is-dragging .liquid-thumb-core,
+      .liquid-thumb.is-dragging .liquid-thumb-sheen {
+        animation-duration: 1.1s;
+      }
+      .liquid-thumb-halo {
+        inset: -5px;
+        background: var(--accent-soft-strong);
+        opacity: 0.55;
+        filter: blur(5px);
+        margin-left: calc(var(--dx, 0px) * -0.2);
+        margin-top: calc(var(--dy, 0px) * -0.2);
+      }
+      .liquid-thumb-core {
         background:
           linear-gradient(
-            160deg,
-            rgba(255, 245, 235, 0.55) 0%,
-            var(--accent-soft-strong) 42%,
+            155deg,
+            rgba(255, 250, 245, 0.62) 0%,
+            rgba(255, 245, 235, 0.28) 28%,
+            var(--accent-soft-strong) 58%,
             var(--accent) 100%
           );
         border: 1px solid var(--glass-rim);
         box-shadow:
-          inset 0 1.5px 0 rgba(255, 245, 235, 0.65),
-          inset 0 -1px 0 rgba(0, 0, 0, 0.12),
+          inset 0 1.5px 0 rgba(255, 248, 240, 0.72),
+          inset 0 -2px 4px rgba(0, 0, 0, 0.14),
+          inset 0 0 10px rgba(255, 240, 230, 0.18),
           0 0 0 1px var(--glass-rim-outer),
-          0 2px 10px rgba(12, 4, 28, 0.28),
+          0 3px 12px rgba(12, 4, 28, 0.3),
+          0 0 14px var(--accent-ring);
+        backdrop-filter: blur(10px) saturate(1.35);
+        -webkit-backdrop-filter: blur(10px) saturate(1.35);
+      }
+      .liquid-thumb-sheen {
+        inset: 2px;
+        background:
+          radial-gradient(
+            120% 80% at 30% 18%,
+            rgba(255, 255, 255, 0.72) 0%,
+            rgba(255, 255, 255, 0.18) 32%,
+            transparent 58%
+          );
+        opacity: 0.9;
+        mix-blend-mode: soft-light;
+        animation-name: liquid-goop-sheen;
+      }
+      .liquid-track:has(.liquid-range:focus-visible) .liquid-thumb-core {
+        box-shadow:
+          inset 0 1.5px 0 rgba(255, 248, 240, 0.72),
+          inset 0 -2px 4px rgba(0, 0, 0, 0.14),
+          0 0 0 2px var(--bg),
+          0 0 0 4px var(--accent-border),
+          0 3px 12px rgba(12, 4, 28, 0.28);
+      }
+      .liquid-range:disabled ~ .liquid-thumb,
+      .liquid-track:has(.liquid-range:disabled) .liquid-thumb {
+        opacity: 0.4;
+      }
+      @keyframes liquid-goop {
+        0%,
+        100% {
+          border-radius: 42% 58% 55% 45% / 48% 42% 58% 52%;
+          transform: translateY(0) scale(1, 1);
+        }
+        25% {
+          border-radius: 58% 42% 48% 52% / 42% 55% 45% 58%;
+          transform: translateY(-1.6px) scale(0.96, 1.06);
+        }
+        50% {
+          border-radius: 48% 52% 42% 58% / 55% 48% 52% 42%;
+          transform: translateY(1.8px) scale(1.04, 0.94);
+        }
+        75% {
+          border-radius: 52% 48% 58% 42% / 45% 58% 42% 55%;
+          transform: translateY(-1.1px) scale(0.98, 1.03);
+        }
+      }
+      @keyframes liquid-goop-sheen {
+        0%,
+        100% {
+          border-radius: 45% 55% 52% 48% / 50% 45% 55% 50%;
+          transform: rotate(0deg) translateY(0) scale(1);
+        }
+        33% {
+          border-radius: 52% 48% 55% 45% / 48% 52% 45% 55%;
+          transform: rotate(8deg) translateY(-1.2px) scale(1.03);
+        }
+        66% {
+          border-radius: 55% 45% 48% 52% / 45% 55% 50% 50%;
+          transform: rotate(-6deg) translateY(1.4px) scale(1.02);
+        }
+      }
+      [data-theme="light"] .liquid-thumb-core {
+        box-shadow:
+          inset 0 1.5px 0 rgba(255, 255, 255, 0.9),
+          inset 0 -2px 4px rgba(80, 50, 30, 0.08),
+          inset 0 0 10px rgba(255, 255, 255, 0.35),
+          0 0 0 1px var(--glass-rim-outer),
+          0 2px 10px rgba(80, 50, 30, 0.16),
           0 0 12px var(--accent-ring);
-        cursor: pointer;
-      }
-      .expr-param-slider:hover::-webkit-slider-thumb,
-      input[type="range"]:hover::-webkit-slider-thumb {
-        transform: scale(1.06);
-        box-shadow:
-          inset 0 1.5px 0 rgba(255, 245, 235, 0.72),
-          inset 0 -1px 0 rgba(0, 0, 0, 0.1),
-          0 0 0 1px var(--glass-rim-outer),
-          0 3px 14px rgba(12, 4, 28, 0.32),
-          0 0 16px var(--accent-focus);
-      }
-      .expr-param-slider:hover::-moz-range-thumb,
-      input[type="range"]:hover::-moz-range-thumb {
-        box-shadow:
-          inset 0 1.5px 0 rgba(255, 245, 235, 0.72),
-          inset 0 -1px 0 rgba(0, 0, 0, 0.1),
-          0 0 0 1px var(--glass-rim-outer),
-          0 3px 14px rgba(12, 4, 28, 0.32),
-          0 0 16px var(--accent-focus);
-      }
-      .expr-param-slider:focus,
-      input[type="range"]:focus {
-        outline: none;
-      }
-      .expr-param-slider:focus-visible::-webkit-slider-thumb,
-      input[type="range"]:focus-visible::-webkit-slider-thumb {
-        box-shadow:
-          inset 0 1.5px 0 rgba(255, 245, 235, 0.72),
-          0 0 0 2px var(--bg),
-          0 0 0 4px var(--accent-border),
-          0 2px 10px rgba(12, 4, 28, 0.28);
-      }
-      .expr-param-slider:focus-visible::-moz-range-thumb,
-      input[type="range"]:focus-visible::-moz-range-thumb {
-        box-shadow:
-          inset 0 1.5px 0 rgba(255, 245, 235, 0.72),
-          0 0 0 2px var(--bg),
-          0 0 0 4px var(--accent-border),
-          0 2px 10px rgba(12, 4, 28, 0.28);
-      }
-      [data-theme="light"] .expr-param-slider::-webkit-slider-thumb,
-      [data-theme="light"] input[type="range"]::-webkit-slider-thumb,
-      [data-theme="light"] .expr-param-slider::-moz-range-thumb,
-      [data-theme="light"] input[type="range"]::-moz-range-thumb {
-        box-shadow:
-          inset 0 1.5px 0 rgba(255, 255, 255, 0.85),
-          inset 0 -1px 0 rgba(80, 50, 30, 0.08),
-          0 0 0 1px var(--glass-rim-outer),
-          0 2px 8px rgba(80, 50, 30, 0.16),
-          0 0 10px var(--accent-ring);
       }
       .expr-row.has-error {
         border-color: #e07070;
@@ -987,6 +1029,12 @@
         margin-top: 2px;
         padding-top: 10px;
       }
+      .march-liquid-track {
+        position: relative;
+        height: 24px;
+        display: flex;
+        align-items: center;
+      }
       .march-slider-wrap .ui-slider {
         display: block;
       }
@@ -1130,7 +1178,7 @@
           <section class="settings-section">
             <p class="settings-section-title">Approximation</p>
             <div class="row3">
-              <label>poly deg<input id="deg" type="number" min="2" max="128" step="1" value="30" /></label>
+              <label>poly deg<input id="deg" type="number" min="2" max="128" step="1" value="23" /></label>
               <label>scale<input id="scale" type="number" min="0.1" max="20" step="0.1" value="2.5" /></label>
               <label>steps<input id="steps" type="number" min="8" max="96" step="4" value="32" /></label>
             </div>
@@ -1145,7 +1193,9 @@
               </span>
               <div class="march-slider-wrap">
                 <div class="march-slider-ticks" id="marchSliderTicks" aria-hidden="true"></div>
-                <input id="marchDownscale" class="ui-slider" type="range" min="1" max="16" step="1" value="1" />
+                <div class="march-liquid-track">
+                  <input id="marchDownscale" class="ui-slider" type="range" min="1" max="16" step="1" value="1" />
+                </div>
                 <div class="march-slider-labels" id="marchSliderLabels" aria-hidden="true"></div>
               </div>
             </label>

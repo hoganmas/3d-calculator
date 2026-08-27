@@ -506,6 +506,85 @@ fn fsMain(in: VSOut) -> FSOut {
 }
 
 /**
+ * Camera-facing axis letter billboards; same ray-t depth encoding as the grid
+ * so isosurfaces can occlude them.
+ */
+function makeAxisLabelWgsl() {
+  return /* wgsl */ `
+struct GridParams {
+  viewProj: mat4x4f,
+  ro: vec3f,
+  half: f32,
+  m0: vec4f,
+  m1: vec4f,
+  m2: vec4f,
+  fbW: f32,
+  fbH: f32,
+  _pad0: f32,
+  _pad1: f32,
+}
+
+@group(0) @binding(0) var<uniform> u: GridParams;
+@group(0) @binding(1) var atlas: texture_2d<f32>;
+@group(0) @binding(2) var atlasSamp: sampler;
+
+struct VSIn {
+  @location(0) pos: vec3f,
+  @location(1) uv: vec2f,
+}
+
+struct VSOut {
+  @builtin(position) clip: vec4f,
+  @location(0) world: vec3f,
+  @location(1) uv: vec2f,
+}
+
+struct FSOut {
+  @location(0) color: vec4f,
+  @builtin(frag_depth) depth: f32,
+}
+
+@vertex
+fn vsMain(v: VSIn) -> VSOut {
+  var o: VSOut;
+  o.clip = u.viewProj * vec4f(v.pos, 1.0);
+  o.world = v.pos;
+  o.uv = v.uv;
+  return o;
+}
+
+@fragment
+fn fsMain(in: VSOut) -> FSOut {
+  var out: FSOut;
+  let tex = textureSample(atlas, atlasSamp, in.uv);
+  if (tex.a < 0.02) { discard; }
+  let fbW = u.fbW; let fbH = u.fbH;
+  let ndcX = -1.0 + 2.0 * in.clip.x / fbW;
+  let ndcY = 1.0 - 2.0 * in.clip.y / fbH;
+  let xy1 = vec3f(ndcX, ndcY, 1.0);
+  let rd = vec3f(dot(u.m0.xyz, xy1), dot(u.m1.xyz, xy1), dot(u.m2.xyz, xy1));
+  let ro = u.ro; let half = u.half;
+  let invRd = vec3f(
+    select(1e15, 1.0 / rd.x, abs(rd.x) >= 1e-15),
+    select(1e15, 1.0 / rd.y, abs(rd.y) >= 1e-15),
+    select(1e15, 1.0 / rd.z, abs(rd.z) >= 1e-15),
+  );
+  let tA = (-vec3f(half) - ro) * invRd;
+  let tB = (vec3f(half) - ro) * invRd;
+  let tmin = min(tA, tB); let tmax = max(tA, tB);
+  let tExit = min(min(tmax.x, tmax.y), tmax.z);
+  let far = max(tExit, half * 4.0);
+  let rd2 = max(dot(rd, rd), 1e-20);
+  let t = dot(in.world - ro, rd) / rd2;
+  if (!(t > 0.0)) { discard; }
+  out.depth = clamp(t / far, 0.0, 0.999);
+  out.color = vec4f(tex.rgb * tex.a, tex.a);
+  return out;
+}
+`;
+}
+
+/**
  * Compact FXAA 3.11-style post (luma edge detect + blend).
  * Input is premultiplied overlay; we un-premultiply for luma, then re-premultiply.
  */
@@ -768,6 +847,15 @@ let gridVertexBuf = null;
 let gridVertexCapacity = 0;
 let gridVertexCount = 0;
 let gridHalf = NaN;
+let labelPipeline = null;
+let labelVertexBuf = null;
+/** @type {GPUTexture | null} */
+let labelAtlasTex = null;
+/** @type {GPUSampler | null} */
+let labelAtlasSamp = null;
+let labelAtlasDirty = true;
+/** Scratch for 3 billboard quads (18 verts × 6 floats). */
+const labelVertScratch = new Float32Array(18 * 6);
 
 let drawParamBuf = null;
 let drawParamBufBeer = null;
@@ -828,7 +916,7 @@ let lastPresentAt = 0;
 let profileMethod = "";
 let profileGridM = 0;
 
-const PIPELINE_EPOCH = 22;
+const PIPELINE_EPOCH = 23;
 let builtEpoch = -1;
 
 /**
@@ -948,9 +1036,10 @@ let themeBoxRgb = [0.35, 0.29, 0.45];
 let themeAxisXRgb = [0.9, 0.35, 0.38];
 let themeAxisYRgb = [0.35, 0.75, 0.48];
 let themeAxisZRgb = [0.79, 0.66, 0.91];
+let themeLabelStroke = "rgba(26, 18, 40, 0.58)";
 
 /**
- * @param {{ gridMajor?: number, gridMinor?: number, boxEdgeRgb?: number[], axisXRgb?: number[], axisYRgb?: number[], axisZRgb?: number[] }} colors
+ * @param {{ gridMajor?: number, gridMinor?: number, boxEdgeRgb?: number[], axisXRgb?: number[], axisYRgb?: number[], axisZRgb?: number[], labelStroke?: string }} colors
  */
 export function applyClipGpuTheme(colors) {
   if (colors.gridMajor) themeGridMajor = colors.gridMajor;
@@ -959,7 +1048,9 @@ export function applyClipGpuTheme(colors) {
   if (colors.axisXRgb) themeAxisXRgb = colors.axisXRgb;
   if (colors.axisYRgb) themeAxisYRgb = colors.axisYRgb;
   if (colors.axisZRgb) themeAxisZRgb = colors.axisZRgb;
+  if (colors.labelStroke) themeLabelStroke = colors.labelStroke;
   gridHalf = -1;
+  labelAtlasDirty = true;
 }
 
 function hexToRgb(hex) {
@@ -1052,6 +1143,115 @@ export function syncClipGpuWorldGrid(half) {
   device.queue.writeBuffer(gridVertexBuf, 0, data.subarray(0, n * 8));
 }
 
+function rgb01Css(rgb) {
+  const r = Math.round(Math.min(1, Math.max(0, rgb[0])) * 255);
+  const g = Math.round(Math.min(1, Math.max(0, rgb[1])) * 255);
+  const b = Math.round(Math.min(1, Math.max(0, rgb[2])) * 255);
+  return `rgb(${r},${g},${b})`;
+}
+
+/** Bake x/y/z glyphs into a 3-cell atlas (theme-colored). */
+function ensureAxisLabelAtlas() {
+  if (!device) return;
+  if (!labelAtlasDirty && labelAtlasTex && labelAtlasSamp) return;
+
+  const cell = 128;
+  const canvasEl = document.createElement("canvas");
+  canvasEl.width = cell * 3;
+  canvasEl.height = cell;
+  const c2d = canvasEl.getContext("2d");
+  c2d.clearRect(0, 0, canvasEl.width, canvasEl.height);
+  c2d.font = "600 72px 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif";
+  c2d.textAlign = "center";
+  c2d.textBaseline = "middle";
+  c2d.lineWidth = 3;
+  c2d.strokeStyle = themeLabelStroke || "rgba(26, 18, 40, 0.58)";
+  const glyphs = [
+    { ch: "x", rgb: themeAxisXRgb },
+    { ch: "y", rgb: themeAxisYRgb },
+    { ch: "z", rgb: themeAxisZRgb },
+  ];
+  for (let i = 0; i < 3; i++) {
+    const cx = cell * i + cell / 2;
+    const cy = cell / 2 + 1;
+    c2d.strokeText(glyphs[i].ch, cx, cy);
+    c2d.fillStyle = rgb01Css(glyphs[i].rgb);
+    c2d.fillText(glyphs[i].ch, cx, cy);
+  }
+
+  if (!labelAtlasTex) {
+    labelAtlasTex = device.createTexture({
+      size: [canvasEl.width, canvasEl.height],
+      format: "rgba8unorm",
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+  }
+  device.queue.copyExternalImageToTexture(
+    { source: canvasEl },
+    { texture: labelAtlasTex },
+    [canvasEl.width, canvasEl.height],
+  );
+  if (!labelAtlasSamp) {
+    labelAtlasSamp = device.createSampler({
+      magFilter: "linear",
+      minFilter: "linear",
+    });
+  }
+  if (!labelVertexBuf) {
+    labelVertexBuf = device.createBuffer({
+      size: labelVertScratch.byteLength,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    });
+  }
+  labelAtlasDirty = false;
+}
+
+/**
+ * Camera-facing x/y/z billboards at axis tips (world size ~0.42).
+ * @param {{ matrixWorld: { elements: ArrayLike<number> } }} camera
+ * @param {number} half
+ */
+function uploadAxisLabelBillboards(camera, half) {
+  ensureAxisLabelAtlas();
+  if (!device || !labelVertexBuf) return 0;
+
+  const h = Math.max(0.5, half);
+  const tip = Math.ceil(h + 0.5) + 0.25;
+  const e = camera.matrixWorld.elements;
+  const rx = e[0]; const ry = e[1]; const rz = e[2];
+  const ux = e[4]; const uy = e[5]; const uz = e[6];
+  const hs = 0.21;
+
+  const centers = [
+    [tip, 0, 0, 0],
+    [0, tip, 0, 1],
+    [0, 0, tip, 2],
+  ];
+  // UV: WebGPU texture (0,0) = top-left of atlas row.
+  const corners = [
+    [-1, -1], [1, -1], [1, 1],
+    [-1, -1], [1, 1], [-1, 1],
+  ];
+  let vi = 0;
+  for (const [cx, cy, cz, cell] of centers) {
+    const u0 = cell / 3;
+    const u1 = (cell + 1) / 3;
+    for (const [sx, sy] of corners) {
+      const o = vi * 6;
+      labelVertScratch[o] = cx + rx * sx * hs + ux * sy * hs;
+      labelVertScratch[o + 1] = cy + ry * sx * hs + uy * sy * hs;
+      labelVertScratch[o + 2] = cz + rz * sx * hs + uz * sy * hs;
+      labelVertScratch[o + 3] = 0;
+      // sy=-1 → v=1 (bottom), sy=+1 → v=0 (top) to match canvas Y-down
+      labelVertScratch[o + 4] = sx < 0 ? u0 : u1;
+      labelVertScratch[o + 5] = sy < 0 ? 1 : 0;
+      vi++;
+    }
+  }
+  device.queue.writeBuffer(labelVertexBuf, 0, labelVertScratch);
+  return vi;
+}
+
 function packGridParams(viewProj, ro, half, M, fbW, fbH) {
   const buf = new ArrayBuffer(160);
   const f32 = new Float32Array(buf);
@@ -1067,7 +1267,7 @@ function packGridParams(viewProj, ro, half, M, fbW, fbH) {
 
 export function isClipBakeGpuReady() {
   return Boolean(
-    device && isoPipeline && beerPipeline && fxaaPipeline && ssaoPipeline && gridPipeline,
+    device && isoPipeline && beerPipeline && fxaaPipeline && ssaoPipeline && gridPipeline && labelPipeline,
   );
 }
 export function isClipMarchReady() {
@@ -1402,7 +1602,11 @@ export async function initClipBakeGpu(viewportEl) {
       device = await adapter.requestDevice({ requiredFeatures });
       device.lost.then(() => {
         device = null;
-        isoPipeline = beerPipeline = fxaaPipeline = ssaoPipeline = gridPipeline = null;
+        isoPipeline = beerPipeline = fxaaPipeline = ssaoPipeline = gridPipeline = labelPipeline = null;
+        labelAtlasTex = null;
+        labelAtlasSamp = null;
+        labelVertexBuf = null;
+        labelAtlasDirty = true;
         initFailed = true;
       });
       if (timestampsSupported) {
@@ -1456,7 +1660,11 @@ export async function initClipBakeGpu(viewportEl) {
       console.warn("[clipBakeGpu] init failed", e);
       initFailed = true;
       device = null;
-      isoPipeline = beerPipeline = fxaaPipeline = ssaoPipeline = gridPipeline = null;
+      isoPipeline = beerPipeline = fxaaPipeline = ssaoPipeline = gridPipeline = labelPipeline = null;
+      labelAtlasTex = null;
+      labelAtlasSamp = null;
+      labelVertexBuf = null;
+      labelAtlasDirty = true;
       return false;
     }
   })();
@@ -1475,7 +1683,7 @@ async function compileChecked(label, code) {
 export async function ensurePipelinesForDegree(_deg) {
   if (!device) return false;
   if (
-    isoPipeline && beerPipeline && fxaaPipeline && ssaoPipeline && gridPipeline &&
+    isoPipeline && beerPipeline && fxaaPipeline && ssaoPipeline && gridPipeline && labelPipeline &&
     builtEpoch === PIPELINE_EPOCH
   ) {
     return true;
@@ -1485,6 +1693,7 @@ export async function ensurePipelinesForDegree(_deg) {
   const isoMod = await compileChecked("iso", makeIsoWgsl());
   const beerMod = await compileChecked("beer", makeBeerMultiWgsl());
   const gridMod = await compileChecked("grid", makeGridWgsl());
+  const labelMod = await compileChecked("axisLabel", makeAxisLabelWgsl());
   const fxaaMod = await compileChecked("fxaa", makeFxaaWgsl());
   const ssaoMod = await compileChecked("ssao", makeSsaoWgsl());
 
@@ -1570,6 +1779,37 @@ export async function ensurePipelinesForDegree(_deg) {
   }
 
   device.pushErrorScope("validation");
+  const nextLabel = device.createRenderPipeline({
+    layout: "auto",
+    vertex: {
+      module: labelMod,
+      entryPoint: "vsMain",
+      buffers: [{
+        arrayStride: 24,
+        attributes: [
+          { shaderLocation: 0, offset: 0, format: "float32x3" },
+          { shaderLocation: 1, offset: 16, format: "float32x2" },
+        ],
+      }],
+    },
+    fragment: {
+      module: labelMod,
+      entryPoint: "fsMain",
+      targets: [{ format: canvasFormat, blend: blendPremul }],
+    },
+    primitive: { topology: "triangle-list" },
+    depthStencil: {
+      format: "depth32float",
+      depthWriteEnabled: false,
+      depthCompare: "less",
+    },
+  });
+  {
+    const err = await device.popErrorScope();
+    if (err) throw new Error(`axisLabel: ${err.message}`);
+  }
+
+  device.pushErrorScope("validation");
   const nextSsao = device.createRenderPipeline({
     layout: "auto",
     vertex: { module: ssaoMod, entryPoint: "vsMain" },
@@ -1604,9 +1844,11 @@ export async function ensurePipelinesForDegree(_deg) {
   isoPipeline = nextIso;
   beerPipeline = nextBeer;
   gridPipeline = nextGrid;
+  labelPipeline = nextLabel;
   ssaoPipeline = nextSsao;
   fxaaPipeline = nextFxaa;
   builtEpoch = PIPELINE_EPOCH;
+  labelAtlasDirty = true;
   if (Number.isFinite(gridHalf)) {
     const h = gridHalf;
     gridHalf = NaN; // force rebuild into new device buffers
@@ -1789,7 +2031,7 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps, ndcOf
     sceneView = aoView;
   }
 
-  // World grid / axes / box — depth-test against iso depth in-place (no copy).
+  // World grid / axes / box / axis labels — depth-test against iso depth in-place.
   if (gridVertexBuf && gridVertexCount > 0 && gridPipeline) {
     camera.updateMatrixWorld(true);
     const viewProj = new Float32Array(16);
@@ -1811,6 +2053,9 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps, ndcOf
       0,
       packGridParams(viewProj, ro, h, Mat, marchW, marchH),
     );
+    const labelVertCount = labelPipeline
+      ? uploadAxisLabelBillboards(camera, h)
+      : 0;
     const bg = device.createBindGroup({
       layout: gridPipeline.getBindGroupLayout(0),
       entries: [{ binding: 0, resource: { buffer: gridParamBuf } }],
@@ -1830,6 +2075,22 @@ export function renderClipFrameGpu({ camera, half, fbW, fbH, scale, steps, ndcOf
     pass.setBindGroup(0, bg);
     pass.setVertexBuffer(0, gridVertexBuf);
     pass.draw(gridVertexCount);
+
+    if (labelPipeline && labelVertexBuf && labelAtlasTex && labelAtlasSamp && labelVertCount > 0) {
+      const labelBg = device.createBindGroup({
+        layout: labelPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: gridParamBuf } },
+          { binding: 1, resource: labelAtlasTex.createView() },
+          { binding: 2, resource: labelAtlasSamp },
+        ],
+      });
+      pass.setPipeline(labelPipeline);
+      pass.setBindGroup(0, labelBg);
+      pass.setVertexBuffer(0, labelVertexBuf);
+      pass.draw(labelVertCount);
+    }
+
     pass.end();
     device.queue.submit([enc.finish()]);
   }

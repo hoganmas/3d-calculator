@@ -5,6 +5,7 @@ import "mathlive/static.css";
 import "./theme.css";
 import { initTheme, onThemeChange, readThemeColors, getThemePref, setThemePref } from "./theme.js";
 import { createLavaBackground } from "./lavaBackground.js";
+import { mountLiquidThumb, syncLiquidThumb } from "./liquidSlider.js";
 import { compileExpr, classifyExpr, fitChebyshev3D, PRESETS, formatParamLatexValue, compileParamLatex } from "./fit.js";
 import {
   syncParamsFromDefinitions,
@@ -360,6 +361,7 @@ function syncMarchSlider() {
   const n = readMarchDownscale();
   if (els.marchDownscale) els.marchDownscale.value = String(n);
   if (els.marchScaleLabel) els.marchScaleLabel.textContent = `${n}×`;
+  syncLiquidThumb(els.marchDownscale);
   return n;
 }
 
@@ -372,6 +374,10 @@ if (!listExpressions().length) {
   setExpressions([{ latex: PRESETS.sincos.latex }]);
 }
 initMarchSliderUi();
+if (els.marchDownscale) {
+  const wrap = els.marchDownscale.closest(".march-liquid-track") || els.marchDownscale.closest(".march-slider-wrap");
+  if (wrap instanceof HTMLElement) mountLiquidThumb(wrap, els.marchDownscale);
+}
 syncMarchSlider();
 
 function layerRgbFromItem(item) {
@@ -457,7 +463,8 @@ renderer.setPixelRatio(1);
 renderer.setClearColor(0x000000, 0);
 els.viewport.appendChild(renderer.domElement);
 
-/** Axis labels on a higher canvas so isosurfaces (WebGPU or clip quad) never cover them. */
+/** Axis labels for the WebGL fallback (always-on-top). WebGPU draws them
+ *  in the march pass with iso depth-test instead. */
 const labelRenderer = new THREE.WebGLRenderer({
   antialias: true,
   alpha: true,
@@ -1055,10 +1062,12 @@ function syncClipPresentation() {
   );
   const gpu = useGpuClipPath() && hasVolume;
   clipQuad.visible = !gpu && hasVolume && Boolean(worldCheb);
-  // Grid/box depth-test on the WebGPU overlay; axis labels stay on a
-  // higher WebGL canvas so isosurfaces never cover them.
+  // Grid/box/labels depth-test on the WebGPU overlay; WebGL fallback keeps
+  // labels on a higher canvas (isos don't write depth there).
   worldGrid.visible = !gpu;
+  worldLabels.visible = !gpu;
   boxHelper.visible = !gpu;
+  labelRenderer.domElement.style.visibility = gpu ? "hidden" : "visible";
   setClipGpuCanvasVisible(isClipBakeGpuReady());
 }
 
@@ -1717,7 +1726,9 @@ function frame(rafNow) {
     }
   }
 
-  labelRenderer.render(labelScene, camera);
+  if (!useGpuClipPath()) {
+    labelRenderer.render(labelScene, camera);
+  }
 
   const dt = performance.now() - t0;
   cpuMsSmooth = cpuMsSmooth * 0.85 + dt * 0.15;

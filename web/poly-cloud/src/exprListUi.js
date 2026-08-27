@@ -24,6 +24,7 @@ import {
   MIN_GRAD_STOPS,
 } from "./expressions.js";
 import { classifyExpr } from "./fit.js";
+import { mountLiquidThumb, syncLiquidThumb } from "./liquidSlider.js";
 import {
   getParam,
   listParamNames,
@@ -136,6 +137,18 @@ function configureMathField(mf) {
   } catch (_) {
     /* ignore */
   }
+}
+
+/** True when MathLive's latex suggestion UI is showing (owns ↑/↓). */
+function isSuggestionUiActive(mf) {
+  const panel = document.getElementById("mathlive-suggestion-popover");
+  if (panel?.classList.contains("is-visible")) return true;
+  try {
+    if (mf?.mode === "latex") return true;
+  } catch (_) {
+    /* ignore */
+  }
+  return false;
 }
 
 function fmtNum(v) {
@@ -376,6 +389,7 @@ export function mountExprList(opts) {
         mark.hidden = !show;
         if (show) mark.style.left = `${Math.min(100, Math.max(0, zeroPct))}%`;
       }
+      syncLiquidThumb(slider);
     }
     if (minEl instanceof HTMLInputElement && document.activeElement !== minEl) {
       minEl.value = fmtNum(p.min);
@@ -487,6 +501,7 @@ export function mountExprList(opts) {
     });
 
     trackWrap.append(zero, slider);
+    mountLiquidThumb(trackWrap, slider);
 
     const maxEl = document.createElement("input");
     maxEl.type = "text";
@@ -635,120 +650,243 @@ export function mountExprList(opts) {
     return true;
   }
 
-  /** @type {{ id: string, pointerId: number, startY: number, moved: boolean, offsetX: number, offsetY: number } | null} */
+  /** @type {{ id: string, pointerId: number, startY: number, moved: boolean, offsetX: number, offsetY: number, width: number } | null} */
   let dragState = null;
-  /** @type {{ beforeId: string | null, el: Element | null, where: "before" | "after" } | null} */
-  let lastInsert = null;
+  /** @type {string | null | undefined} */
+  let liveBeforeId = undefined;
   /** @type {HTMLElement | null} */
-  let dragGhost = null;
+  let dragPlaceholder = null;
+  /** @type {HTMLElement | null} floating row (the real node) */
+  let dragFloat = null;
 
-  function clearDragGhost() {
-    if (dragGhost) {
-      dragGhost.remove();
-      dragGhost = null;
-    }
+  function rowElements() {
+    return [...root.querySelectorAll(".expr-row")].filter(
+      (r) => r instanceof HTMLElement && r.dataset.id && !r.classList.contains("is-drag-floating"),
+    );
   }
 
-  function clearDragIndicators() {
+  function clearDragVisuals() {
     root.classList.remove("is-reordering");
-    clearDragGhost();
+    if (dragFloat instanceof HTMLElement) {
+      dragFloat.classList.remove("is-drag-floating");
+      dragFloat.style.position = "";
+      dragFloat.style.left = "";
+      dragFloat.style.top = "";
+      dragFloat.style.width = "";
+      dragFloat.style.height = "";
+      dragFloat.style.zIndex = "";
+      dragFloat.style.margin = "";
+      dragFloat.style.transform = "";
+      dragFloat.style.pointerEvents = "";
+      dragFloat.style.boxShadow = "";
+      dragFloat = null;
+    }
+    if (dragPlaceholder) {
+      dragPlaceholder.remove();
+      dragPlaceholder = null;
+    }
     root.querySelectorAll(".expr-row").forEach((r) => {
-      r.classList.remove("drag-over-before", "drag-over-after", "is-dragging");
+      if (r instanceof HTMLElement) {
+        r.style.transition = "";
+        r.style.transform = "";
+      }
     });
   }
 
+  function moveDragFloat(clientX, clientY) {
+    if (!dragFloat || !dragState) return;
+    dragFloat.style.transform = `translate(${clientX - dragState.offsetX}px, ${clientY - dragState.offsetY}px) scale(1.02)`;
+  }
+
   /**
-   * Floating clone that tracks the pointer (replaces HTML5 drag image).
+   * Lift the real row into a fixed float; leave a placeholder hole in the list.
    * @param {HTMLElement} row
    * @param {number} clientX
    * @param {number} clientY
-   * @param {number} offsetX
-   * @param {number} offsetY
    */
-  function showDragGhost(row, clientX, clientY, offsetX, offsetY) {
-    clearDragGhost();
-    const ghost = /** @type {HTMLElement} */ (row.cloneNode(true));
-    ghost.classList.add("expr-row-ghost");
-    ghost.classList.remove("is-dragging", "selected", "drag-over-before", "drag-over-after");
-    ghost.removeAttribute("data-id");
-    ghost.querySelectorAll("input, button, math-field").forEach((el) => {
-      el.setAttribute("tabindex", "-1");
-      if (el instanceof HTMLInputElement || el instanceof HTMLButtonElement) el.disabled = true;
-    });
+  function beginFloatDrag(row, clientX, clientY) {
     const rect = row.getBoundingClientRect();
-    ghost.style.width = `${rect.width}px`;
-    ghost.style.height = `${rect.height}px`;
-    document.body.appendChild(ghost);
-    dragGhost = ghost;
-    moveDragGhost(clientX, clientY, offsetX, offsetY);
-  }
+    const ph = document.createElement("div");
+    ph.className = "expr-row-placeholder";
+    ph.style.height = `${rect.height}px`;
+    ph.setAttribute("aria-hidden", "true");
+    row.parentNode?.insertBefore(ph, row);
+    dragPlaceholder = ph;
 
-  function moveDragGhost(clientX, clientY, offsetX, offsetY) {
-    if (!dragGhost) return;
-    dragGhost.style.transform = `translate(${clientX - offsetX}px, ${clientY - offsetY}px)`;
+    // Keep capture target alive: float the real row (not a clone).
+    dragFloat = row;
+    row.classList.add("is-drag-floating");
+    row.style.position = "fixed";
+    row.style.left = "0";
+    row.style.top = "0";
+    row.style.width = `${rect.width}px`;
+    row.style.height = `${rect.height}px`;
+    row.style.zIndex = "10000";
+    row.style.margin = "0";
+    row.style.pointerEvents = "none";
+    row.style.boxShadow = "var(--glass-shadow), var(--glass-fresnel)";
+    document.body.appendChild(row);
+    moveDragFloat(clientX, clientY);
+
+    const next = ph.nextElementSibling;
+    liveBeforeId =
+      next instanceof HTMLElement && next.classList.contains("expr-row")
+        ? next.dataset.id ?? null
+        : null;
   }
 
   /**
-   * Map pointer Y to an insert slot. Top/bottom use large edge zones so ends are easy.
    * @param {number} clientY
    * @param {string | null} excludeId
-   * @returns {{ beforeId: string | null, el: Element | null, where: "before" | "after" }}
+   * @returns {string | null}
    */
-  function resolveInsert(clientY, excludeId) {
-    const others = [...root.querySelectorAll(".expr-row")].filter(
-      (r) => r instanceof HTMLElement && r.dataset.id && r.dataset.id !== excludeId,
-    );
-    if (!others.length) return { beforeId: null, el: null, where: "after" };
+  function resolveBeforeId(clientY, excludeId) {
+    const others = rowElements().filter((r) => r.dataset.id !== excludeId);
+    if (!others.length) return null;
 
-    const listRect = root.getBoundingClientRect();
     const first = others[0];
     const last = others[others.length - 1];
     const firstRect = first.getBoundingClientRect();
     const lastRect = last.getBoundingClientRect();
-    const topEdge = Math.min(listRect.top + 36, firstRect.top + firstRect.height / 3);
-    const botEdge = Math.max(listRect.bottom - 36, lastRect.bottom - lastRect.height / 3);
 
-    if (clientY <= topEdge) {
-      return { beforeId: first.dataset.id ?? null, el: first, where: "before" };
+    if (clientY < firstRect.top + firstRect.height * 0.5) {
+      return first.dataset.id ?? null;
     }
-    if (clientY >= botEdge) {
-      return { beforeId: null, el: last, where: "after" };
+    if (clientY >= lastRect.top + lastRect.height * 0.5) {
+      return null;
     }
 
     for (const row of others) {
       const rect = row.getBoundingClientRect();
-      if (clientY < rect.top + rect.height / 2) {
-        return { beforeId: row.dataset.id ?? null, el: row, where: "before" };
+      if (clientY < rect.top + rect.height * 0.5) {
+        return row.dataset.id ?? null;
       }
     }
-    return { beforeId: null, el: last, where: "after" };
+    return null;
   }
 
-  function updateInsertIndicator(clientY, excludeId) {
-    lastInsert = resolveInsert(clientY, excludeId);
-    const { el, where } = lastInsert;
-    for (const r of root.querySelectorAll(".expr-row")) {
-      r.classList.toggle("drag-over-before", r === el && where === "before");
-      r.classList.toggle("drag-over-after", r === el && where === "after");
+  /**
+   * @param {Map<string, DOMRect>} prevRects
+   */
+  function flipRows(prevRects) {
+    for (const row of rowElements()) {
+      const id = row.dataset.id;
+      if (!id) continue;
+      const prev = prevRects.get(id);
+      if (!prev) continue;
+      const next = row.getBoundingClientRect();
+      const dy = prev.top - next.top;
+      if (Math.abs(dy) < 0.5) continue;
+      row.style.transition = "none";
+      row.style.transform = `translateY(${dy}px)`;
+      void row.offsetHeight;
+      row.style.transition = "transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1)";
+      row.style.transform = "";
+      const onEnd = (ev) => {
+        if (ev.target !== row || ev.propertyName !== "transform") return;
+        row.style.transition = "";
+        row.removeEventListener("transitionend", onEnd);
+      };
+      row.addEventListener("transitionend", onEnd);
     }
+  }
+
+  /**
+   * Move the placeholder hole (not the captured row) to match the pointer.
+   * @param {number} clientY
+   */
+  function liveReorderToPointer(clientY) {
+    if (!dragState || !dragPlaceholder) return;
+    const beforeId = resolveBeforeId(clientY, dragState.id);
+    if (beforeId === liveBeforeId) return;
+
+    const ph = dragPlaceholder;
+    const currentNext = ph.nextElementSibling;
+    const currentBeforeId =
+      currentNext instanceof HTMLElement && currentNext.classList.contains("expr-row")
+        ? currentNext.dataset.id ?? null
+        : null;
+    if (currentBeforeId === beforeId) {
+      liveBeforeId = beforeId;
+      return;
+    }
+
+    const prevRects = new Map();
+    for (const r of rowElements()) {
+      if (r.dataset.id) prevRects.set(r.dataset.id, r.getBoundingClientRect());
+    }
+
+    if (beforeId) {
+      const target = root.querySelector(`.expr-row[data-id="${CSS.escape(beforeId)}"]`);
+      if (!(target instanceof HTMLElement)) return;
+      root.insertBefore(ph, target);
+    } else {
+      const actions = root.querySelector(".expr-list-actions");
+      if (actions) root.insertBefore(ph, actions);
+      else root.appendChild(ph);
+    }
+
+    liveBeforeId = beforeId;
+    flipRows(prevRects);
+  }
+
+  function unbindWindowDrag() {
+    window.removeEventListener("pointermove", onWindowPointerMove);
+    window.removeEventListener("pointerup", onWindowPointerUp);
+    window.removeEventListener("pointercancel", onWindowPointerUp);
+  }
+
+  function bindWindowDrag() {
+    window.addEventListener("pointermove", onWindowPointerMove);
+    window.addEventListener("pointerup", onWindowPointerUp);
+    window.addEventListener("pointercancel", onWindowPointerUp);
+  }
+
+  function onWindowPointerMove(ev) {
+    if (!dragState || ev.pointerId !== dragState.pointerId) return;
+    onPointerMove(ev);
+  }
+
+  function onWindowPointerUp(ev) {
+    if (!dragState || ev.pointerId !== dragState.pointerId) return;
+    onPointerUp(ev);
   }
 
   function finishPointerDrag() {
     const state = dragState;
+    if (!state) return;
     dragState = null;
-    if (!state?.moved) {
-      clearDragIndicators();
-      lastInsert = null;
+    unbindWindowDrag();
+    if (!state.moved) {
+      clearDragVisuals();
       return;
     }
-    const beforeId = lastInsert ? lastInsert.beforeId : null;
-    const id = state.id;
-    clearDragIndicators();
-    lastInsert = null;
-    if (moveExpr(id, beforeId)) {
-      onStructuralChange();
-      render();
+
+    // Commit slot from the placeholder's live position.
+    const ph = dragPlaceholder;
+    let beforeId = null;
+    if (ph) {
+      const next = ph.nextElementSibling;
+      beforeId =
+        next instanceof HTMLElement && next.classList.contains("expr-row")
+          ? next.dataset.id ?? null
+          : null;
+    } else if (typeof liveBeforeId !== "undefined") {
+      beforeId = liveBeforeId;
     }
+    liveBeforeId = undefined;
+
+    const floatRow = dragFloat;
+    if (floatRow && ph?.parentNode) {
+      ph.parentNode.insertBefore(floatRow, ph);
+    } else if (floatRow?.parentNode === document.body) {
+      root.appendChild(floatRow);
+    }
+    clearDragVisuals();
+
+    moveExpr(state.id, beforeId);
+    onStructuralChange();
+    render();
   }
 
   function onPointerMove(ev) {
@@ -760,19 +898,24 @@ export function mountExprList(opts) {
       root.classList.add("is-reordering");
       const row = root.querySelector(`.expr-row[data-id="${CSS.escape(dragState.id)}"]`);
       if (row instanceof HTMLElement) {
-        row.classList.add("is-dragging");
-        showDragGhost(row, ev.clientX, ev.clientY, dragState.offsetX, dragState.offsetY);
+        beginFloatDrag(row, ev.clientX, ev.clientY);
       }
+      bindWindowDrag();
     } else {
-      moveDragGhost(ev.clientX, ev.clientY, dragState.offsetX, dragState.offsetY);
+      moveDragFloat(ev.clientX, ev.clientY);
     }
     ev.preventDefault();
-    updateInsertIndicator(ev.clientY, dragState.id);
+    liveReorderToPointer(ev.clientY);
   }
 
   function onPointerUp(ev) {
     if (!dragState || ev.pointerId !== dragState.pointerId) return;
-    if (dragState.moved) updateInsertIndicator(ev.clientY, dragState.id);
+    if (dragState.moved) liveReorderToPointer(ev.clientY);
+    try {
+      ev.currentTarget?.releasePointerCapture?.(ev.pointerId);
+    } catch (_) {
+      /* ignore */
+    }
     finishPointerDrag();
   }
 
@@ -801,8 +944,10 @@ export function mountExprList(opts) {
         moved: false,
         offsetX: ev.clientX - rect.left,
         offsetY: ev.clientY - rect.top,
+        width: rect.width,
       };
-      lastInsert = null;
+      liveBeforeId = undefined;
+      bindWindowDrag();
       try {
         handle.setPointerCapture(ev.pointerId);
       } catch (_) {
@@ -898,7 +1043,9 @@ export function mountExprList(opts) {
       mf.addEventListener(
         "keydown",
         (ev) => {
+          // ↑/↓: defer only while latex suggestions own the keys.
           if (ev.key === "ArrowUp" || ev.key === "ArrowDown") {
+            if (isSuggestionUiActive(mf)) return;
             const list = listExpressions();
             const idx = list.findIndex((e) => e.id === item.id);
             const target = ev.key === "ArrowUp" ? list[idx - 1] : list[idx + 1];
@@ -923,25 +1070,27 @@ export function mountExprList(opts) {
                 render();
                 queueMicrotask(() => focusFieldAt(root, merged.id, merged.caretOffset));
               }
-              return;
-            }
-          }
-
-          if (ev.key === "Enter" && !ev.shiftKey) {
-            ev.preventDefault();
-            ev.stopPropagation();
-            const { left, right } = latexAroundCaret(mf);
-            updateExpr(item.id, { latex: left });
-            const split = splitExprAt(item.id, left, right);
-            onStructuralChange();
-            render();
-            if (split) {
-              queueMicrotask(() => focusFieldAt(root, split.id, 0));
             }
           }
         },
         true,
       );
+      // Enter in bubble so MathLive (capture on its sink) runs first.
+      // Split only when MathLive did not consume the key (e.g. latex complete).
+      mf.addEventListener("keydown", (ev) => {
+        if (ev.key !== "Enter" || ev.shiftKey) return;
+        if (ev.defaultPrevented) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        const { left, right } = latexAroundCaret(mf);
+        updateExpr(item.id, { latex: left });
+        const split = splitExprAt(item.id, left, right);
+        onStructuralChange();
+        render();
+        if (split) {
+          queueMicrotask(() => focusFieldAt(root, split.id, 0));
+        }
+      });
 
       fieldRow.appendChild(mf);
       mid.appendChild(fieldRow);
