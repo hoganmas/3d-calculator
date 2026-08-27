@@ -65,6 +65,8 @@ import {
   clearClipGpuFrame,
   syncClipGpuWorldGrid,
   applyClipGpuTheme,
+  getIsoInterpHermite,
+  setIsoInterpHermite,
 } from "./clipBakeGpu.js";
 
 initTheme();
@@ -76,6 +78,7 @@ const els = {
   scale: document.getElementById("scale"),
   steps: document.getElementById("steps"),
   boxSize: document.getElementById("boxSize"),
+  isoInterp: document.getElementById("isoInterp"),
   marchDownscale: document.getElementById("marchDownscale"),
   marchScaleLabel: document.getElementById("marchScaleLabel"),
   reset: document.getElementById("reset"),
@@ -864,6 +867,7 @@ function buildMetricsReport() {
     `js_frame_ms     ${cpuMsSmooth.toFixed(2)}`,
     `gpu_path        ${useGpuClipPath() ? "webgpu" : "cpu/webgl"}`,
     `gpu_method      ${p.method || "—"}`,
+    `iso_interp      ${p.isoInterp || (getIsoInterpHermite() ? "hermite" : "trilinear")}`,
     `expr_kind       ${lastExprMeta.kind}`,
     `shade           ${lastExprMeta.shade}`,
     `iso_level       ${readIsoLevel()}`,
@@ -1532,6 +1536,14 @@ els.scale.addEventListener("input", applyRenderHyperparams);
 els.scale.addEventListener("change", applyRenderHyperparams);
 els.steps.addEventListener("input", applyRenderHyperparams);
 els.steps.addEventListener("change", applyRenderHyperparams);
+els.isoInterp?.addEventListener("change", async () => {
+  const hermite = els.isoInterp.value === "hermite";
+  if (!setIsoInterpHermite(hermite)) return;
+  resetClipGpuProfile();
+  clipDirty = true;
+  await prepareClipGpuForDegree(fitDeg || Number(els.deg.value) || 23);
+  refreshMetricsDump();
+});
 function markMarchDirty() {
   syncMarchSlider();
   resetClipGpuProfile();

@@ -1186,6 +1186,13 @@
 
           <section class="settings-section">
             <p class="settings-section-title">Rendering</p>
+            <label>
+              iso interpolation
+              <select id="isoInterp" title="Trilinear is faster; tricubic Hermite is C¹ using dens+∇ slabs">
+                <option value="trilinear">trilinear</option>
+                <option value="hermite" selected>tricubic Hermite</option>
+              </select>
+            </label>
             <label class="march-slider-label">
               <span class="march-slider-head">
                 <span>march downscale</span>

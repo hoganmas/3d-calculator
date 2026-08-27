@@ -43,8 +43,51 @@ fn sampleGradStops(stops: ptr<function, array<vec4f, ${MAX_GRAD_STOPS}>>, t: f32
 }
 `;
 
+/** Iso field interpolant: tricubic Hermite (C¹) vs trilinear. Compile-time switch. */
+let isoInterpHermite = true;
+
+export function getIsoInterpHermite() {
+  return isoInterpHermite;
+}
+
+/** @returns {boolean} true if the mode changed (iso pipeline must rebuild) */
+export function setIsoInterpHermite(on) {
+  const next = !!on;
+  if (next === isoInterpHermite) return false;
+  isoInterpHermite = next;
+  isoPipeline = null;
+  return true;
+}
+
 /** Classic DrawParams layout (matches 872b141). volBase in the _p1 slot. */
 function makeIsoWgsl() {
+  const volumeSample = isoInterpHermite
+    ? /* wgsl */ `
+  let a = sampleFieldHermite4(u32(draw.volBase), p);
+  let b = sampleFieldHermite4(u32(draw.volBaseB), p);
+  return mix(a.x, b.x, draw.blendT);`
+    : /* wgsl */ `
+  let a = sampleFieldBase(u32(draw.volBase), p);
+  let b = sampleFieldBase(u32(draw.volBaseB), p);
+  return mix(a, b, draw.blendT);`;
+
+  const gradSample = isoInterpHermite
+    ? /* wgsl */ `
+  let a = sampleFieldHermite4(u32(draw.volBase), p);
+  let b = sampleFieldHermite4(u32(draw.volBaseB), p);
+  return mix(a.yzw, b.yzw, draw.blendT);`
+    : /* wgsl */ `
+  let half = draw.half;
+  let volN = draw.gridM * draw.gridM * draw.gridM;
+  let b0 = u32(draw.volBase);
+  let b1 = u32(draw.volBaseB);
+  let t = draw.blendT;
+  let gxi = mix(sampleFieldBase(b0 + volN, p), sampleFieldBase(b1 + volN, p), t);
+  let geta = mix(sampleFieldBase(b0 + 2u * volN, p), sampleFieldBase(b1 + 2u * volN, p), t);
+  let gzeta = mix(sampleFieldBase(b0 + 3u * volN, p), sampleFieldBase(b1 + 3u * volN, p), t);
+  let invH = select(0.0, 1.0 / half, abs(half) > 1e-12);
+  return vec3f(gxi, geta, gzeta) * invH;`;
+
   return /* wgsl */ `
 struct DrawParams {
   fbW: u32,
@@ -131,10 +174,167 @@ fn sampleFieldBase(base: u32, p: vec3f) -> f32 {
   return mix(mix(c00, c10, ty), mix(c01, c11, ty), tz);
 }
 
+/** Chebyshev-root ξ at dens-grid index i. */
+fn nodeXi(i: i32) -> f32 {
+  return cos((f32(i) + 0.5) * 3.141592653589793 / f32(draw.gridM));
+}
+
+fn h00(t: f32) -> f32 { let t2 = t * t; return (2.0 * t - 3.0) * t2 + 1.0; }
+fn h10(t: f32) -> f32 { let t2 = t * t; return (t - 2.0) * t2 + t; }
+fn h01(t: f32) -> f32 { let t2 = t * t; return (-2.0 * t + 3.0) * t2; }
+fn h11(t: f32) -> f32 { let t2 = t * t; return (t - 1.0) * t2; }
+fn h00d(t: f32) -> f32 { return 6.0 * t * (t - 1.0); }
+fn h10d(t: f32) -> f32 { return 3.0 * t * t - 4.0 * t + 1.0; }
+fn h01d(t: f32) -> f32 { return 6.0 * t * (1.0 - t); }
+fn h11d(t: f32) -> f32 { return 3.0 * t * t - 2.0 * t; }
+
+fn hermiteVal(t: f32, f0: f32, f1: f32, d0: f32, d1: f32) -> f32 {
+  return h00(t) * f0 + h10(t) * d0 + h01(t) * f1 + h11(t) * d1;
+}
+fn hermiteDt(t: f32, f0: f32, f1: f32, d0: f32, d1: f32) -> f32 {
+  return h00d(t) * f0 + h10d(t) * d0 + h01d(t) * f1 + h11d(t) * d1;
+}
+
+/**
+ * Tricubic Hermite (tensor-product) using dens + ∂f/∂ξ slabs at the 8 cell corners.
+ * Derivatives are scaled to the unit-cell parameter t∈[0,1]. Mixed partials are
+ * estimated by finite differences of ∇f across the cell (C¹ Hermite).
+ * Returns (f, ∂f/∂x, ∂f/∂y, ∂f/∂z) in world space.
+ */
+fn sampleFieldHermite4(base: u32, p: vec3f) -> vec4f {
+  let half = draw.half;
+  let M = i32(draw.gridM);
+  let last = max(M - 2, 0);
+  let xi = clamp(p / half, vec3f(-1.0), vec3f(1.0));
+  let fx = chebIndex(xi.x); let fy = chebIndex(xi.y); let fz = chebIndex(xi.z);
+  let x0 = clamp(i32(floor(fx)), 0, last);
+  let y0 = clamp(i32(floor(fy)), 0, last);
+  let z0 = clamp(i32(floor(fz)), 0, last);
+  let tx = clamp(fx - f32(x0), 0.0, 1.0);
+  let ty = clamp(fy - f32(y0), 0.0, 1.0);
+  let tz = clamp(fz - f32(z0), 0.0, 1.0);
+
+  let volN = draw.gridM * draw.gridM * draw.gridM;
+  let bGx = base + volN;
+  let bGy = base + 2u * volN;
+  let bGz = base + 3u * volN;
+  let dltX = nodeXi(x0 + 1) - nodeXi(x0);
+  let dltY = nodeXi(y0 + 1) - nodeXi(y0);
+  let dltZ = nodeXi(z0 + 1) - nodeXi(z0);
+
+  var F: array<f32, 8>;
+  var DX: array<f32, 8>;
+  var DY: array<f32, 8>;
+  var DZ: array<f32, 8>;
+  for (var k: i32 = 0; k < 2; k++) {
+    for (var j: i32 = 0; j < 2; j++) {
+      for (var i: i32 = 0; i < 2; i++) {
+        let idx = i + j * 2 + k * 4;
+        let ix = x0 + i; let iy = y0 + j; let iz = z0 + k;
+        F[idx] = densAtBase(base, ix, iy, iz);
+        DX[idx] = densAtBase(bGx, ix, iy, iz) * dltX;
+        DY[idx] = densAtBase(bGy, ix, iy, iz) * dltY;
+        DZ[idx] = densAtBase(bGz, ix, iy, iz) * dltZ;
+      }
+    }
+  }
+
+  // Cell-wide mixed partials from FD of first derivatives (same for all corners).
+  var dxy = 0.0;
+  var dxz = 0.0;
+  var dyz = 0.0;
+  for (var j: i32 = 0; j < 2; j++) {
+    for (var k: i32 = 0; k < 2; k++) {
+      let a = j * 2 + k * 4;
+      dxy += 0.25 * (DY[1 + a] - DY[0 + a]);
+      dxz += 0.25 * (DZ[1 + a] - DZ[0 + a]);
+    }
+  }
+  for (var i: i32 = 0; i < 2; i++) {
+    for (var k: i32 = 0; k < 2; k++) {
+      dyz += 0.25 * (DZ[i + 2 + k * 4] - DZ[i + k * 4]);
+    }
+  }
+  // Also average the dual FD for dxy/dxz for symmetry.
+  var dxy2 = 0.0;
+  var dxz2 = 0.0;
+  var dyz2 = 0.0;
+  for (var i: i32 = 0; i < 2; i++) {
+    for (var k: i32 = 0; k < 2; k++) {
+      dxy2 += 0.25 * (DX[i + 2 + k * 4] - DX[i + k * 4]);
+    }
+    for (var j: i32 = 0; j < 2; j++) {
+      dxz2 += 0.25 * (DX[i + j * 2 + 4] - DX[i + j * 2]);
+      dyz2 += 0.25 * (DY[i + j * 2 + 4] - DY[i + j * 2]);
+    }
+  }
+  dxy = 0.5 * (dxy + dxy2);
+  dxz = 0.5 * (dxz + dxz2);
+  dyz = 0.5 * (dyz + dyz2);
+  let dxyz = 0.5 * (
+    (DZ[1 + 2 + 0] - DZ[0 + 2 + 0]) - (DZ[1 + 0 + 0] - DZ[0 + 0 + 0])
+    + (DZ[1 + 2 + 4] - DZ[0 + 2 + 4]) - (DZ[1 + 0 + 4] - DZ[0 + 0 + 4])
+  ) * 0.5;
+
+  // X pass → 4 values on the yz face (pack j+2*k).
+  var U: array<f32, 4>;
+  var UY: array<f32, 4>;
+  var UZ: array<f32, 4>;
+  var UYZ: array<f32, 4>;
+  var UX: array<f32, 4>;
+  var UXY: array<f32, 4>;
+  var UXZ: array<f32, 4>;
+  var UXYZ: array<f32, 4>;
+  for (var k: i32 = 0; k < 2; k++) {
+    for (var j: i32 = 0; j < 2; j++) {
+      let pjk = j + k * 2;
+      let i0 = 0 + j * 2 + k * 4;
+      let i1 = 1 + j * 2 + k * 4;
+      U[pjk] = hermiteVal(tx, F[i0], F[i1], DX[i0], DX[i1]);
+      UY[pjk] = hermiteVal(tx, DY[i0], DY[i1], dxy, dxy);
+      UZ[pjk] = hermiteVal(tx, DZ[i0], DZ[i1], dxz, dxz);
+      UYZ[pjk] = hermiteVal(tx, dyz, dyz, dxyz, dxyz);
+      UX[pjk] = hermiteDt(tx, F[i0], F[i1], DX[i0], DX[i1]);
+      UXY[pjk] = hermiteDt(tx, DY[i0], DY[i1], dxy, dxy);
+      UXZ[pjk] = hermiteDt(tx, DZ[i0], DZ[i1], dxz, dxz);
+      UXYZ[pjk] = hermiteDt(tx, dyz, dyz, dxyz, dxyz);
+    }
+  }
+
+  // Y pass → 2 values on the z edge.
+  let V0 = hermiteVal(ty, U[0], U[1], UY[0], UY[1]);
+  let V1 = hermiteVal(ty, U[2], U[3], UY[2], UY[3]);
+  let VZ0 = hermiteVal(ty, UZ[0], UZ[1], UYZ[0], UYZ[1]);
+  let VZ1 = hermiteVal(ty, UZ[2], UZ[3], UYZ[2], UYZ[3]);
+  let VX0 = hermiteVal(ty, UX[0], UX[1], UXY[0], UXY[1]);
+  let VX1 = hermiteVal(ty, UX[2], UX[3], UXY[2], UXY[3]);
+  let VY0 = hermiteDt(ty, U[0], U[1], UY[0], UY[1]);
+  let VY1 = hermiteDt(ty, U[2], U[3], UY[2], UY[3]);
+  let VYZ0 = hermiteDt(ty, UZ[0], UZ[1], UYZ[0], UYZ[1]);
+  let VYZ1 = hermiteDt(ty, UZ[2], UZ[3], UYZ[2], UYZ[3]);
+  let VXZ0 = hermiteVal(ty, UXZ[0], UXZ[1], UXYZ[0], UXYZ[1]);
+  let VXZ1 = hermiteVal(ty, UXZ[2], UXZ[3], UXYZ[2], UXYZ[3]);
+
+  // Z pass → value + parametric derivatives.
+  let f = hermiteVal(tz, V0, V1, VZ0, VZ1);
+  let dF_dtz = hermiteDt(tz, V0, V1, VZ0, VZ1);
+  let dF_dty = hermiteVal(tz, VY0, VY1, VYZ0, VYZ1);
+  let dF_dtx = hermiteVal(tz, VX0, VX1, VXZ0, VXZ1);
+
+  let invH = select(0.0, 1.0 / half, abs(half) > 1e-12);
+  let invDltX = select(0.0, 1.0 / dltX, abs(dltX) > 1e-15);
+  let invDltY = select(0.0, 1.0 / dltY, abs(dltY) > 1e-15);
+  let invDltZ = select(0.0, 1.0 / dltZ, abs(dltZ) > 1e-15);
+  return vec4f(
+    f,
+    dF_dtx * invDltX * invH,
+    dF_dty * invDltY * invH,
+    dF_dtz * invDltZ * invH,
+  );
+}
+
 fn sampleVolume(p: vec3f) -> f32 {
-  let a = sampleFieldBase(u32(draw.volBase), p);
-  let b = sampleFieldBase(u32(draw.volBaseB), p);
-  return mix(a, b, draw.blendT);
+${volumeSample}
 }
 
 fn fieldAt(p: vec3f) -> f32 {
@@ -163,10 +363,9 @@ fn cellIndexAt(p: vec3f) -> vec3i {
 }
 
 /**
- * Final-hit test: the sampled field is trilinear inside each grid cell, so a
- * real isosurface can only exist in that cell if the 8 corner values bracket
- * isoLevel (min ≤ iso ≤ max). Rejects Newton/ray near-misses that land in a
- * same-sign cell (ghost halo).
+ * Final-hit filter: reject hits in cells whose 8 corner dens values do not
+ * bracket isoLevel. Hermite can overshoot, so this is conservative (may drop
+ * some valid zeros) but still kills most ghost-halo near-misses.
  */
 fn cellBracketsIso(p: vec3f) -> bool {
   let c = cellIndexAt(p);
@@ -185,18 +384,9 @@ fn cellBracketsIso(p: vec3f) -> bool {
   return lo <= 0.0 && hi >= 0.0;
 }
 
-/** Analytic ∇f from Chebyshev-diff IDCT slabs (∂/∂ξ,∂/∂η,∂/∂ζ), then / half → world. */
+/** ∇f of the active iso interpolant (world space). */
 fn fieldGrad(p: vec3f) -> vec3f {
-  let half = draw.half;
-  let volN = draw.gridM * draw.gridM * draw.gridM;
-  let b0 = u32(draw.volBase);
-  let b1 = u32(draw.volBaseB);
-  let t = draw.blendT;
-  let gxi = mix(sampleFieldBase(b0 + volN, p), sampleFieldBase(b1 + volN, p), t);
-  let geta = mix(sampleFieldBase(b0 + 2u * volN, p), sampleFieldBase(b1 + 2u * volN, p), t);
-  let gzeta = mix(sampleFieldBase(b0 + 3u * volN, p), sampleFieldBase(b1 + 3u * volN, p), t);
-  let invH = select(0.0, 1.0 / half, abs(half) > 1e-12);
-  return vec3f(gxi, geta, gzeta) * invH;
+${gradSample}
 }
 
 ${GRADIENT_WGSL}
@@ -1406,6 +1596,7 @@ export function getClipGpuProfile() {
     method: profileMethod,
     gridM: profileGridM,
     timestamps: timestampsSupported,
+    isoInterp: isoInterpHermite ? "hermite" : "trilinear",
   };
 }
 
