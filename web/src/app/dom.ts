@@ -45,10 +45,8 @@ export interface DomElements {
   flowAgeMax: HTMLInputElement | null;
   flowVizMode: HTMLSelectElement | null;
   flowParticleCount: HTMLInputElement | null;
-  flowParticleSize: HTMLInputElement | null;
   flowTrailSteps: HTMLInputElement | null;
   flowTrailWidth: HTMLInputElement | null;
-  flowShowTrails: HTMLInputElement | null;
 }
 
 export const els: DomElements = {
@@ -82,10 +80,8 @@ export const els: DomElements = {
   flowAgeMax: document.getElementById("flowAgeMax") as HTMLInputElement | null,
   flowVizMode: document.getElementById("flowVizMode") as HTMLSelectElement | null,
   flowParticleCount: document.getElementById("flowParticleCount") as HTMLInputElement | null,
-  flowParticleSize: document.getElementById("flowParticleSize") as HTMLInputElement | null,
   flowTrailSteps: document.getElementById("flowTrailSteps") as HTMLInputElement | null,
   flowTrailWidth: document.getElementById("flowTrailWidth") as HTMLInputElement | null,
-  flowShowTrails: document.getElementById("flowShowTrails") as HTMLInputElement | null,
 };
 
 export function viewportSize() {

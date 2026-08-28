@@ -46,9 +46,9 @@ html[data-panel-init] {
   }
 }
 
-/* Dark — warm purple glass */
+/* UI — dark warm purple glass */
 :root,
-[data-theme="dark"] {
+[data-ui-theme="dark"] {
   color-scheme: dark;
 
   --bg: #1a1228;
@@ -64,7 +64,6 @@ html[data-panel-init] {
   --glass-rim-outer: rgba(255, 220, 200, 0.1);
   --glass-shadow: 0 16px 48px rgba(12, 4, 28, 0.48);
   --glass-shadow-dialog: 0 18px 48px rgba(12, 4, 28, 0.52);
-  /* Soft fresnel edge: bright top catch + soft all-around rim + faint outer halo */
   --glass-fresnel:
     inset 0 1.5px 0 rgba(255, 240, 230, 0.32),
     inset 0 -1px 0 rgba(255, 220, 200, 0.08),
@@ -103,39 +102,13 @@ html[data-panel-init] {
   --ok: #6ecf8a;
   --warn: #f5a524;
 
-  --grid-major: #6b5a82;
-  --grid-minor: #3d2f55;
-  --box-edge: #5a4a72;
-  --axis-x: #e85d66;
-  --axis-y: #5ecf7a;
-  --axis-z: #c9a8e8;
-  --label-stroke: rgba(26, 18, 40, 0.58);
-
-  --lava-1: #2a1840;
-  --lava-2: #3a2848;
-  --lava-3: #524058;
-
-  --iso-absorb-r: 0.22;
-  --iso-absorb-g: 0.14;
-  --iso-absorb-b: 0.28;
-  --iso-emit-r: 0.92;
-  --iso-emit-g: 0.66;
-  --iso-emit-b: 0.48;
-
-  --beer-absorb-r: 0.18;
-  --beer-absorb-g: 0.12;
-  --beer-absorb-b: 0.22;
-  --beer-emit-r: 0.85;
-  --beer-emit-g: 0.62;
-  --beer-emit-b: 0.45;
-
   --dialog-backdrop: rgba(20, 10, 36, 0.48);
   --math-highlight: rgba(232, 168, 124, 0.14);
   --btn-on-accent: #1a1228;
 }
 
-/* Light — warm cream glass */
-[data-theme="light"] {
+/* UI — light warm cream glass */
+[data-ui-theme="light"] {
   color-scheme: light;
 
   --bg: #f7efe6;
@@ -189,6 +162,43 @@ html[data-panel-init] {
   --ok: #3a9a58;
   --warn: #c48020;
 
+  --dialog-backdrop: rgba(44, 24, 16, 0.22);
+  --math-highlight: rgba(196, 112, 58, 0.12);
+  --btn-on-accent: #fffaf5;
+}
+
+/* Scene — dark */
+:root,
+[data-scene-theme="dark"] {
+  --grid-major: #6b5a82;
+  --grid-minor: #3d2f55;
+  --box-edge: #5a4a72;
+  --axis-x: #e85d66;
+  --axis-y: #5ecf7a;
+  --axis-z: #c9a8e8;
+  --label-stroke: rgba(26, 18, 40, 0.58);
+
+  --lava-1: #2a1840;
+  --lava-2: #3a2848;
+  --lava-3: #524058;
+
+  --iso-absorb-r: 0.22;
+  --iso-absorb-g: 0.14;
+  --iso-absorb-b: 0.28;
+  --iso-emit-r: 0.92;
+  --iso-emit-g: 0.66;
+  --iso-emit-b: 0.48;
+
+  --beer-absorb-r: 0.18;
+  --beer-absorb-g: 0.12;
+  --beer-absorb-b: 0.22;
+  --beer-emit-r: 0.85;
+  --beer-emit-g: 0.62;
+  --beer-emit-b: 0.45;
+}
+
+/* Scene — light */
+[data-scene-theme="light"] {
   --grid-major: #a89888;
   --grid-minor: #d4c8bc;
   --box-edge: #9a8878;
@@ -214,8 +224,4 @@ html[data-panel-init] {
   --beer-emit-r: 0.78;
   --beer-emit-g: 0.48;
   --beer-emit-b: 0.28;
-
-  --dialog-backdrop: rgba(44, 24, 16, 0.22);
-  --math-highlight: rgba(196, 112, 58, 0.12);
-  --btn-on-accent: #fffaf5;
 }

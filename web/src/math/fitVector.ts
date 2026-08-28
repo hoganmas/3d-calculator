@@ -795,8 +795,6 @@ function respawnParticle(
   gridSpacing: number,
   gridPoints: boolean,
   frameIdx: number,
-  trailHist?: Float32Array | null,
-  trailSteps?: number,
 ): void {
   const o = i * FLOW_PARTICLE_STRIDE;
   for (let t = 0; t < 24; t++) {
@@ -810,21 +808,10 @@ function respawnParticle(
     posAge[o + 2] = pz;
     posAge[o + 3] = 0;
     posAge[o + 4] = 0;
-    resetFlowTrailHistSlot(trailHist, trailSteps ?? 0, i, px, py, pz, 0, 0);
     return;
   }
   posAge[o + 3] = 0;
   posAge[o + 4] = 0;
-  resetFlowTrailHistSlot(
-    trailHist,
-    trailSteps ?? 0,
-    i,
-    posAge[o]!,
-    posAge[o + 1]!,
-    posAge[o + 2]!,
-    0,
-    0,
-  );
 }
 
 /** Fill all trail slots for one particle (e.g. on respawn). */
@@ -924,8 +911,12 @@ export function advectFlowParticles(
     const [vx, vy, vz] = sampleVelGridAt(vel.fx, vel.fy, vel.fz, M, half, px, py, pz);
     const speed = Math.hypot(vx, vy, vz);
     const [cx, cy, cz] = ibfvClampVelocity(vx, vy, vz, vMax);
-    if (speed <= 1e-5 || Math.abs(px) > half || Math.abs(py) > half || Math.abs(pz) > half || age > ageMax * 2.5) {
-      respawnParticle(posAge, i, layer, half, gridSpacing, gridPoints, frameIdx, trailHist, trailSteps);
+    const outOfBounds =
+      Math.abs(px) > half || Math.abs(py) > half || Math.abs(pz) > half;
+    const expired = age > ageMax;
+    const stuck = speed <= 1e-5 && age > ageMax * 0.5;
+    if (outOfBounds || expired || stuck) {
+      respawnParticle(posAge, i, layer, half, gridSpacing, gridPoints, frameIdx);
       continue;
     }
     px += cx * dt;
@@ -933,11 +924,11 @@ export function advectFlowParticles(
     pz += cz * dt;
     age += dt;
     if (Math.abs(px) > half || Math.abs(py) > half || Math.abs(pz) > half) {
-      respawnParticle(posAge, i, layer, half, gridSpacing, gridPoints, frameIdx, trailHist, trailSteps);
+      respawnParticle(posAge, i, layer, half, gridSpacing, gridPoints, frameIdx);
       continue;
     }
     if (alpha > 1e-6 && hash01(i, frameIdx, 919) < alpha) {
-      respawnParticle(posAge, i, layer, half, gridSpacing, gridPoints, frameIdx, trailHist, trailSteps);
+      respawnParticle(posAge, i, layer, half, gridSpacing, gridPoints, frameIdx);
       continue;
     }
     posAge[o] = px;

@@ -57,20 +57,16 @@ export const state = {
   flowVMax: 0,
   /** Fixed Beer density for flow layers (before global scale). */
   flowOpacity: 0.15,
-  /** Age (seconds) at which advected dye reaches gradient color 2. */
-  flowAgeMax: 1.0,
+  /** Age (seconds) at which advected dye reaches gradient color 2 / particle respawn. */
+  flowAgeMax: 30.0,
   /** Flow visualization: advected particles (depth-sorted) or IBFV dye grid. */
   flowVizMode: "particles" as "particles" | "ibfv",
   /** Particle count for flow advection (GPU instanced billboards). */
   flowParticleCount: 1000,
-  /** Screen-space particle radius in pixels. */
-  flowParticleSize: 1,
   /** Trail history length (segments = steps − 1). */
   flowTrailSteps: 12,
   /** Trail stroke width in pixels. */
-  flowTrailWidth: 1,
-  /** Draw streak trails behind particles. */
-  flowShowTrails: true,
+  flowTrailWidth: 10,
 };
 
 export const FIT_DEBOUNCE_MS = 320;

@@ -1,25 +1,61 @@
 /**
- * Light / dark / system theme — CSS tokens + JS color reads for Three.js / WebGPU.
+ * Theme prefs — UI and 3D scene can be light/dark independently.
+ * CSS tokens live in theme.css; JS reads scene colors for Three.js / WebGPU.
  */
 
 const STORAGE_KEY = "poly-cloud-theme";
 
-export type ThemePref = "dark" | "light" | "system";
 export type ThemeResolved = "dark" | "light";
 
-const listeners = new Set<(resolved: ThemeResolved, pref: ThemePref) => void>();
+export type ThemePref =
+  | "dark"
+  | "light"
+  | "system"
+  | "dark-scene-light-ui"
+  | "light-scene-dark-ui";
+
+export type ThemeSplit = {
+  ui: ThemeResolved;
+  scene: ThemeResolved;
+};
+
+const THEME_PREFS = new Set<ThemePref>([
+  "dark",
+  "light",
+  "system",
+  "dark-scene-light-ui",
+  "light-scene-dark-ui",
+]);
+
+const listeners = new Set<(split: ThemeSplit, pref: ThemePref) => void>();
 
 export function getThemePref(): ThemePref {
   const v = localStorage.getItem(STORAGE_KEY);
-  if (v === "light" || v === "system") return v;
+  if (v && THEME_PREFS.has(v as ThemePref)) return v as ThemePref;
   return "dark";
 }
 
-export function resolveTheme(pref: ThemePref): ThemeResolved {
-  if (pref === "system") {
-    return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+export function resolveThemeSplit(pref: ThemePref): ThemeSplit {
+  switch (pref) {
+    case "light":
+      return { ui: "light", scene: "light" };
+    case "dark-scene-light-ui":
+      return { ui: "light", scene: "dark" };
+    case "light-scene-dark-ui":
+      return { ui: "dark", scene: "light" };
+    case "system": {
+      const sys = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      return { ui: sys, scene: sys };
+    }
+    default:
+      return { ui: "dark", scene: "dark" };
   }
-  return pref;
+}
+
+/** @deprecated Use resolveThemeSplit — kept for callers that only need a single resolved value. */
+export function resolveTheme(pref: ThemePref): ThemeResolved {
+  const { ui, scene } = resolveThemeSplit(pref);
+  return ui === scene ? ui : ui;
 }
 
 export function setThemePref(pref: ThemePref) {
@@ -27,16 +63,18 @@ export function setThemePref(pref: ThemePref) {
   applyTheme(pref);
 }
 
-export function onThemeChange(fn: (resolved: ThemeResolved, pref: ThemePref) => void) {
+export function onThemeChange(fn: (split: ThemeSplit, pref: ThemePref) => void) {
   listeners.add(fn);
   return () => listeners.delete(fn);
 }
 
 export function applyTheme(pref: ThemePref = getThemePref()) {
-  const resolved = resolveTheme(pref);
-  document.documentElement.setAttribute("data-theme", resolved);
-  document.documentElement.dataset.themePref = pref;
-  for (const fn of listeners) fn(resolved, pref);
+  const split = resolveThemeSplit(pref);
+  const root = document.documentElement;
+  root.setAttribute("data-ui-theme", split.ui);
+  root.setAttribute("data-scene-theme", split.scene);
+  root.dataset.themePref = pref;
+  for (const fn of listeners) fn(split, pref);
 }
 
 export function initTheme() {
@@ -75,7 +113,7 @@ function cssHexToRgb01(hexStr: string) {
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 }
 
-/** Snapshot of theme colors for WebGL / WebGPU. */
+/** Snapshot of scene theme colors for WebGL / WebGPU. */
 export function readThemeColors() {
   const axisX = cssColor("--axis-x");
   const axisY = cssColor("--axis-y");

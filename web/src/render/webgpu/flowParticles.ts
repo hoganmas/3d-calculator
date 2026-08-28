@@ -215,7 +215,7 @@ export function tickFlowParticles(
       dt: effectiveFlowDt(),
       vMax: effectiveVMax(),
       half: gpu.flowHalf,
-      alpha: state.flowAlpha,
+      alpha: 0,
       gridSpacing: state.flowNoiseScale,
       gridPoints: state.flowGridPoints,
       ageMax: state.flowAgeMax,

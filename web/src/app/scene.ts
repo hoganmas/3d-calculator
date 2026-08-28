@@ -228,7 +228,7 @@ export function applyThemeToScene() {
 export function initScene() {
   rebuildWorldGrid(2);
 
-  onThemeChange((_resolved, pref) => {
+  onThemeChange((_split, pref) => {
     if (els.themePref && els.themePref.value !== pref) els.themePref.value = pref;
   });
   onThemeChange(() => applyThemeToScene());

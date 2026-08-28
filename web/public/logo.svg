@@ -1,13 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
   <defs>
     <filter id="glassPlate" filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse"
-      x="0" y="0" width="32" height="32" color-interpolation-filters="sRGB">
-      <feGaussianBlur in="SourceAlpha" stdDeviation="1" result="sdfA"/>
-      <feGaussianBlur in="sdfA" stdDeviation="1" result="sdf"/>
+      x="0" y="0" width="64" height="64" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2" result="sdfA"/>
+      <feGaussianBlur in="sdfA" stdDeviation="2" result="sdf"/>
       <feDiffuseLighting in="sdf" diffuseConstant="1" surfaceScale="5.5" lighting-color="#ffffff" result="raw">
         <feDistantLight azimuth="225" elevation="52"/>
       </feDiffuseLighting>
-      <feGaussianBlur in="raw" stdDeviation="0.5" result="rawSmooth"/>
+      <feGaussianBlur in="raw" stdDeviation="1" result="rawSmooth"/>
       <feComponentTransfer in="rawSmooth" result="t">
         <feFuncR type="linear" slope="0.78" intercept="0.22"/>
         <feFuncG type="linear" slope="0.78" intercept="0.22"/>
@@ -21,36 +21,35 @@
       <feComposite in="color" in2="SourceAlpha" operator="in"/>
     </filter>
 
-    <!-- SSAO: symbol shadows onto background plate -->
     <filter id="ssaoBg" filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse"
-      x="0" y="0" width="32" height="32" color-interpolation-filters="sRGB">
-      <feGaussianBlur in="SourceAlpha" stdDeviation="1.5" result="blurA"/>
-      <feGaussianBlur in="blurA" stdDeviation="1.5" result="blur"/>
-      <feOffset in="blur" dx="-0.4" dy="0.9" result="off"/>
+      x="0" y="0" width="64" height="64" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3" result="blurA"/>
+      <feGaussianBlur in="blurA" stdDeviation="3" result="blur"/>
+      <feOffset in="blur" dx="-0.8" dy="1.8" result="off"/>
       <feFlood flood-color="#0c041c" flood-opacity="0.78" result="flood"/>
       <feComposite in="flood" in2="off" operator="in"/>
     </filter>
 
     <filter id="twoMaskBlur" x="-100%" y="-100%" width="300%" height="300%">
-      <feGaussianBlur in="SourceGraphic" stdDeviation="1.4" result="blur"/>
-      <feOffset in="blur" dx="-2.5" dy="0.6"/>
+      <feGaussianBlur in="SourceGraphic" stdDeviation="2.8" result="blur"/>
+      <feOffset in="blur" dx="-5" dy="1.2"/>
     </filter>
 
-    <mask id="twoOccMask" maskUnits="userSpaceOnUse" x="0" y="0" width="32" height="32">
-      <rect width="32" height="32" fill="black"/>
-      <g transform="translate(23.5 9) scale(0.88) translate(-10 -10.535)" filter="url(#twoMaskBlur)">
-        <use href="#two" stroke="white" stroke-width="11" fill="none"/>
+    <mask id="twoOccMask" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64">
+      <rect width="64" height="64" fill="black"/>
+      <g transform="translate(47 18) scale(0.88) translate(-20 -21.05)" filter="url(#twoMaskBlur)">
+        <use href="#twoShape" stroke="white" stroke-width="22" fill="none"/>
       </g>
     </mask>
 
     <filter id="sdfNabla" filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse"
-      x="0" y="0" width="32" height="32" color-interpolation-filters="sRGB">
-      <feGaussianBlur in="SourceAlpha" stdDeviation="1" result="sdfA"/>
-      <feGaussianBlur in="sdfA" stdDeviation="1" result="sdf"/>
+      x="0" y="0" width="64" height="64" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2" result="sdfA"/>
+      <feGaussianBlur in="sdfA" stdDeviation="2" result="sdf"/>
       <feDiffuseLighting in="sdf" diffuseConstant="1.1" surfaceScale="3.2" lighting-color="#ffffff" result="rawView">
         <feDistantLight azimuth="0" elevation="88"/>
       </feDiffuseLighting>
-      <feGaussianBlur in="rawView" stdDeviation="0.5" result="viewSmooth"/>
+      <feGaussianBlur in="rawView" stdDeviation="1" result="viewSmooth"/>
       <feComponentTransfer in="viewSmooth" result="ndotv">
         <feFuncR type="linear" slope="0.9" intercept="0.08"/>
         <feFuncG type="linear" slope="0.9" intercept="0.08"/>
@@ -69,15 +68,14 @@
       <feComposite in="color" in2="SourceAlpha" operator="in"/>
     </filter>
 
-    <!-- Occluded nabla pass: cap t before LUT, clipped to 2 mask -->
     <filter id="sdfNablaOcc" filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse"
-      x="0" y="0" width="32" height="32" color-interpolation-filters="sRGB">
-      <feGaussianBlur in="SourceAlpha" stdDeviation="1" result="sdfA"/>
-      <feGaussianBlur in="sdfA" stdDeviation="1" result="sdf"/>
+      x="0" y="0" width="64" height="64" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2" result="sdfA"/>
+      <feGaussianBlur in="sdfA" stdDeviation="2" result="sdf"/>
       <feDiffuseLighting in="sdf" diffuseConstant="1.1" surfaceScale="3.2" lighting-color="#ffffff" result="rawView">
         <feDistantLight azimuth="0" elevation="88"/>
       </feDiffuseLighting>
-      <feGaussianBlur in="rawView" stdDeviation="0.5" result="viewSmooth"/>
+      <feGaussianBlur in="rawView" stdDeviation="1" result="viewSmooth"/>
       <feComponentTransfer in="viewSmooth" result="ndotv">
         <feFuncR type="linear" slope="0.9" intercept="0.08"/>
         <feFuncG type="linear" slope="0.9" intercept="0.08"/>
@@ -99,13 +97,13 @@
     </filter>
 
     <filter id="sdfTwo" filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse"
-      x="0" y="0" width="32" height="32" color-interpolation-filters="sRGB">
-      <feGaussianBlur in="SourceAlpha" stdDeviation="0.42" result="sdfA"/>
-      <feGaussianBlur in="sdfA" stdDeviation="0.42" result="sdf"/>
+      x="0" y="0" width="64" height="64" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="0.84" result="sdfA"/>
+      <feGaussianBlur in="sdfA" stdDeviation="0.84" result="sdf"/>
       <feDiffuseLighting in="sdf" diffuseConstant="1" surfaceScale="2" lighting-color="#ffffff" result="rawView">
         <feDistantLight azimuth="0" elevation="88"/>
       </feDiffuseLighting>
-      <feGaussianBlur in="rawView" stdDeviation="0.35" result="viewSmooth"/>
+      <feGaussianBlur in="rawView" stdDeviation="0.7" result="viewSmooth"/>
       <feComponentTransfer in="viewSmooth" result="ndotv">
         <feFuncR type="linear" slope="0.92" intercept="0.06"/>
         <feFuncG type="linear" slope="0.92" intercept="0.06"/>
@@ -124,55 +122,54 @@
       <feComposite in="color" in2="SourceAlpha" operator="in"/>
     </filter>
 
-    <path id="r" fill-rule="evenodd" d="
-      M 12 9.515
-      L 20 9.515
-      Q 25.5 9.515 22.75 14.278
-      L 18.75 21.207
-      Q 16 25.97 13.25 21.207
-      L 9.25 14.278
-      Q 6.5 9.515 12 9.515
+    <path id="nablaRing" fill-rule="evenodd" d="
+      M 24 19.03
+      L 40 19.03
+      Q 51 19.03 45.5 28.556
+      L 37.5 42.414
+      Q 32 51.94 26.5 42.414
+      L 18.5 28.556
+      Q 13 19.03 24 19.03
       Z
-      M 14.95 13.355
-      L 17.05 13.355
-      Q 18.85 13.355 17.95 14.914
-      L 16.9 16.732
-      Q 16 18.291 15.1 16.732
-      L 14.05 14.914
-      Q 13.15 13.355 14.95 13.355
+      M 29.9 26.71
+      L 34.1 26.71
+      Q 37.7 26.71 35.9 29.828
+      L 33.8 33.464
+      Q 32 36.582 30.2 33.464
+      L 28.1 29.828
+      Q 26.3 26.71 29.9 26.71
       Z
     "/>
-    <path id="two" fill="none" stroke="white" stroke-width="3"
+    <path id="twoShape" fill="none" stroke="white" stroke-width="6"
       stroke-linecap="round" stroke-linejoin="round" d="
-      M 6.56 8.12
-      C 6.06 6.0 13.94 5.85 13.77 9.25
-      C 13.53 11.08 8.03 12.22 6.8 14
-      Q 7 15.2 8.1 15.4
-      L 13.44 15.4
+      M 13.12 16.24
+      C 12.12 12.0 27.88 11.7 27.54 18.5
+      C 27.06 22.16 16.06 24.44 13.6 28
+      Q 14 30.4 16.2 30.4
+      L 26.88 30.4
     "/>
 
   </defs>
 
-  <rect width="32" height="32" rx="8" fill="#1a1228" filter="url(#glassPlate)"/>
+  <rect width="64" height="64" rx="16" fill="#1a1228" filter="url(#glassPlate)"/>
 
-  <!-- SSAO: both symbols onto background -->
   <g opacity="1">
-    <g transform="translate(14.5 17.5) scale(1.18) translate(-16 -15)">
-      <use href="#r" fill="black" filter="url(#ssaoBg)"/>
+    <g transform="translate(29 35) scale(1.18) translate(-32 -30)">
+      <use href="#nablaRing" fill="black" filter="url(#ssaoBg)"/>
     </g>
-    <g transform="translate(23.5 9) scale(0.88) translate(-10 -10.535)">
-      <use href="#two" stroke="black" stroke-width="3.4" fill="none" filter="url(#ssaoBg)"/>
+    <g transform="translate(47 18) scale(0.88) translate(-20 -21.05)">
+      <use href="#twoShape" stroke="black" stroke-width="6.8" fill="none" filter="url(#ssaoBg)"/>
     </g>
   </g>
 
-  <g transform="translate(14.5 17.5) scale(1.18) translate(-16 -15)">
-    <use href="#r" fill="white" filter="url(#sdfNabla)"/>
+  <g transform="translate(29 35) scale(1.18) translate(-32 -30)">
+    <use href="#nablaRing" fill="white" filter="url(#sdfNabla)"/>
   </g>
-  <g transform="translate(14.5 17.5) scale(1.18) translate(-16 -15)" mask="url(#twoOccMask)">
-    <use href="#r" fill="white" filter="url(#sdfNablaOcc)"/>
+  <g transform="translate(29 35) scale(1.18) translate(-32 -30)" mask="url(#twoOccMask)">
+    <use href="#nablaRing" fill="white" filter="url(#sdfNablaOcc)"/>
   </g>
 
-  <g transform="translate(23.5 9) scale(0.88) translate(-10 -10.535)">
-    <use href="#two" filter="url(#sdfTwo)"/>
+  <g transform="translate(47 18) scale(0.88) translate(-20 -21.05)">
+    <use href="#twoShape" filter="url(#sdfTwo)"/>
   </g>
 </svg>

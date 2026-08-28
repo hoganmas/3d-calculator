@@ -554,9 +554,6 @@ export function wirePipelineDom() {
     state.flowParticleCount = Math.max(100, Math.min(32000, Number(els.flowParticleCount!.value) || 1000));
     if (state.lastSceneBake?.flowLayers?.length) state.clipDirty = true;
   });
-  els.flowParticleSize?.addEventListener("input", () => {
-    state.flowParticleSize = Math.max(1, Math.min(32, Number(els.flowParticleSize!.value) || 1));
-  });
   els.flowGridMode?.addEventListener("change", () => {
     state.flowGridPoints = els.flowGridMode!.value === "points";
     reseedFlowDyeBuffers();
@@ -578,10 +575,7 @@ export function wirePipelineDom() {
     reseedFlowParticles();
   });
   els.flowTrailWidth?.addEventListener("input", () => {
-    state.flowTrailWidth = Math.max(1, Math.min(16, Number(els.flowTrailWidth!.value) || 1));
-  });
-  els.flowShowTrails?.addEventListener("change", () => {
-    state.flowShowTrails = !!els.flowShowTrails!.checked;
+    state.flowTrailWidth = Math.max(1, Math.min(32, Number(els.flowTrailWidth!.value) || 10));
   });
   els.flowVMax?.addEventListener("input", () => {
     state.flowVMax = Math.max(0, Number(els.flowVMax!.value) || 0);
@@ -590,7 +584,7 @@ export function wirePipelineDom() {
     state.flowOpacity = Math.max(0.01, Math.min(2, Number(els.flowOpacity!.value) || 0));
   });
   els.flowAgeMax?.addEventListener("input", () => {
-    state.flowAgeMax = Math.max(0.1, Math.min(10, Number(els.flowAgeMax!.value) || 1));
+    state.flowAgeMax = Math.max(1, Math.min(120, Number(els.flowAgeMax!.value) || 30));
   });
 }
 
