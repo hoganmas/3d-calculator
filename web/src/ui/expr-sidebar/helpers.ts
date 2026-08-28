@@ -17,6 +17,29 @@ export function readFieldLatex(mf: MathfieldElement): string {
     : String(mf.value || "");
 }
 
+/** True when focus is inside a MathLive field (including shadow DOM). */
+export function isMathFieldFocused(mf: MathfieldElement | null | undefined): boolean {
+  if (!mf) return false;
+  const active = document.activeElement;
+  if (!active) return false;
+  if (active === mf) return true;
+  if (typeof mf.contains === "function" && mf.contains(active)) return true;
+  try {
+    if (mf.shadowRoot?.contains(active)) return true;
+  } catch {
+    /* ignore */
+  }
+  try {
+    if ("composedPath" in active && typeof (active as Node & { composedPath?: () => EventTarget[] }).composedPath === "function") {
+      const path = (active as Node & { composedPath: () => EventTarget[] }).composedPath();
+      if (path.includes(mf)) return true;
+    }
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
 export function getCaretPos(mf: MathfieldElement): number {
   const sel = mf.selection;
   if (sel?.ranges?.length) return sel.ranges[0][0] | 0;

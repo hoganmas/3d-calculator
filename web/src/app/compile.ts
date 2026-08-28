@@ -19,7 +19,8 @@ import {
   removeExprSilent,
   resolveExprGradient,
 } from "../model/expressions.js";
-import { els } from "./dom.js";
+import { closeSettingsDialog, els } from "./dom.js";
+import { isMathFieldFocused } from "../ui/expr-sidebar/helpers.js";
 import { state } from "./state.js";
 import type { CompileAllResult, CompileLayerResult, ExprItem } from "../types/models.js";
 
@@ -99,7 +100,8 @@ export function shouldDeferAutoParamRows() {
   const mf =
     (ae.closest && ae.closest("math-field")) ||
     (ae.tagName === "MATH-FIELD" ? ae : null);
-  if (!mf) return false;
+  if (!(mf instanceof HTMLElement)) return false;
+  if (!isMathFieldFocused(mf as MathfieldElement)) return false;
   const row = mf.closest?.(".expr-row");
   if (!row || row.classList.contains("is-param-def")) return false;
   return true;
@@ -261,11 +263,18 @@ export function compileAllExprs(opts: CompileOpts = {}): CompileAllResult {
 export function applyPreset(key: string) {
   const p = PRESETS[key] ?? PRESETS.sincos;
   els.preset.value = key in PRESETS ? key : "sincos";
+  closeSettingsDialog();
   state.pendingParamSeed = p.params ?? {};
   if (Array.isArray(p.expressions) && p.expressions.length) {
     setExpressions(p.expressions);
   } else {
     setExpressions([{ latex: p.latex ?? "" }]);
+  }
+  // Insert any auto-param rows before a single UI rebuild.
+  try {
+    compileAllExprs({ rebuildUi: false });
+  } catch {
+    /* uploadFit / syncExprCompileState will surface errors */
   }
   state.exprListApi?.render();
 }

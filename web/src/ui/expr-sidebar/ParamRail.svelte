@@ -9,7 +9,7 @@
   } from "../../model/params.js";
   import { updateExprSilent } from "../../model/expressions.js";
   import { mountLiquidThumb, syncLiquidThumb } from "../liquidSlider.js";
-  import { fmtNum, ANIM_OPTS_ICON } from "./helpers.ts";
+  import { fmtNum, ANIM_OPTS_ICON, isMathFieldFocused } from "./helpers.ts";
   import {
     openAnimOptions,
     isAnimPopoverOpen,
@@ -110,7 +110,7 @@
     if (!next) return;
     const mf = getMathField();
     updateExprSilent(item.id, { latex: next.latex, sliderAnimating: false });
-    if (mf && document.activeElement !== mf) {
+    if (mf && !isMathFieldFocused(mf)) {
       if (typeof mf.setValue === "function") {
         mf.setValue(next.latex, { silenceNotifications: true });
       } else {

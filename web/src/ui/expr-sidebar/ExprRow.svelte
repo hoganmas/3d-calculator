@@ -20,11 +20,13 @@ import {
     setFieldLatex,
     getCaretPos,
     setCaretPos,
+    getLastOffset,
     isCursorAtStart,
     latexAroundCaret,
     isSuggestionUiActive,
     classifyKind,
     neededParamForItem,
+    isMathFieldFocused,
     ICON_EYE,
     ICON_EYE_OFF,
   } from "./helpers.ts";
@@ -82,7 +84,7 @@ import {
   });
 
   $effect(() => {
-    if (!mfEl || document.activeElement === mfEl) return;
+    if (!mfEl || isMathFieldFocused(mfEl)) return;
     const cur = readFieldLatex(mfEl);
     if (cur !== item.latex) setFieldLatex(mfEl, item.latex || "");
   });
@@ -184,7 +186,7 @@ import {
     if (t === mfEl || (mfEl && mfEl.contains(t as Node))) return;
     if (t instanceof HTMLInputElement || t instanceof HTMLButtonElement) return;
     onSelect(item.id);
-    mfEl?.focus?.();
+    if (mfEl) focusAt(getLastOffset(mfEl));
   }
 
   function onDragPointerdown(ev: PointerEvent) {
