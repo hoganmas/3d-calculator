@@ -12,10 +12,13 @@ const PARAM_FLOATS = 12;
 let flowFrameIdx = 0;
 let flowIbfvBuiltEpoch = -1;
 
+export function effectiveFlowDt(): number {
+  return Math.max(state.flowDt, 1e-6) * Math.max(state.flowSpeed, 0.01);
+}
+
 function effectiveVMax(): number {
   if (state.flowVMax > 1e-8) return state.flowVMax;
-  const dt = Math.max(state.flowDt, 1e-6);
-  return state.flowNoiseScale / dt;
+  return state.flowNoiseScale / effectiveFlowDt();
 }
 
 /** Speed reference for Beer |V|-modulated opacity (half-box when vMax auto). */
@@ -140,7 +143,7 @@ function packIbfvParams(
   f[2] = half;
   f[3] = state.flowAlpha;
   f[4] = state.flowNoiseScale;
-  f[5] = state.flowDt;
+  f[5] = effectiveFlowDt();
   f[6] = effectiveVMax();
   u[7] = frameIdx >>> 0;
   u[8] = velBase >>> 0;

@@ -39,9 +39,16 @@ export interface DomElements {
   flowGridMode: HTMLSelectElement | null;
   flowNoiseScale: HTMLInputElement | null;
   flowDt: HTMLInputElement | null;
+  flowSpeed: HTMLInputElement | null;
   flowVMax: HTMLInputElement | null;
   flowOpacity: HTMLInputElement | null;
   flowAgeMax: HTMLInputElement | null;
+  flowVizMode: HTMLSelectElement | null;
+  flowParticleCount: HTMLInputElement | null;
+  flowParticleSize: HTMLInputElement | null;
+  flowTrailSteps: HTMLInputElement | null;
+  flowTrailWidth: HTMLInputElement | null;
+  flowShowTrails: HTMLInputElement | null;
 }
 
 export const els: DomElements = {
@@ -69,9 +76,16 @@ export const els: DomElements = {
   flowGridMode: document.getElementById("flowGridMode") as HTMLSelectElement | null,
   flowNoiseScale: document.getElementById("flowNoiseScale") as HTMLInputElement | null,
   flowDt: document.getElementById("flowDt") as HTMLInputElement | null,
+  flowSpeed: document.getElementById("flowSpeed") as HTMLInputElement | null,
   flowVMax: document.getElementById("flowVMax") as HTMLInputElement | null,
   flowOpacity: document.getElementById("flowOpacity") as HTMLInputElement | null,
   flowAgeMax: document.getElementById("flowAgeMax") as HTMLInputElement | null,
+  flowVizMode: document.getElementById("flowVizMode") as HTMLSelectElement | null,
+  flowParticleCount: document.getElementById("flowParticleCount") as HTMLInputElement | null,
+  flowParticleSize: document.getElementById("flowParticleSize") as HTMLInputElement | null,
+  flowTrailSteps: document.getElementById("flowTrailSteps") as HTMLInputElement | null,
+  flowTrailWidth: document.getElementById("flowTrailWidth") as HTMLInputElement | null,
+  flowShowTrails: document.getElementById("flowShowTrails") as HTMLInputElement | null,
 };
 
 export function viewportSize() {

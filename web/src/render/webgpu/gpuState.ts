@@ -112,6 +112,12 @@ export interface GpuState {
   flowDyeReadIsA: boolean;
   flowIbfvPipeline: GPUComputePipeline | null;
   flowIbfvParamBuf: GPUBuffer | null;
+  flowParticlesPipeline: GPURenderPipeline | null;
+  flowParticlesParamBuf: GPUBuffer | null;
+  flowParticleBuf: GPUBuffer | null;
+  flowParticleLayerBuf: GPUBuffer | null;
+  flowTrailBuf: GPUBuffer | null;
+  flowParticleCount: number;
   /** Minimal storage buffer so Beer binding 4 is always valid. */
   flowDyeDummy: GPUBuffer | null;
 }
@@ -199,10 +205,16 @@ export const gpu: GpuState = {
   flowDyeReadIsA: true,
   flowIbfvPipeline: null,
   flowIbfvParamBuf: null,
+  flowParticlesPipeline: null,
+  flowParticlesParamBuf: null,
+  flowParticleBuf: null,
+  flowParticleLayerBuf: null,
+  flowTrailBuf: null,
+  flowParticleCount: 0,
   flowDyeDummy: null,
 };
 
-export const PIPELINE_EPOCH = 51;
+export const PIPELINE_EPOCH = 60;
 export const labelVertScratch = new Float32Array(18 * 6);
 
 export function resetPipelinesOnDeviceLost(): void {
@@ -210,6 +222,10 @@ export function resetPipelinesOnDeviceLost(): void {
   gpu.gridPipeline = gpu.labelPipeline = null;
   gpu.flowIbfvPipeline = null;
   gpu.flowIbfvParamBuf = null;
+  gpu.flowParticlesPipeline = null;
+  gpu.flowParticlesParamBuf = null;
+  gpu.flowParticleBuf = gpu.flowParticleLayerBuf = gpu.flowTrailBuf = null;
+  gpu.flowParticleCount = 0;
   gpu.flowDyeBufA = gpu.flowDyeBufB = null;
   gpu.labelAtlasTex = gpu.labelAtlasSamp = null;
   gpu.labelVertexBuf = null;

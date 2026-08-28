@@ -19,6 +19,7 @@ struct DrawParams {
   flowAlpha: f32,
   flowVRef: f32,
   flowAgeMax: f32,
+  flowUseParticles: f32,
 }
 
 @group(0) @binding(0) var<uniform> draw: DrawParams;
@@ -216,6 +217,7 @@ fn fsMain(in: VSOut) -> FSOut {
       var col: vec3f;
       let isFlow = f32(L) >= draw.flowLayerStart && draw.flowLayerStart >= 0.0;
       if (isFlow) {
+        if (draw.flowUseParticles >= 0.5) { continue; }
         let flowIdx = L - u32(draw.flowLayerStart);
         let presence = dval;
         let velBase = u32(draw.flowVelBase) + flowIdx * volN * 3u;

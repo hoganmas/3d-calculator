@@ -654,6 +654,324 @@ export function ibfvAdvectStep(
   }
 }
 
+/** Floats per particle: x, y, z, age, speed. */
+export const FLOW_PARTICLE_STRIDE = 5;
+
+/** Floats per trail history slot: x, y, z, age, speed. */
+export const FLOW_TRAIL_SLOT_STRIDE = 5;
+
+export const MAX_FLOW_TRAIL_STEPS = 32;
+export const DEFAULT_FLOW_TRAIL_STEPS = 12;
+
+export function flowTrailBaseIndex(particleIndex: number): number {
+  return particleIndex * MAX_FLOW_TRAIL_STEPS * FLOW_TRAIL_SLOT_STRIDE;
+}
+
+function chebIndexWorld(xi: number, M: number): number {
+  const x = Math.max(-1, Math.min(1, xi));
+  return (M / Math.PI) * Math.acos(x) - 0.5;
+}
+
+/** Trilinear sample of fitted velocity on the Chebyshev grid. */
+export function sampleVelGridAt(
+  fx: Float32Array,
+  fy: Float32Array,
+  fz: Float32Array,
+  M: number,
+  half: number,
+  px: number,
+  py: number,
+  pz: number,
+): [number, number, number] {
+  const xi = Math.max(-1, Math.min(1, px / half));
+  const yi = Math.max(-1, Math.min(1, py / half));
+  const zi = Math.max(-1, Math.min(1, pz / half));
+  const sample = (field: Float32Array) => {
+    const fx_ = chebIndexWorld(xi, M);
+    const fy_ = chebIndexWorld(yi, M);
+    const fz_ = chebIndexWorld(zi, M);
+    const x0 = Math.floor(fx_);
+    const y0 = Math.floor(fy_);
+    const z0 = Math.floor(fz_);
+    const tx = Math.max(0, Math.min(1, fx_ - x0));
+    const ty = Math.max(0, Math.min(1, fy_ - y0));
+    const tz = Math.max(0, Math.min(1, fz_ - z0));
+    const mi = M - 1;
+    const idx = (x: number, y: number, z: number) =>
+      Math.max(0, Math.min(mi, x)) + Math.max(0, Math.min(mi, y)) * M + Math.max(0, Math.min(mi, z)) * M * M;
+    const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+    const c000 = field[idx(x0, y0, z0)]!;
+    const c100 = field[idx(x0 + 1, y0, z0)]!;
+    const c010 = field[idx(x0, y0 + 1, z0)]!;
+    const c110 = field[idx(x0 + 1, y0 + 1, z0)]!;
+    const c001 = field[idx(x0, y0, z0 + 1)]!;
+    const c101 = field[idx(x0 + 1, y0, z0 + 1)]!;
+    const c011 = field[idx(x0, y0 + 1, z0 + 1)]!;
+    const c111 = field[idx(x0 + 1, y0 + 1, z0 + 1)]!;
+    return lerp(
+      lerp(lerp(c000, c100, tx), lerp(c010, c110, tx), ty),
+      lerp(lerp(c001, c101, tx), lerp(c011, c111, tx), ty),
+      tz,
+    );
+  };
+  return [sample(fx), sample(fy), sample(fz)];
+}
+
+function hash01(a: number, b: number, c: number): number {
+  let x = Math.sin(a * 127.1 + b * 311.7 + c * 74.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+/** Seed particles on grid injection mask (lines or points). */
+export function seedFlowParticles(
+  count: number,
+  layers: number,
+  half: number,
+  gridSpacing: number,
+  points: boolean,
+): { posAge: Float32Array; layerIds: Uint32Array } {
+  const posAge = new Float32Array(count * FLOW_PARTICLE_STRIDE);
+  const layerIds = new Uint32Array(count);
+  const perLayer = Math.max(1, Math.floor(count / Math.max(1, layers)));
+  let n = 0;
+  for (let layer = 0; layer < layers && n < count; layer++) {
+    const target = layer === layers - 1 ? count - n : perLayer;
+    let placed = 0;
+    let tries = 0;
+    while (placed < target && n < count && tries < target * 40) {
+      tries++;
+      const px = (hash01(n, tries, layer) * 2 - 1) * half;
+      const py = (hash01(n + 1, tries, layer) * 2 - 1) * half;
+      const pz = (hash01(n + 2, tries, layer) * 2 - 1) * half;
+      const g = ibfvBackgroundGrid(px, py, pz, gridSpacing, points);
+      if (g < 0.15) continue;
+      const o = n * FLOW_PARTICLE_STRIDE;
+      posAge[o] = px;
+      posAge[o + 1] = py;
+      posAge[o + 2] = pz;
+      posAge[o + 3] = 0;
+      posAge[o + 4] = 0;
+      layerIds[n] = layer;
+      n++;
+      placed++;
+    }
+    while (placed < target && n < count) {
+      const o = n * FLOW_PARTICLE_STRIDE;
+      posAge[o] = (hash01(n, 0, layer) * 2 - 1) * half;
+      posAge[o + 1] = (hash01(n, 1, layer) * 2 - 1) * half;
+      posAge[o + 2] = (hash01(n, 2, layer) * 2 - 1) * half;
+      posAge[o + 3] = 0;
+      posAge[o + 4] = 0;
+      layerIds[n] = layer;
+      n++;
+      placed++;
+    }
+  }
+  return { posAge, layerIds };
+}
+
+export interface FlowParticleLayerVel {
+  fx: Float32Array;
+  fy: Float32Array;
+  fz: Float32Array;
+}
+
+export interface FlowParticleAdvectParams {
+  dt: number;
+  vMax: number;
+  half: number;
+  alpha: number;
+  gridSpacing: number;
+  gridPoints: boolean;
+  ageMax: number;
+  frameIdx: number;
+}
+
+function respawnParticle(
+  posAge: Float32Array,
+  i: number,
+  layer: number,
+  half: number,
+  gridSpacing: number,
+  gridPoints: boolean,
+  frameIdx: number,
+  trailHist?: Float32Array | null,
+  trailSteps?: number,
+): void {
+  const o = i * FLOW_PARTICLE_STRIDE;
+  for (let t = 0; t < 24; t++) {
+    const px = (hash01(i, t, frameIdx + layer) * 2 - 1) * half;
+    const py = (hash01(i + 7, t, frameIdx) * 2 - 1) * half;
+    const pz = (hash01(i + 13, t, frameIdx + 1) * 2 - 1) * half;
+    const g = ibfvBackgroundGrid(px, py, pz, gridSpacing, gridPoints);
+    if (g < 0.12 && t < 23) continue;
+    posAge[o] = px;
+    posAge[o + 1] = py;
+    posAge[o + 2] = pz;
+    posAge[o + 3] = 0;
+    posAge[o + 4] = 0;
+    resetFlowTrailHistSlot(trailHist, trailSteps ?? 0, i, px, py, pz, 0, 0);
+    return;
+  }
+  posAge[o + 3] = 0;
+  posAge[o + 4] = 0;
+  resetFlowTrailHistSlot(
+    trailHist,
+    trailSteps ?? 0,
+    i,
+    posAge[o]!,
+    posAge[o + 1]!,
+    posAge[o + 2]!,
+    0,
+    0,
+  );
+}
+
+/** Fill all trail slots for one particle (e.g. on respawn). */
+export function resetFlowTrailHistSlot(
+  trailHist: Float32Array | null | undefined,
+  trailSteps: number,
+  i: number,
+  px: number,
+  py: number,
+  pz: number,
+  age: number,
+  speed = 0,
+): void {
+  if (!trailHist || trailSteps < 2) return;
+  const ho = flowTrailBaseIndex(i);
+  for (let j = 0; j < trailSteps; j++) {
+    const o = ho + j * FLOW_TRAIL_SLOT_STRIDE;
+    trailHist[o] = px;
+    trailHist[o + 1] = py;
+    trailHist[o + 2] = pz;
+    trailHist[o + 3] = age;
+    trailHist[o + 4] = speed;
+  }
+}
+
+/** Initialize trail ring from seeded particle positions. */
+export function seedFlowTrailHist(
+  posAge: Float32Array,
+  trailHist: Float32Array,
+  trailSteps: number,
+  count: number,
+): void {
+  if (trailSteps < 2) return;
+  for (let i = 0; i < count; i++) {
+    const o = i * FLOW_PARTICLE_STRIDE;
+    resetFlowTrailHistSlot(
+      trailHist,
+      trailSteps,
+      i,
+      posAge[o]!,
+      posAge[o + 1]!,
+      posAge[o + 2]!,
+      posAge[o + 3]!,
+    );
+  }
+}
+
+/** Shift trail history and insert the current particle state at slot 0. */
+export function pushFlowTrailHist(
+  posAge: Float32Array,
+  trailHist: Float32Array,
+  trailSteps: number,
+  count: number,
+): void {
+  if (trailSteps < 2) return;
+  for (let i = 0; i < count; i++) {
+    const po = i * FLOW_PARTICLE_STRIDE;
+    const ho = flowTrailBaseIndex(i);
+    for (let j = trailSteps - 1; j >= 1; j--) {
+      const dst = ho + j * FLOW_TRAIL_SLOT_STRIDE;
+      const src = ho + (j - 1) * FLOW_TRAIL_SLOT_STRIDE;
+      trailHist[dst] = trailHist[src]!;
+      trailHist[dst + 1] = trailHist[src + 1]!;
+      trailHist[dst + 2] = trailHist[src + 2]!;
+      trailHist[dst + 3] = trailHist[src + 3]!;
+      trailHist[dst + 4] = trailHist[src + 4]!;
+    }
+    trailHist[ho] = posAge[po]!;
+    trailHist[ho + 1] = posAge[po + 1]!;
+    trailHist[ho + 2] = posAge[po + 2]!;
+    trailHist[ho + 3] = posAge[po + 3]!;
+    trailHist[ho + 4] = posAge[po + 4]!;
+  }
+}
+
+/** One CPU advection step for all particles (reference + runtime). */
+export function advectFlowParticles(
+  posAge: Float32Array,
+  layerIds: Uint32Array,
+  layers: FlowParticleLayerVel[],
+  M: number,
+  params: FlowParticleAdvectParams,
+  trailHist: Float32Array | null = null,
+  trailSteps = 0,
+): void {
+  const { dt, vMax, half, alpha, gridSpacing, gridPoints, ageMax, frameIdx } = params;
+  const n = layerIds.length;
+  for (let i = 0; i < n; i++) {
+    const layer = layerIds[i]!;
+    const vel = layers[layer];
+    if (!vel) continue;
+    const o = i * FLOW_PARTICLE_STRIDE;
+    let px = posAge[o]!;
+    let py = posAge[o + 1]!;
+    let pz = posAge[o + 2]!;
+    let age = posAge[o + 3]!;
+    const [vx, vy, vz] = sampleVelGridAt(vel.fx, vel.fy, vel.fz, M, half, px, py, pz);
+    const speed = Math.hypot(vx, vy, vz);
+    const [cx, cy, cz] = ibfvClampVelocity(vx, vy, vz, vMax);
+    if (speed <= 1e-5 || Math.abs(px) > half || Math.abs(py) > half || Math.abs(pz) > half || age > ageMax * 2.5) {
+      respawnParticle(posAge, i, layer, half, gridSpacing, gridPoints, frameIdx, trailHist, trailSteps);
+      continue;
+    }
+    px += cx * dt;
+    py += cy * dt;
+    pz += cz * dt;
+    age += dt;
+    if (Math.abs(px) > half || Math.abs(py) > half || Math.abs(pz) > half) {
+      respawnParticle(posAge, i, layer, half, gridSpacing, gridPoints, frameIdx, trailHist, trailSteps);
+      continue;
+    }
+    if (alpha > 1e-6 && hash01(i, frameIdx, 919) < alpha) {
+      respawnParticle(posAge, i, layer, half, gridSpacing, gridPoints, frameIdx, trailHist, trailSteps);
+      continue;
+    }
+    posAge[o] = px;
+    posAge[o + 1] = py;
+    posAge[o + 2] = pz;
+    posAge[o + 3] = age;
+    posAge[o + 4] = speed;
+  }
+}
+
+/** Sort particle indices back-to-front for alpha compositing. */
+export function sortFlowParticlesByDepth(
+  posAge: Float32Array,
+  sortOrder: Uint32Array,
+  ro: [number, number, number],
+  viewDir: [number, number, number],
+): void {
+  const n = sortOrder.length;
+  for (let i = 0; i < n; i++) sortOrder[i] = i;
+  sortOrder.sort((a, b) => {
+    const oa = a * FLOW_PARTICLE_STRIDE;
+    const ob = b * FLOW_PARTICLE_STRIDE;
+    const da =
+      (posAge[oa]! - ro[0]) * viewDir[0] +
+      (posAge[oa + 1]! - ro[1]) * viewDir[1] +
+      (posAge[oa + 2]! - ro[2]) * viewDir[2];
+    const db =
+      (posAge[ob]! - ro[0]) * viewDir[0] +
+      (posAge[ob + 1]! - ro[1]) * viewDir[1] +
+      (posAge[ob + 2]! - ro[2]) * viewDir[2];
+    return db - da;
+  });
+}
+
 export function fitVectorField(
   compiled: CompiledVectorExpr,
   vectorFn: (x: number, y: number, z: number) => [number, number, number],

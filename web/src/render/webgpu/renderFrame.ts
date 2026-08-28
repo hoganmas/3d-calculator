@@ -18,6 +18,11 @@ import { noteGpuPresent, scheduleStampReadback } from "./marchProfile.js";
 import { hasFlowGpuLayers } from "./flowGpu.js";
 import { effectiveFlowVRef, getFlowDyeReadBuffer, tickFlowIbfv } from "./flowIbfv.js";
 import {
+  drawFlowParticlesPass,
+  ensureFlowParticlesPipeline,
+  tickFlowParticles,
+} from "./flowParticles.js";
+import {
   acquireMarchGpuHandles,
   acquireMarchTargets,
   type MarchGpuHandles,
@@ -260,6 +265,7 @@ function drawBeerPass(
       state.flowAlpha,
       effectiveFlowVRef(half),
       state.flowAgeMax,
+      state.flowVizMode === "particles" ? 1 : 0,
     ),
   );
   const dyeBuf = getFlowDyeReadBuffer() ?? gpu.flowDyeDummy;
@@ -427,8 +433,27 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
 
   const ranBeer = gpu.densLayerCount > 0 && gpu.densPacked;
   if (ranBeer) {
-    if (hasFlowGpuLayers()) tickFlowIbfv();
+    if (hasFlowGpuLayers() && state.flowVizMode === "ibfv") tickFlowIbfv();
     drawBeerPass(handles, targets, sceneView, marchW, marchH, Mgrid, steps, half, scale, ro, dirMatrix);
+  }
+
+  if (hasFlowGpuLayers() && state.flowVizMode === "particles") {
+    const viewDir: [number, number, number] = [
+      -dirMatrix[2],
+      -dirMatrix[5],
+      -dirMatrix[8],
+    ];
+    tickFlowParticles(ro, viewDir);
+    drawFlowParticlesPass(
+      camera,
+      sceneView,
+      targets.occlIsoTex.createView(),
+      ro,
+      dirMatrix,
+      half,
+      marchW,
+      marchH,
+    );
   }
 
   drawFxaaPass(handles, sceneView, swapView, marchW, marchH);

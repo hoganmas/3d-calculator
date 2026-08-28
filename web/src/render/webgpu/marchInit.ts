@@ -10,6 +10,7 @@ import { writeLayerColors } from "./uniforms.js";
 import { ensureVolumeBuf } from "./sceneUpload.js";
 import { ensurePipelinesForDegree as buildPipelines } from "./pipelines.js";
 import { ensureFlowIbfvPipeline } from "./flowIbfv.js";
+import { ensureFlowParticlesPipeline } from "./flowParticles.js";
 import { syncClipGpuWorldGrid } from "./gridOverlay.js";
 import { attachMarchCanvas, bindMarchCanvasContext } from "./marchCanvas.js";
 import { isClipBakeGpuReady } from "./marchReadiness.js";
@@ -88,6 +89,7 @@ export async function initClipBakeGpu(viewportEl: HTMLElement | null | undefined
       ensureVolumeBuf(8 * 8 * 8);
       await ensurePipelinesForDegree(4);
       await ensureFlowIbfvPipeline();
+      await ensureFlowParticlesPipeline();
       if (viewportEl) attachMarchCanvas(viewportEl);
       bindMarchCanvasContext();
       return isClipBakeGpuReady();

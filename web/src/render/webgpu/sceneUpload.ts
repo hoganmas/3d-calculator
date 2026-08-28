@@ -4,6 +4,7 @@ import { normalizeRgbStops, writeLayerColors } from "./uniforms.js";
 import { hasFlowGpuLayers } from "./flowGpu.js";
 import { flowPresenceSlice } from "../../math/fitVector.js";
 import { DEFAULT_FLOW_GRID_M, ensureFlowDyeBuffers, ensureFlowIbfvPipeline, destroyFlowDyeBuffers } from "./flowIbfv.js";
+import { destroyFlowParticleBuffers, ensureFlowParticleBuffers, ensureFlowParticlesPipeline } from "./flowParticles.js";
 
 const MAX_FLOW_LAYERS = 4;
 
@@ -175,9 +176,12 @@ export function uploadSceneVolumes(scene: SceneUploadPayload | null): SceneUploa
 
   if (flow.length > 0) {
     ensureFlowDyeBuffers(flow.length, DEFAULT_FLOW_GRID_M, half);
+    ensureFlowParticleBuffers(flow.length, half);
     void ensureFlowIbfvPipeline();
+    void ensureFlowParticlesPipeline();
   } else {
     destroyFlowDyeBuffers();
+    destroyFlowParticleBuffers();
   }
 
   return { M, bakeMs: performance.now() - t0, epoch: gpu.sceneEpoch };

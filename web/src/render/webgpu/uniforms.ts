@@ -80,6 +80,7 @@ export function packDrawParamsBeer(
   flowAlpha: number = 0,
   flowVRef: number = 1,
   flowAgeMax: number = 1,
+  flowUseParticles: number = 0,
 ): ArrayBuffer {
   const buf = new ArrayBuffer(256);
   const u32 = new Uint32Array(buf);
@@ -97,6 +98,7 @@ export function packDrawParamsBeer(
   f32[28] = flowAlpha;
   f32[29] = flowVRef;
   f32[30] = flowAgeMax;
+  f32[31] = flowUseParticles;
   return buf;
 }
 
