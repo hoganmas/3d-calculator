@@ -14,18 +14,29 @@ struct DrawParams {
   m2: vec4f,
   flowLayerStart: f32,
   flowVelBase: f32,
-  flowTime: f32,
-  flowTimeScale: f32,
-  flowStripeScale: f32,
+  flowGridM: u32,
   flowOpacity: f32,
+  flowAlpha: f32,
+  flowVRef: f32,
+  flowAgeMax: f32,
 }
 
 @group(0) @binding(0) var<uniform> draw: DrawParams;
 @group(0) @binding(1) var<storage, read> volume: array<f32>;
 @group(0) @binding(2) var occlIsoTex: texture_2d<f32>;
 @group(0) @binding(3) var<storage, read> layerGrads: array<vec4f>;
+@group(0) @binding(4) var<storage, read> flowDye: array<f32>;
 
 {{GRADIENT_WGSL}}
+
+fn sampleLayerGradAt(L: u32, t: f32) -> vec3f {
+  let base = L * MAX_GRAD_STOPS;
+  var stops: array<vec4f, {{MAX_GRAD_STOPS}}>;
+  for (var i: u32 = 0u; i < MAX_GRAD_STOPS; i++) {
+    stops[i] = layerGrads[base + i];
+  }
+  return sampleGradStops(&stops, t);
+}
 
 fn sampleLayerGrad(L: u32, t: f32) -> vec3f {
   let base = L * MAX_GRAD_STOPS;
@@ -76,26 +87,73 @@ fn sampleLayer(base: u32, p: vec3f) -> f32 {
               mix(mix(c001, c101, tx), mix(c011, c111, tx), ty), tz);
 }
 
-// For V = ω×r, axis ∥ p×V; measure azimuth in the plane ⊥ axis (not always xy).
-fn flowSpatialPhase(k: vec3f, V: vec3f, p: vec3f, half: f32) -> f32 {
-  let along = dot(k, p);
-  let r = length(p);
-  let align = select(0.0, abs(dot(k, p / r)), r > 1e-4);
-  let spinMix = 1.0 - clamp(align / 0.35, 0.0, 1.0);
-  var azimuth = atan2(p.y, p.x) * half * 0.318309886;
-  let axisRaw = cross(p, V);
-  let axisLen = length(axisRaw);
-  if (axisLen > 1e-4) {
-    let axis = axisRaw / axisLen;
-    var axisRef = vec3f(0.0, 0.0, 1.0);
-    if (abs(dot(axis, axisRef)) > 0.9) { axisRef = vec3f(0.0, 1.0, 0.0); }
-    if (abs(dot(axis, axisRef)) > 0.9) { axisRef = vec3f(1.0, 0.0, 0.0); }
-    let u = normalize(cross(axisRef, axis));
-    let v = cross(axis, u);
-    let theta = atan2(dot(p, v), dot(p, u));
-    azimuth = theta * half * 0.318309886;
+fn dyeIndex(ix: u32, iy: u32, iz: u32) -> u32 {
+  let M = draw.flowGridM;
+  return ix + iy * M + iz * M * M;
+}
+
+fn sampleFlowDyePair(flowIdx: u32, p: vec3f) -> vec2f {
+  let half = draw.half;
+  if (abs(p.x) > half || abs(p.y) > half || abs(p.z) > half) {
+    return vec2f(0.0);
   }
-  return mix(along, azimuth, spinMix);
+  let M = i32(draw.flowGridM);
+  if (M <= 0) { return vec2f(0.0); }
+  let layerVolN = draw.flowGridM * draw.flowGridM * draw.flowGridM;
+  let layerOff = flowIdx * layerVolN * 2u;
+  let f = (p + vec3f(half)) / (2.0 * half) * f32(M) - 0.5;
+  let x0 = i32(floor(f.x));
+  let y0 = i32(floor(f.y));
+  let z0 = i32(floor(f.z));
+  let tx = clamp(f.x - f32(x0), 0.0, 1.0);
+  let ty = clamp(f.y - f32(y0), 0.0, 1.0);
+  let tz = clamp(f.z - f32(z0), 0.0, 1.0);
+  var out = vec2f(0.0);
+  for (var ch: u32 = 0u; ch < 2u; ch++) {
+    let c000 = flowDye[layerOff + dyeIndex(u32(clamp(x0, 0, M - 1)), u32(clamp(y0, 0, M - 1)), u32(clamp(z0, 0, M - 1))) * 2u + ch];
+    let c100 = flowDye[layerOff + dyeIndex(u32(clamp(x0 + 1, 0, M - 1)), u32(clamp(y0, 0, M - 1)), u32(clamp(z0, 0, M - 1))) * 2u + ch];
+    let c010 = flowDye[layerOff + dyeIndex(u32(clamp(x0, 0, M - 1)), u32(clamp(y0 + 1, 0, M - 1)), u32(clamp(z0, 0, M - 1))) * 2u + ch];
+    let c110 = flowDye[layerOff + dyeIndex(u32(clamp(x0 + 1, 0, M - 1)), u32(clamp(y0 + 1, 0, M - 1)), u32(clamp(z0, 0, M - 1))) * 2u + ch];
+    let c001 = flowDye[layerOff + dyeIndex(u32(clamp(x0, 0, M - 1)), u32(clamp(y0, 0, M - 1)), u32(clamp(z0 + 1, 0, M - 1))) * 2u + ch];
+    let c101 = flowDye[layerOff + dyeIndex(u32(clamp(x0 + 1, 0, M - 1)), u32(clamp(y0, 0, M - 1)), u32(clamp(z0 + 1, 0, M - 1))) * 2u + ch];
+    let c011 = flowDye[layerOff + dyeIndex(u32(clamp(x0, 0, M - 1)), u32(clamp(y0 + 1, 0, M - 1)), u32(clamp(z0 + 1, 0, M - 1))) * 2u + ch];
+    let c111 = flowDye[layerOff + dyeIndex(u32(clamp(x0 + 1, 0, M - 1)), u32(clamp(y0 + 1, 0, M - 1)), u32(clamp(z0 + 1, 0, M - 1))) * 2u + ch];
+    out[ch] = mix(mix(mix(c000, c100, tx), mix(c010, c110, tx), ty),
+                  mix(mix(c001, c101, tx), mix(c011, c111, tx), ty), tz);
+  }
+  return out;
+}
+
+fn sampleVelLayer(velBase: u32, p: vec3f) -> vec3f {
+  let half = draw.half;
+  let xi = clamp(p / half, vec3f(-1.0), vec3f(1.0));
+  let M = draw.gridM;
+  let M2 = M * M;
+  let volN = M2 * M;
+  var v = vec3f(0.0);
+  for (var c: u32 = 0u; c < 3u; c++) {
+    let compBase = velBase + c * volN;
+    let fx = chebIndex(xi.x);
+    let fy = chebIndex(xi.y);
+    let fz = chebIndex(xi.z);
+    let x0 = i32(floor(fx));
+    let y0 = i32(floor(fy));
+    let z0 = i32(floor(fz));
+    let tx = clamp(fx - f32(x0), 0.0, 1.0);
+    let ty = clamp(fy - f32(y0), 0.0, 1.0);
+    let tz = clamp(fz - f32(z0), 0.0, 1.0);
+    let c000 = densAtBase(compBase, x0, y0, z0);
+    let c100 = densAtBase(compBase, x0 + 1, y0, z0);
+    let c010 = densAtBase(compBase, x0, y0 + 1, z0);
+    let c110 = densAtBase(compBase, x0 + 1, y0 + 1, z0);
+    let c001 = densAtBase(compBase, x0, y0, z0 + 1);
+    let c101 = densAtBase(compBase, x0 + 1, y0, z0 + 1);
+    let c011 = densAtBase(compBase, x0, y0 + 1, z0 + 1);
+    let c111 = densAtBase(compBase, x0 + 1, y0 + 1, z0 + 1);
+    v[c] = mix(mix(mix(c000, c100, tx), mix(c010, c110, tx), ty),
+               mix(mix(c001, c101, tx), mix(c011, c111, tx), ty), tz);
+  }
+  return v;
 }
 
 @fragment
@@ -159,24 +217,18 @@ fn fsMain(in: VSOut) -> FSOut {
       let isFlow = f32(L) >= draw.flowLayerStart && draw.flowLayerStart >= 0.0;
       if (isFlow) {
         let flowIdx = L - u32(draw.flowLayerStart);
+        let presence = dval;
         let velBase = u32(draw.flowVelBase) + flowIdx * volN * 3u;
-        let V = vec3f(
-          sampleLayer(velBase, p),
-          sampleLayer(velBase + volN, p),
-          sampleLayer(velBase + volN * 2u, p),
-        );
-        let speed = length(V);
-        if (speed > 1e-5) {
-          let k = V / speed;
-          let spatial = flowSpatialPhase(k, V, p, half);
-          let phi = spatial * draw.flowStripeScale - draw.flowTime * draw.flowTimeScale;
-          let band = 0.5 + 0.5 * sin(phi);
-          dval = draw.flowOpacity * (0.12 + 0.88 * band);
-        } else {
-          dval = 0.0;
-        }
-        let gt = gradientT(p, half);
-        col = sampleLayerGrad(L, gt);
+        let V = sampleVelLayer(velBase, p);
+        let speedNorm = clamp(length(V) / max(draw.flowVRef, 1e-6), 0.0, 1.0);
+        let dyePair = sampleFlowDyePair(flowIdx, p);
+        let totalAmt = dyePair.x;
+        let age = dyePair.y;
+        dval = draw.flowOpacity * presence * speedNorm * totalAmt;
+        let tAge = clamp(age / max(draw.flowAgeMax, 1e-4), 0.0, 1.0);
+        let col1 = sampleLayerGradAt(L, 0.0);
+        let col2 = sampleLayerGradAt(L, 1.0);
+        col = mix(col1, col2, tAge);
       } else {
         let gt = gradientT(p, half);
         col = sampleLayerGrad(L, gt);

@@ -3,6 +3,7 @@ import { MAX_DENS_LAYERS, gpu, DEFAULT_DENS_RGB, DEFAULT_DENS_RGB2, type RgbTrip
 import { normalizeRgbStops, writeLayerColors } from "./uniforms.js";
 import { hasFlowGpuLayers } from "./flowGpu.js";
 import { flowPresenceSlice } from "../../math/fitVector.js";
+import { DEFAULT_FLOW_GRID_M, ensureFlowDyeBuffers, ensureFlowIbfvPipeline, destroyFlowDyeBuffers } from "./flowIbfv.js";
 
 const MAX_FLOW_LAYERS = 4;
 
@@ -171,6 +172,14 @@ export function uploadSceneVolumes(scene: SceneUploadPayload | null): SceneUploa
   gpu.profileGridM = M;
   const anyKf = gpu.sceneConstraints.some((c) => c.K > 1);
   gpu.profileMethod = anyKf ? "gpu-kf-scene" : "cpu-idct-scene";
+
+  if (flow.length > 0) {
+    ensureFlowDyeBuffers(flow.length, DEFAULT_FLOW_GRID_M, half);
+    void ensureFlowIbfvPipeline();
+  } else {
+    destroyFlowDyeBuffers();
+  }
+
   return { M, bakeMs: performance.now() - t0, epoch: gpu.sceneEpoch };
 }
 

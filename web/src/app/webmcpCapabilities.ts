@@ -107,7 +107,7 @@ export function buildCapabilities() {
     app: {
       name: "Laplacian",
       description:
-        "Multi-expression 3D polynomial calculator. Scalar fields → density clouds or isosurfaces; vector fields → phase-based flow stripes. Shared named parameters animate over time via slider keyframes.",
+        "Multi-expression 3D polynomial calculator. Scalar fields → density clouds or isosurfaces; vector fields → IBFV dye advection. Shared named parameters animate over time via slider keyframes.",
       pipeline:
         "LaTeX → compile → Chebyshev fit (on structural changes) → IDCT volume → GPU march (every frame). Animated params refit only dirty layers via keyframe blend.",
     },
@@ -132,7 +132,7 @@ export function buildCapabilities() {
         {
           form: "(Fx,Fy,Fz), \\grad f, \\nabla f, \\curl(Fx,Fy,Fz), or \\nabla\\times(Fx,Fy,Fz)",
           kind: "flow",
-          description: "Vector field → animated phase stripes (role flow or auto-detected tuple/grad/curl).",
+          description: "Vector field → IBFV dye advection (role flow or auto-detected tuple/grad/curl).",
         },
         {
           form: "\\laplacian f, \\nabla^2 f, \\Delta f, \\div(Fx,Fy,Fz), or \\nabla\\cdot(Fx,Fy,Fz)",
@@ -145,7 +145,7 @@ export function buildCapabilities() {
         auto: "Infer cloud / isosurface / flow from syntax.",
         cloud: "Force volumetric cloud rendering.",
         isosurface: "Force isosurface manifold.",
-        flow: "Force vector phase flow visualization.",
+        flow: "Force vector IBFV flow visualization.",
         density: "Legacy alias for cloud.",
         constraint: "Legacy alias for isosurface.",
       },

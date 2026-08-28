@@ -9,6 +9,7 @@ import {
 import { writeLayerColors } from "./uniforms.js";
 import { ensureVolumeBuf } from "./sceneUpload.js";
 import { ensurePipelinesForDegree as buildPipelines } from "./pipelines.js";
+import { ensureFlowIbfvPipeline } from "./flowIbfv.js";
 import { syncClipGpuWorldGrid } from "./gridOverlay.js";
 import { attachMarchCanvas, bindMarchCanvasContext } from "./marchCanvas.js";
 import { isClipBakeGpuReady } from "./marchReadiness.js";
@@ -79,9 +80,14 @@ export async function initClipBakeGpu(viewportEl: HTMLElement | null | undefined
         size: MAX_DENS_LAYERS * MAX_GRAD_STOPS * 16,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
       });
+      gpu.flowDyeDummy = gpu.device.createBuffer({
+        size: 16,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      });
       writeLayerColors(gpu.device, gpu.colorBuf, [[DEFAULT_DENS_RGB, DEFAULT_DENS_RGB2]]);
       ensureVolumeBuf(8 * 8 * 8);
       await ensurePipelinesForDegree(4);
+      await ensureFlowIbfvPipeline();
       if (viewportEl) attachMarchCanvas(viewportEl);
       bindMarchCanvasContext();
       return isClipBakeGpuReady();

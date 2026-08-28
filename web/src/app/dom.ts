@@ -35,9 +35,13 @@ export interface DomElements {
   closeSettings: HTMLButtonElement | null;
   settingsDialog: HTMLDialogElement | null;
   themePref: HTMLSelectElement | null;
-  flowStripeScale: HTMLInputElement | null;
-  flowTimeScale: HTMLInputElement | null;
+  flowAlpha: HTMLInputElement | null;
+  flowGridMode: HTMLSelectElement | null;
+  flowNoiseScale: HTMLInputElement | null;
+  flowDt: HTMLInputElement | null;
+  flowVMax: HTMLInputElement | null;
   flowOpacity: HTMLInputElement | null;
+  flowAgeMax: HTMLInputElement | null;
 }
 
 export const els: DomElements = {
@@ -61,9 +65,13 @@ export const els: DomElements = {
   closeSettings: document.getElementById("closeSettings") as HTMLButtonElement | null,
   settingsDialog: document.getElementById("settingsDialog") as HTMLDialogElement | null,
   themePref: document.getElementById("themePref") as HTMLSelectElement | null,
-  flowStripeScale: document.getElementById("flowStripeScale") as HTMLInputElement | null,
-  flowTimeScale: document.getElementById("flowTimeScale") as HTMLInputElement | null,
+  flowAlpha: document.getElementById("flowAlpha") as HTMLInputElement | null,
+  flowGridMode: document.getElementById("flowGridMode") as HTMLSelectElement | null,
+  flowNoiseScale: document.getElementById("flowNoiseScale") as HTMLInputElement | null,
+  flowDt: document.getElementById("flowDt") as HTMLInputElement | null,
+  flowVMax: document.getElementById("flowVMax") as HTMLInputElement | null,
   flowOpacity: document.getElementById("flowOpacity") as HTMLInputElement | null,
+  flowAgeMax: document.getElementById("flowAgeMax") as HTMLInputElement | null,
 };
 
 export function viewportSize() {

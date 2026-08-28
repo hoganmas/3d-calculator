@@ -75,10 +75,11 @@ export function packDrawParamsBeer(
   M: Float64Array | Float32Array | number[],
   flowLayerStart: number = -1,
   flowVelBase: number = 0,
-  flowTime: number = 0,
-  flowTimeScale: number = 4,
-  flowStripeScale: number = 5,
+  flowDyeGridM: number = 32,
   flowOpacity: number = 0.15,
+  flowAlpha: number = 0,
+  flowVRef: number = 1,
+  flowAgeMax: number = 1,
 ): ArrayBuffer {
   const buf = new ArrayBuffer(256);
   const u32 = new Uint32Array(buf);
@@ -91,10 +92,11 @@ export function packDrawParamsBeer(
   f32[20] = M[6]; f32[21] = M[7]; f32[22] = M[8];
   f32[24] = flowLayerStart;
   f32[25] = flowVelBase;
-  f32[26] = flowTime;
-  f32[27] = flowTimeScale;
-  f32[28] = flowStripeScale;
-  f32[29] = flowOpacity;
+  u32[26] = flowDyeGridM | 0;
+  f32[27] = flowOpacity;
+  f32[28] = flowAlpha;
+  f32[29] = flowVRef;
+  f32[30] = flowAgeMax;
   return buf;
 }
 

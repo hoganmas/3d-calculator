@@ -165,9 +165,18 @@
           <section class="settings-section">
             <p class="settings-section-title">Flow</p>
             <div class="row3">
-              <label>stripes<input id="flowStripeScale" type="number" min="0.1" max="20" step="0.1" value="5" title="Spatial frequency (k·x)" /></label>
-              <label>freq<input id="flowTimeScale" type="number" min="0" max="20" step="0.1" value="4" title="Temporal frequency (rad/s)" /></label>
-              <label>alpha<input id="flowOpacity" type="number" min="0.01" max="2" step="0.01" value="0.15" /></label>
+              <label>alpha<input id="flowAlpha" type="number" min="0" max="1" step="0.01" value="0.1" title="Grid injection rate at upstream footpoint (0 = advection only)" /></label>
+              <label>inject<select id="flowGridMode" title="Grid lines vs lattice points">
+                <option value="lines" selected>lines</option>
+                <option value="points">points</option>
+              </select></label>
+              <label>grid<input id="flowNoiseScale" type="number" min="0.05" max="2" step="0.05" value="0.3" title="Grid spacing (world units)" /></label>
+              <label>dt<input id="flowDt" type="number" min="0.001" max="0.5" step="0.005" value="0.05" title="Advection timestep" /></label>
+            </div>
+            <div class="row3">
+              <label>vMax<input id="flowVMax" type="number" min="0" max="20" step="0.1" value="0" title="Velocity clamp (0 = auto)" /></label>
+              <label>opacity<input id="flowOpacity" type="number" min="0.01" max="2" step="0.01" value="0.15" /></label>
+              <label>age<input id="flowAgeMax" type="number" min="0.1" max="10" step="0.1" value="1" title="Seconds until advected dye reaches gradient color 2" /></label>
             </div>
           </section>
 

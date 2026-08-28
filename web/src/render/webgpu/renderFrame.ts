@@ -16,6 +16,7 @@ import { state } from "../../app/state.js";
 import { ensureMarchTargets, resizeClipGpuCanvas } from "./marchCanvas.js";
 import { noteGpuPresent, scheduleStampReadback } from "./marchProfile.js";
 import { hasFlowGpuLayers } from "./flowGpu.js";
+import { effectiveFlowVRef, getFlowDyeReadBuffer, tickFlowIbfv } from "./flowIbfv.js";
 import {
   acquireMarchGpuHandles,
   acquireMarchTargets,
@@ -254,12 +255,14 @@ function drawBeerPass(
       dirMatrix,
       gpu.flowLayerStart,
       gpu.flowVelBase,
-      performance.now() * 0.001,
-      state.flowTimeScale,
-      state.flowStripeScale,
+      gpu.flowGridM || 32,
       state.flowOpacity,
+      state.flowAlpha,
+      effectiveFlowVRef(half),
+      state.flowAgeMax,
     ),
   );
+  const dyeBuf = getFlowDyeReadBuffer() ?? gpu.flowDyeDummy;
   const bg = device.createBindGroup({
     layout: beerPipeline.getBindGroupLayout(0),
     entries: [
@@ -267,6 +270,7 @@ function drawBeerPass(
       { binding: 1, resource: { buffer: volumeBuf } },
       { binding: 2, resource: occlIsoView },
       { binding: 3, resource: { buffer: colorBuf } },
+      { binding: 4, resource: { buffer: dyeBuf! } },
     ],
   });
   const enc = device.createCommandEncoder();
@@ -423,6 +427,7 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
 
   const ranBeer = gpu.densLayerCount > 0 && gpu.densPacked;
   if (ranBeer) {
+    if (hasFlowGpuLayers()) tickFlowIbfv();
     drawBeerPass(handles, targets, sceneView, marchW, marchH, Mgrid, steps, half, scale, ro, dirMatrix);
   }
 

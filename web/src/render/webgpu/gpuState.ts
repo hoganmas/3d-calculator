@@ -105,6 +105,15 @@ export interface GpuState {
   flowLayerStart: number;
   /** Float offset in volume for first flow layer fx slice. */
   flowVelBase: number;
+  flowLayerCount: number;
+  flowEpoch: number;
+  flowDyeBufA: GPUBuffer | null;
+  flowDyeBufB: GPUBuffer | null;
+  flowDyeReadIsA: boolean;
+  flowIbfvPipeline: GPUComputePipeline | null;
+  flowIbfvParamBuf: GPUBuffer | null;
+  /** Minimal storage buffer so Beer binding 4 is always valid. */
+  flowDyeDummy: GPUBuffer | null;
 }
 
 export const gpu: GpuState = {
@@ -183,14 +192,25 @@ export const gpu: GpuState = {
   flowHalf: 2.5,
   flowLayerStart: -1,
   flowVelBase: 0,
+  flowLayerCount: 0,
+  flowEpoch: 0,
+  flowDyeBufA: null,
+  flowDyeBufB: null,
+  flowDyeReadIsA: true,
+  flowIbfvPipeline: null,
+  flowIbfvParamBuf: null,
+  flowDyeDummy: null,
 };
 
-export const PIPELINE_EPOCH = 39;
+export const PIPELINE_EPOCH = 51;
 export const labelVertScratch = new Float32Array(18 * 6);
 
 export function resetPipelinesOnDeviceLost(): void {
   gpu.isoPipeline = gpu.beerPipeline = gpu.fxaaPipeline = gpu.ssaoPipeline = null;
   gpu.gridPipeline = gpu.labelPipeline = null;
+  gpu.flowIbfvPipeline = null;
+  gpu.flowIbfvParamBuf = null;
+  gpu.flowDyeBufA = gpu.flowDyeBufB = null;
   gpu.labelAtlasTex = gpu.labelAtlasSamp = null;
   gpu.labelVertexBuf = null;
   gpu.labelAtlasDirty = true;

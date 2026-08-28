@@ -457,97 +457,201 @@ export function flowSpeedSlice(
   return out;
 }
 
-function cross3(
-  ax: number, ay: number, az: number,
-  bx: number, by: number, bz: number,
-): [number, number, number] {
-  return [
-    ay * bz - az * by,
-    az * bx - ax * bz,
-    ax * by - ay * bx,
-  ];
+/** CPU mirror: distance to nearest axis-aligned grid plane. */
+function ibfvGridLineDist(coord: number, spacing: number): number {
+  const s = Math.max(spacing, 1e-4);
+  const f = ((coord / s) % 1 + 1) % 1;
+  return Math.min(f, 1 - f) * s;
 }
 
-function norm3(x: number, y: number, z: number): number {
-  return Math.hypot(x, y, z);
-}
-
-/** Spatial phase coordinate: k·p for stream-aligned flow; azimuth in plane ⊥ (p×V) for rotation. */
-export function flowSpatialPhase(
-  vx: number,
-  vy: number,
-  vz: number,
+/** Gridline injection G(p) in [0,1] on world-axis planes. */
+export function ibfvBackgroundGridlines(
   px: number,
   py: number,
   pz: number,
+  gridSpacing: number,
+): number {
+  const s = Math.max(gridSpacing, 1e-4);
+  const w = s * 0.22;
+  const smooth = (d: number) => Math.max(0, Math.min(1, 1 - d / w));
+  const lx = smooth(ibfvGridLineDist(px, s));
+  const ly = smooth(ibfvGridLineDist(py, s));
+  const lz = smooth(ibfvGridLineDist(pz, s));
+  return Math.max(lx, ly, lz);
+}
+
+/** Grid-point injection G(p) in [0,1] at lattice intersections only. */
+export function ibfvBackgroundGridPoints(
+  px: number,
+  py: number,
+  pz: number,
+  gridSpacing: number,
+): number {
+  const s = Math.max(gridSpacing, 1e-4);
+  const w = s * 0.22;
+  const smooth = (d: number) => Math.max(0, Math.min(1, 1 - d / w));
+  const lx = smooth(ibfvGridLineDist(px, s));
+  const ly = smooth(ibfvGridLineDist(py, s));
+  const lz = smooth(ibfvGridLineDist(pz, s));
+  return lx * ly * lz;
+}
+
+export function ibfvBackgroundGrid(
+  px: number,
+  py: number,
+  pz: number,
+  gridSpacing: number,
+  points: boolean,
+): number {
+  return points
+    ? ibfvBackgroundGridPoints(px, py, pz, gridSpacing)
+    : ibfvBackgroundGridlines(px, py, pz, gridSpacing);
+}
+
+/** Dye channels per voxel: density + advected age. */
+export const FLOW_DYE_CHANNELS = 2;
+export const FLOW_DYE_TOTAL = 0;
+export const FLOW_DYE_AGE = 1;
+
+function dyeVoxelIndex(ix: number, iy: number, iz: number, M: number): number {
+  return (ix + iy * M + iz * M * M) * FLOW_DYE_CHANNELS;
+}
+
+/** Seed dye buffer with grid injection mask (one layer block per layer). */
+export function seedFlowDyeGridlines(
+  M: number,
   half: number,
-): number {
-  const speed = Math.hypot(vx, vy, vz);
-  if (speed < 1e-12) return 0;
-  const kx = vx / speed;
-  const ky = vy / speed;
-  const kz = vz / speed;
-  const along = kx * px + ky * py + kz * pz;
-  const r = norm3(px, py, pz);
-  const align = r > 1e-4 ? Math.abs(along / r) : 0;
-  const spinMix = 1 - Math.min(1, align / 0.35);
-  let azimuth = Math.atan2(py, px) * (half / Math.PI);
-  const [ax, ay, az] = cross3(px, py, pz, vx, vy, vz);
-  const axisLen = norm3(ax, ay, az);
-  if (axisLen > 1e-4) {
-    const axis = [ax / axisLen, ay / axisLen, az / axisLen] as const;
-    let rx = 0; let ry = 0; let rz = 1;
-    if (Math.abs(axis[0] * rx + axis[1] * ry + axis[2] * rz) > 0.9) {
-      rx = 0; ry = 1; rz = 0;
+  gridSpacing: number,
+  layers: number,
+  points = false,
+): Float32Array {
+  const volN = M * M * M;
+  const buf = new Float32Array(volN * layers * FLOW_DYE_CHANNELS);
+  const cell = (2 * half) / M;
+  for (let layer = 0; layer < layers; layer++) {
+    const off = layer * volN * FLOW_DYE_CHANNELS;
+    for (let iz = 0; iz < M; iz++) {
+      for (let iy = 0; iy < M; iy++) {
+        for (let ix = 0; ix < M; ix++) {
+          const px = (ix + 0.5) * cell - half;
+          const py = (iy + 0.5) * cell - half;
+          const pz = (iz + 0.5) * cell - half;
+          const g = ibfvBackgroundGrid(px, py, pz, gridSpacing, points);
+          const o = off + dyeVoxelIndex(ix, iy, iz, M);
+          buf[o + FLOW_DYE_TOTAL] = g;
+          buf[o + FLOW_DYE_AGE] = 0;
+        }
+      }
     }
-    if (Math.abs(axis[0] * rx + axis[1] * ry + axis[2] * rz) > 0.9) {
-      rx = 1; ry = 0; rz = 0;
-    }
-    let [ux, uy, uz] = cross3(rx, ry, rz, axis[0], axis[1], axis[2]);
-    const uNorm = norm3(ux, uy, uz);
-    const uxN = ux / uNorm;
-    const uyN = uy / uNorm;
-    const uzN = uz / uNorm;
-    const [vx2, vy2, vz2] = cross3(axis[0], axis[1], axis[2], uxN, uyN, uzN);
-    const theta = Math.atan2(
-      px * vx2 + py * vy2 + pz * vz2,
-      px * uxN + py * uyN + pz * uzN,
-    );
-    azimuth = theta * (half / Math.PI);
   }
-  return along * (1 - spinMix) + azimuth * spinMix;
+  return buf;
 }
 
-/** Phase φ = spatial·stripeScale − t·timeScale with k ∥ V. */
-export function flowPhaseAt(
+export function ibfvClampVelocity(
   vx: number,
   vy: number,
   vz: number,
+  vMax: number,
+): [number, number, number] {
+  const speed = Math.hypot(vx, vy, vz);
+  if (speed <= vMax || vMax <= 1e-8) return [vx, vy, vz];
+  const s = vMax / speed;
+  return [vx * s, vy * s, vz * s];
+}
+
+function gridToWorld(ix: number, iy: number, iz: number, M: number, half: number): [number, number, number] {
+  const s = (2 * half) / M;
+  return [(ix + 0.5) * s - half, (iy + 0.5) * s - half, (iz + 0.5) * s - half];
+}
+
+function sampleDyeChannel(
+  dye: Float32Array,
   px: number,
   py: number,
   pz: number,
-  t: number,
-  stripeScale: number,
-  timeScale: number,
-  half: number = 2.5,
+  M: number,
+  half: number,
+  ch: number,
 ): number {
-  const spatial = flowSpatialPhase(vx, vy, vz, px, py, pz, half);
-  return spatial * stripeScale - t * timeScale;
+  if (Math.abs(px) > half || Math.abs(py) > half || Math.abs(pz) > half) return 0;
+  const f = [(px + half) / (2 * half) * M - 0.5, (py + half) / (2 * half) * M - 0.5, (pz + half) / (2 * half) * M - 0.5];
+  const x0 = Math.floor(f[0]!);
+  const y0 = Math.floor(f[1]!);
+  const z0 = Math.floor(f[2]!);
+  const tx = Math.max(0, Math.min(1, f[0]! - x0));
+  const ty = Math.max(0, Math.min(1, f[1]! - y0));
+  const tz = Math.max(0, Math.min(1, f[2]! - z0));
+  const mi = M - 1;
+  const idx = (x: number, y: number, z: number) => dyeVoxelIndex(
+    Math.max(0, Math.min(mi, x)),
+    Math.max(0, Math.min(mi, y)),
+    Math.max(0, Math.min(mi, z)),
+    M,
+  ) + ch;
+  const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+  const c000 = dye[idx(x0, y0, z0)]!;
+  const c100 = dye[idx(x0 + 1, y0, z0)]!;
+  const c010 = dye[idx(x0, y0 + 1, z0)]!;
+  const c110 = dye[idx(x0 + 1, y0 + 1, z0)]!;
+  const c001 = dye[idx(x0, y0, z0 + 1)]!;
+  const c101 = dye[idx(x0 + 1, y0, z0 + 1)]!;
+  const c011 = dye[idx(x0, y0 + 1, z0 + 1)]!;
+  const c111 = dye[idx(x0 + 1, y0 + 1, z0 + 1)]!;
+  return lerp(
+    lerp(lerp(c000, c100, tx), lerp(c010, c110, tx), ty),
+    lerp(lerp(c001, c101, tx), lerp(c011, c111, tx), ty),
+    tz,
+  );
 }
 
-/** Soft sine band in 0..1. */
-export function flowSoftBand(phi: number): number {
-  return 0.5 + 0.5 * Math.sin(phi);
+export interface IbfvAdvectParams {
+  alpha: number;
+  gridSpacing: number;
+  dt: number;
+  vMax: number;
+  frameIdx: number;
+  half: number;
+  gridPoints?: boolean;
 }
 
-/** Fixed base opacity modulated by soft sine band; zero at stagnation. */
-export function flowPhaseOpacity(
-  speed: number,
-  phi: number,
-  opacity: number,
-): number {
-  if (speed < 1e-5) return 0;
-  return opacity * (0.12 + 0.88 * flowSoftBand(phi));
+/** One IBFV advection step: total dye + advected age (CPU reference). */
+export function ibfvAdvectStep(
+  dyeIn: Float32Array,
+  dyeOut: Float32Array,
+  sampleVel: (x: number, y: number, z: number) => [number, number, number],
+  M: number,
+  params: IbfvAdvectParams,
+): void {
+  const { alpha, gridSpacing, dt, vMax, half, gridPoints = false } = params;
+  for (let iz = 0; iz < M; iz++) {
+    for (let iy = 0; iy < M; iy++) {
+      for (let ix = 0; ix < M; ix++) {
+        const [px, py, pz] = gridToWorld(ix, iy, iz, M, half);
+        const [vx, vy, vz] = sampleVel(px, py, pz);
+        const speed = Math.hypot(vx, vy, vz);
+        const [cx, cy, cz] = ibfvClampVelocity(vx, vy, vz, vMax);
+        const pPrevX = px - cx * dt;
+        const pPrevY = py - cy * dt;
+        const pPrevZ = pz - cz * dt;
+        const o = dyeVoxelIndex(ix, iy, iz, M);
+        if (speed <= 1e-5) {
+          dyeOut[o + FLOW_DYE_TOTAL] = 0;
+          dyeOut[o + FLOW_DYE_AGE] = 0;
+          continue;
+        }
+        const totalPrev = sampleDyeChannel(dyeIn, pPrevX, pPrevY, pPrevZ, M, half, FLOW_DYE_TOTAL);
+        const agePrev = sampleDyeChannel(dyeIn, pPrevX, pPrevY, pPrevZ, M, half, FLOW_DYE_AGE) + dt;
+        let G = 0;
+        if (alpha > 1e-6) {
+          G = ibfvBackgroundGrid(pPrevX, pPrevY, pPrevZ, gridSpacing, gridPoints);
+        }
+        const totalNew = (1 - alpha) * totalPrev + alpha * G;
+        dyeOut[o + FLOW_DYE_TOTAL] = totalNew;
+        dyeOut[o + FLOW_DYE_AGE] =
+          totalNew > 1e-6 ? ((1 - alpha) * totalPrev * agePrev) / totalNew : 0;
+      }
+    }
+  }
 }
 
 export function fitVectorField(

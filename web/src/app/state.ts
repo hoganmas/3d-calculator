@@ -43,12 +43,20 @@ export const state = {
   loopFpsLast: performance.now(),
   cpuMsSmooth: 0,
 
-  /** Spatial stripe density (scales k·x). */
-  flowStripeScale: 5.0,
-  /** Temporal frequency in rad/s (scales t only). */
-  flowTimeScale: 4.0,
+  /** IBFV grid injection rate α (0 = pure advection; >0 refreshes lines at upstream footpoint). */
+  flowAlpha: 0.1,
+  /** Spatial grid spacing for IBFV injection (world units). */
+  flowNoiseScale: 0.3,
+  /** When true, inject at grid points; otherwise axis-aligned grid lines. */
+  flowGridPoints: false,
+  /** Advection timestep Δt. */
+  flowDt: 0.05,
+  /** Velocity clamp vMax (0 = auto: noiseScale/dt). */
+  flowVMax: 0,
   /** Fixed Beer density for flow layers (before global scale). */
   flowOpacity: 0.15,
+  /** Age (seconds) at which advected dye reaches gradient color 2. */
+  flowAgeMax: 1.0,
 };
 
 export const FIT_DEBOUNCE_MS = 320;

@@ -26,6 +26,7 @@ import {
   resetClipGpuProfile,
   setIsoInterpHermite,
 } from "../render/webgpu/march.js";
+import { reseedFlowDyeBuffers } from "../render/webgpu/flowIbfv.js";
 import { compileExpr, classifyExpr } from "../math/fit.js";
 import { fitVectorField } from "../math/fitVector.js";
 import { listExpressions, resolveExprRole } from "../model/expressions.js";
@@ -542,14 +543,28 @@ export function wirePipelineDom() {
     await prepareClipGpuForDegree(state.fitDeg || Number(els.deg.value) || 23);
     refreshMetricsDump();
   });
-  els.flowStripeScale?.addEventListener("input", () => {
-    state.flowStripeScale = Math.max(0.1, Number(els.flowStripeScale!.value) || 0);
+  els.flowAlpha?.addEventListener("input", () => {
+    state.flowAlpha = Math.max(0, Math.min(1, Number(els.flowAlpha!.value) || 0));
   });
-  els.flowTimeScale?.addEventListener("input", () => {
-    state.flowTimeScale = Math.max(0, Number(els.flowTimeScale!.value) || 0);
+  els.flowGridMode?.addEventListener("change", () => {
+    state.flowGridPoints = els.flowGridMode!.value === "points";
+    reseedFlowDyeBuffers();
+  });
+  els.flowNoiseScale?.addEventListener("input", () => {
+    state.flowNoiseScale = Math.max(0.05, Number(els.flowNoiseScale!.value) || 0);
+    reseedFlowDyeBuffers();
+  });
+  els.flowDt?.addEventListener("input", () => {
+    state.flowDt = Math.max(0.001, Number(els.flowDt!.value) || 0);
+  });
+  els.flowVMax?.addEventListener("input", () => {
+    state.flowVMax = Math.max(0, Number(els.flowVMax!.value) || 0);
   });
   els.flowOpacity?.addEventListener("input", () => {
     state.flowOpacity = Math.max(0.01, Math.min(2, Number(els.flowOpacity!.value) || 0));
+  });
+  els.flowAgeMax?.addEventListener("input", () => {
+    state.flowAgeMax = Math.max(0.1, Math.min(10, Number(els.flowAgeMax!.value) || 1));
   });
 }
 

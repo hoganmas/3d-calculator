@@ -127,6 +127,7 @@ export function ensureDensSumForWebGl() {
     for (let i = 0; i < densSum.length; i++) densSum[i] += d.dens[i] || 0;
   }
   for (const f of flowLayers ?? []) {
+    // WebGL path: static presence × opacity only (no IBFV dye animation).
     const presence = flowPresenceSlice(f.fx, f.fy, f.fz, M);
     for (let i = 0; i < densSum.length; i++) densSum[i] += presence[i]! * state.flowOpacity;
   }
