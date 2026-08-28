@@ -43,10 +43,12 @@ export const state = {
   loopFpsLast: performance.now(),
   cpuMsSmooth: 0,
 
-  /** Flow advection speed multiplier. */
-  flowSpeed: 1.0,
-  /** Per-frame dye dissipation (0–1). */
-  flowDissipation: 0.015,
+  /** Spatial stripe density (scales k·x). */
+  flowStripeScale: 5.0,
+  /** Temporal frequency in rad/s (scales t only). */
+  flowTimeScale: 4.0,
+  /** Fixed Beer density for flow layers (before global scale). */
+  flowOpacity: 0.15,
 };
 
 export const FIT_DEBOUNCE_MS = 320;

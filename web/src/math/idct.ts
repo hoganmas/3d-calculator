@@ -4,7 +4,13 @@
  * See research/poly/notes/cheb-idct-volume.md.
  */
 
-import type { Idct3DResult, IdctGrad3DResult } from "../types/models.js";
+import type {
+  Idct3DResult,
+  IdctCurl3DResult,
+  IdctGrad3DResult,
+} from "../types/models.js";
+
+type ChebAxis = 0 | 1 | 2;
 
 /** Univariate IDCT at M Chebyshev roots: v_m = Σ_{i=0}^{n-1} c_i T_i(ξ_m). */
 function idctCheb1D(coeff: ArrayLike<number>, M: number): Float64Array {
@@ -127,6 +133,133 @@ export function idctChebGrad3D(
     gx: idctCheb3D(cx, deg, M).dens,
     gy: idctCheb3D(cy, deg, M).dens,
     gz: idctCheb3D(cz, deg, M).dens,
+    M,
+    deg,
+    n,
+  };
+}
+
+function chebCoeffsDiff3D(
+  cheb: ArrayLike<number>,
+  deg: number,
+  axis: ChebAxis,
+): Float64Array {
+  const n = deg + 1;
+  const n3 = n * n * n;
+  const out = new Float64Array(n3);
+  const row = new Float64Array(n);
+
+  if (axis === 0) {
+    for (let j = 0; j < n; j++) {
+      for (let k = 0; k < n; k++) {
+        for (let i = 0; i < n; i++) row[i] = cheb[i + j * n + k * n * n] || 0;
+        const d = chebDiff1D(row);
+        for (let i = 0; i < n; i++) out[i + j * n + k * n * n] = d[i]!;
+      }
+    }
+    return out;
+  }
+  if (axis === 1) {
+    for (let i = 0; i < n; i++) {
+      for (let k = 0; k < n; k++) {
+        for (let j = 0; j < n; j++) row[j] = cheb[i + j * n + k * n * n] || 0;
+        const d = chebDiff1D(row);
+        for (let j = 0; j < n; j++) out[i + j * n + k * n * n] = d[j]!;
+      }
+    }
+    return out;
+  }
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      for (let k = 0; k < n; k++) row[k] = cheb[i + j * n + k * n * n] || 0;
+      const d = chebDiff1D(row);
+      for (let k = 0; k < n; k++) out[i + j * n + k * n * n] = d[k]!;
+    }
+  }
+  return out;
+}
+
+function chebCoeffsDiff2_3D(
+  cheb: ArrayLike<number>,
+  deg: number,
+  axis: ChebAxis,
+): Float64Array {
+  return chebCoeffsDiff3D(chebCoeffsDiff3D(cheb, deg, axis), deg, axis);
+}
+
+function addChebCoeffs(
+  a: ArrayLike<number>,
+  b: ArrayLike<number>,
+): Float64Array {
+  const out = new Float64Array(a.length);
+  for (let i = 0; i < out.length; i++) out[i] = (a[i] || 0) + (b[i] || 0);
+  return out;
+}
+
+function subChebCoeffs(
+  a: ArrayLike<number>,
+  b: ArrayLike<number>,
+): Float64Array {
+  const out = new Float64Array(a.length);
+  for (let i = 0; i < out.length; i++) out[i] = (a[i] || 0) - (b[i] || 0);
+  return out;
+}
+
+/** ∇²f on the Chebyshev-root grid (ξ derivatives; multiply by (1/half)² for world). */
+export function idctChebLaplacian3D(
+  cheb: Float32Array | Float64Array,
+  deg: number,
+  gridM?: number,
+): Idct3DResult {
+  const n = deg + 1;
+  const d2x = chebCoeffsDiff2_3D(cheb, deg, 0);
+  const d2y = chebCoeffsDiff2_3D(cheb, deg, 1);
+  const d2z = chebCoeffsDiff2_3D(cheb, deg, 2);
+  const lap = addChebCoeffs(addChebCoeffs(d2x, d2y), d2z);
+  const { dens, M } = idctCheb3D(lap, deg, gridM);
+  return { dens, M, deg, n };
+}
+
+/** ∇·V from component Chebyshev fits (ξ derivatives; scale each axis by 1/half). */
+export function idctChebDivergence3D(
+  chebX: Float32Array | Float64Array,
+  chebY: Float32Array | Float64Array,
+  chebZ: Float32Array | Float64Array,
+  deg: number,
+  gridM?: number,
+): Idct3DResult {
+  const n = deg + 1;
+  const dVx = chebCoeffsDiff3D(chebX, deg, 0);
+  const dVy = chebCoeffsDiff3D(chebY, deg, 1);
+  const dVz = chebCoeffsDiff3D(chebZ, deg, 2);
+  const div = addChebCoeffs(addChebCoeffs(dVx, dVy), dVz);
+  const { dens, M } = idctCheb3D(div, deg, gridM);
+  return { dens, M, deg, n };
+}
+
+/** ∇×V from component Chebyshev fits (ξ derivatives; scale by 1/half). */
+export function idctChebCurl3D(
+  chebX: Float32Array | Float64Array,
+  chebY: Float32Array | Float64Array,
+  chebZ: Float32Array | Float64Array,
+  deg: number,
+  gridM?: number,
+): IdctCurl3DResult {
+  const n = deg + 1;
+  const dVx_dy = chebCoeffsDiff3D(chebX, deg, 1);
+  const dVx_dz = chebCoeffsDiff3D(chebX, deg, 2);
+  const dVy_dx = chebCoeffsDiff3D(chebY, deg, 0);
+  const dVy_dz = chebCoeffsDiff3D(chebY, deg, 2);
+  const dVz_dx = chebCoeffsDiff3D(chebZ, deg, 0);
+  const dVz_dy = chebCoeffsDiff3D(chebZ, deg, 2);
+  const cx = subChebCoeffs(dVz_dy, dVy_dz);
+  const cy = subChebCoeffs(dVx_dz, dVz_dx);
+  const cz = subChebCoeffs(dVy_dx, dVx_dy);
+  const M = Math.max(n, (gridM ?? n) | 0 || n);
+  return {
+    fx: idctCheb3D(cx, deg, M).dens,
+    fy: idctCheb3D(cy, deg, M).dens,
+    fz: idctCheb3D(cz, deg, M).dens,
     M,
     deg,
     n,

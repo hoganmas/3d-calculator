@@ -101,6 +101,10 @@ export interface GpuState {
   isoInterpHermite: boolean;
   flowGridM: number;
   flowHalf: number;
+  /** First Beer layer index that is a flow layer. */
+  flowLayerStart: number;
+  /** Float offset in volume for first flow layer fx slice. */
+  flowVelBase: number;
 }
 
 export const gpu: GpuState = {
@@ -177,9 +181,11 @@ export const gpu: GpuState = {
   isoInterpHermite: true,
   flowGridM: 0,
   flowHalf: 2.5,
+  flowLayerStart: -1,
+  flowVelBase: 0,
 };
 
-export const PIPELINE_EPOCH = 27;
+export const PIPELINE_EPOCH = 39;
 export const labelVertScratch = new Float32Array(18 * 6);
 
 export function resetPipelinesOnDeviceLost(): void {

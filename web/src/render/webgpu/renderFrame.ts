@@ -12,8 +12,10 @@ import {
   writeLayerColors,
 } from "./uniforms.js";
 import { packGridParams, syncClipGpuWorldGrid, uploadAxisLabelBillboards } from "./gridOverlay.js";
+import { state } from "../../app/state.js";
 import { ensureMarchTargets, resizeClipGpuCanvas } from "./marchCanvas.js";
 import { noteGpuPresent, scheduleStampReadback } from "./marchProfile.js";
+import { hasFlowGpuLayers } from "./flowGpu.js";
 import {
   acquireMarchGpuHandles,
   acquireMarchTargets,
@@ -35,7 +37,7 @@ function buildRaySetup(
   outW: number;
   outH: number;
 } | null {
-  if (gpu.densLayerCount < 1 && gpu.sceneConstraints.length < 1 && !(gpu.flowGridM > 0)) return null;
+  if (gpu.densLayerCount < 1 && gpu.sceneConstraints.length < 1 && !hasFlowGpuLayers()) return null;
 
   const handles = acquireMarchGpuHandles();
   if (!handles) return null;
@@ -239,7 +241,24 @@ function drawBeerPass(
   device.queue.writeBuffer(
     drawParamBufBeer,
     0,
-    packDrawParamsBeer(marchW, marchH, Mgrid, steps, half, scale, gpu.densBase, gpu.densLayerCount, ro, dirMatrix),
+    packDrawParamsBeer(
+      marchW,
+      marchH,
+      Mgrid,
+      steps,
+      half,
+      scale,
+      gpu.densBase,
+      gpu.densLayerCount,
+      ro,
+      dirMatrix,
+      gpu.flowLayerStart,
+      gpu.flowVelBase,
+      performance.now() * 0.001,
+      state.flowTimeScale,
+      state.flowStripeScale,
+      state.flowOpacity,
+    ),
   );
   const bg = device.createBindGroup({
     layout: beerPipeline.getBindGroupLayout(0),
@@ -387,7 +406,9 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
   gpu.profileMethod = "gpu-iso+ssao+beer+grid+fxaa";
   gpu.profileGridM = Mgrid;
 
-  if (gpu.scenePacked) device.queue.writeBuffer(volumeBuf, 0, gpu.scenePacked);
+  if (gpu.scenePacked && gpu.volumeBuf) {
+    device.queue.writeBuffer(volumeBuf, 0, gpu.scenePacked);
+  }
   writeLayerColors(device, colorBuf, gpu.densGradStops);
 
   let sceneView = targets.sceneColorTex.createView();

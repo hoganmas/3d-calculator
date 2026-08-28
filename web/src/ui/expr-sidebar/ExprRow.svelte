@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-import type { ExprItem, ExprRole } from "../../types/models.js";
+  import type { ExprItem } from "../../types/models.js";
 import {
   resolveExprGradient,
   cssGradientFromColors,
@@ -74,18 +74,6 @@ import {
   const grad = $derived(resolveExprGradient(item));
   const gradCss = $derived(cssGradientFromColors(grad.colors));
   const swatchDisabled = $derived(isParamDef);
-
-  const ROLE_CYCLE: ExprRole[] = ["auto", "cloud", "isosurface", "flow"];
-  const roleLabel = $derived(
-    ({ auto: "Auto", cloud: "Cloud", isosurface: "Isosurface", flow: "Flow" } as const)[item.role],
-  );
-
-  function cycleRole() {
-    const i = ROLE_CYCLE.indexOf(item.role);
-    const next = ROLE_CYCLE[(i + 1) % ROLE_CYCLE.length]!;
-    updateExpr(item.id, { role: next });
-    onStructuralChange();
-  }
 
   onMount(() => {
     if (!mfEl) return;
@@ -284,16 +272,6 @@ import {
       />
     {/if}
   </div>
-
-  {#if !isParamDef}
-    <button
-      type="button"
-      class="expr-role secondary has-tooltip"
-      data-tooltip={roleLabel}
-      aria-label={`Role: ${roleLabel}`}
-      onclick={() => cycleRole()}
-    >{roleLabel.slice(0, 1)}</button>
-  {/if}
 
   <button
     type="button"

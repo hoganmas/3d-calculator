@@ -116,6 +116,10 @@ export function configureMathField(mf: MathfieldElement) {
     mf.macros = {
       ...mf.macros,
       grad: "\\nabla",
+      del: "\\nabla",
+      laplacian: "\\operatorname{laplacian}",
+      div: "\\operatorname{div}",
+      curl: "\\operatorname{curl}",
     };
   } catch {
     /* ignore */

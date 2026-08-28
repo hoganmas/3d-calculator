@@ -4,7 +4,8 @@ export type ExprRole = "auto" | "cloud" | "isosurface" | "flow";
 export type AnimMode = "pingpong" | "loop";
 export type ExprKind = "parameter" | "constraint" | "definition" | "bare";
 export type LayerRole = "parameter" | "cloud" | "isosurface" | "flow";
-export type VectorFieldKind = "tuple" | "gradient" | "reference";
+export type VectorFieldKind = "tuple" | "gradient" | "curl" | "reference";
+export type ScalarFieldOperator = "none" | "laplacian" | "divergence";
 
 export interface ExprItem {
   id: string;
@@ -86,7 +87,6 @@ export interface FlowLayer {
   fx: Float32Array;
   fy: Float32Array;
   fz: Float32Array;
-  dye: Float32Array;
   color: number[];
   color2: number[];
   colors?: number[][];
@@ -162,6 +162,9 @@ export interface CompiledVectorExpr {
   bindScalar?: (
     params?: Record<string, number>,
   ) => (x: number, y: number, z: number) => number;
+  bindTuple?: (
+    params?: Record<string, number>,
+  ) => (x: number, y: number, z: number) => [number, number, number];
 }
 
 export interface VectorFitResult {
@@ -201,7 +204,18 @@ export interface CompiledExpr {
   shade: ClassifiedShade;
   isoLevel: number;
   classifyLabel: string;
+  operator?: ScalarFieldOperator;
+  /** Inner scalar for \\laplacian f. */
+  scalarCompileLatex?: string;
+  /** Tuple components for \\div(Fx,Fy,Fz). */
+  divergenceParts?: [string, string, string];
   bind: (params?: Record<string, number>) => (x: number, y: number, z: number) => number;
+  bindScalar?: (
+    params?: Record<string, number>,
+  ) => (x: number, y: number, z: number) => number;
+  bindTuple?: (
+    params?: Record<string, number>,
+  ) => (x: number, y: number, z: number) => [number, number, number];
 }
 
 export interface CompiledParam {
@@ -264,6 +278,23 @@ export interface IdctGrad3DResult {
   M: number;
   deg: number;
   n: number;
+}
+
+export interface IdctCurl3DResult {
+  fx: Float32Array;
+  fy: Float32Array;
+  fz: Float32Array;
+  M: number;
+  deg: number;
+  n: number;
+}
+
+export interface ScalarFitResult {
+  dens: Float32Array;
+  cheb: Float32Array;
+  fitRelL2: number;
+  M: number;
+  deg: number;
 }
 
 export interface CompileLayerResult {

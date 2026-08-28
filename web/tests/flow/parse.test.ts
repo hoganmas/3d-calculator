@@ -1,3 +1,4 @@
+import { compileExpr } from "../../src/math/fit.ts";
 import {
   classifyVectorExpr,
   compileVectorExpr,
@@ -55,6 +56,15 @@ export async function run() {
         const latex = String.raw`\nabla\left(x^2+y^2+z^2\right)`;
         assert(classifyVectorExpr(latex).kind === "gradient");
         compileVectorExpr(latex);
+      },
+    },
+    {
+      name: "\\nabla\\cdot with \\left(\\right) parens (MathLive)",
+      fn: () => {
+        const latex = String.raw`\nabla\cdot\left(x,y,z\right)`;
+        const compiled = compileExpr(latex);
+        assert(compiled.operator === "divergence", "expected divergence");
+        assertNear(compiled.bind({})(0.1, 0.2, 0.3), 3, 0.05, "nabla dot with left/right");
       },
     },
     {

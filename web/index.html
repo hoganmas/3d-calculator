@@ -165,10 +165,10 @@
           <section class="settings-section">
             <p class="settings-section-title">Flow</p>
             <div class="row3">
-              <label>speed<input id="flowSpeed" type="number" min="0" max="10" step="0.1" value="1" /></label>
-              <label>dissipation<input id="flowDissipation" type="number" min="0" max="0.5" step="0.005" value="0.015" /></label>
+              <label>stripes<input id="flowStripeScale" type="number" min="0.1" max="20" step="0.1" value="5" title="Spatial frequency (k·x)" /></label>
+              <label>freq<input id="flowTimeScale" type="number" min="0" max="20" step="0.1" value="4" title="Temporal frequency (rad/s)" /></label>
+              <label>alpha<input id="flowOpacity" type="number" min="0.01" max="2" step="0.01" value="0.15" /></label>
             </div>
-            <button id="reseedFlow" class="secondary" type="button">Re-seed flow dye</button>
           </section>
 
           <section class="settings-section">

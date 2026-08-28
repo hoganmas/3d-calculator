@@ -30,7 +30,7 @@ import {
   drawClipGpuFrame,
   prepareClipGpuForDegree,
 } from "./webglFallback.js";
-import { uploadFit, tickGpuKeyframeBlends, tickFlowAdvection } from "./pipeline.js";
+import { uploadFit, tickGpuKeyframeBlends } from "./pipeline.js";
 import { hudText, refreshMetricsDump } from "./hud.js";
 import { syncClipPresentation } from "./presentation.js";
 
@@ -90,10 +90,6 @@ function frame(rafNow: number) {
 
   controls.update();
   clipUniforms.uCameraPos.value.copy(camera.position);
-
-  if (state.lastSceneBake?.flowLayers?.length) {
-    tickFlowAdvection(state.frameDtSmooth);
-  }
 
   if (!useGpuClipPath()) {
     syncClipCpuVolume();

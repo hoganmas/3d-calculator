@@ -4,7 +4,13 @@
 
 import { compile, ComputeEngine } from "@cortex-js/compute-engine";
 import { fitChebyshev3D } from "./fit.js";
-import { idctCheb3D, idctChebGrad3D } from "./idct.js";
+import { idctCheb3D, idctChebCurl3D, idctChebGrad3D } from "./idct.js";
+import {
+  extractTriple,
+  normalizeCalcLatex,
+  scalarFromUnaryOpJson,
+  tripleFromUnaryOpJson,
+} from "./calcOps.js";
 import type {
   ClassifiedVectorExpr,
   CompiledVectorExpr,
@@ -26,7 +32,8 @@ interface CeCompileResult {
 const SPATIAL = new Set(["x", "y", "z", "r", "theta", "phi", "rho"]);
 const RESERVED = new Set([...SPATIAL]);
 const KNOWN_FNS = new Set([
-  "sin", "cos", "tan", "exp", "ln", "log", "sqrt", "abs", "grad", "nabla",
+  "sin", "cos", "tan", "exp", "ln", "log", "sqrt", "abs",
+  "grad", "nabla", "laplacian", "div", "curl",
 ]);
 
 function jsonArr(j: unknown): unknown[] {
@@ -113,47 +120,39 @@ function bindVectorFromScalar(
   };
 }
 
-/** Normalize grad/nabla LaTeX for CE parsing. */
+function bindCurlFromVector(
+  vectorFn: (x: number, y: number, z: number) => [number, number, number],
+  eps = 1e-5,
+): (x: number, y: number, z: number) => [number, number, number] {
+  return (x: number, y: number, z: number) => {
+    const [vx0, vy0, vz0] = vectorFn(x, y, z);
+    const dVy_dz =
+      (vectorFn(x, y, z + eps)[1]! - vectorFn(x, y, z - eps)[1]!) / (2 * eps);
+    const dVz_dy =
+      (vectorFn(x, y + eps, z)[2]! - vectorFn(x, y - eps, z)[2]!) / (2 * eps);
+    const dVz_dx =
+      (vectorFn(x + eps, y, z)[2]! - vectorFn(x - eps, y, z)[2]!) / (2 * eps);
+    const dVx_dz =
+      (vectorFn(x, y, z + eps)[0]! - vectorFn(x, y, z - eps)[0]!) / (2 * eps);
+    const dVy_dx =
+      (vectorFn(x + eps, y, z)[1]! - vectorFn(x - eps, y, z)[1]!) / (2 * eps);
+    const dVx_dy =
+      (vectorFn(x, y + eps, z)[0]! - vectorFn(x, y - eps, z)[0]!) / (2 * eps);
+    void vx0;
+    void vy0;
+    void vz0;
+    return [dVz_dy - dVy_dz, dVx_dz - dVz_dx, dVy_dx - dVx_dy];
+  };
+}
+
+/** Normalize vector-calculus LaTeX for CE parsing. */
 export function normalizeVectorLatex(latex: string): string {
-  let s = String(latex ?? "").trim();
-  // MathLive often emits \left( \right) — CE treats bare \grad as an unknown command.
-  s = s.replace(/\\left\s*/g, "");
-  s = s.replace(/\\right\s*/g, "");
-  s = s.replace(/\\operatorname\s*\{\s*grad\s*\}/gi, "\\grad");
-  s = s.replace(/\\grad\s*\{/g, "\\operatorname{grad}{");
-  s = s.replace(/\\grad\s*\(/g, "\\operatorname{grad}(");
-  s = s.replace(/\\nabla\s+/g, "\\operatorname{grad} ");
-  s = s.replace(/\\nabla\s*\(/g, "\\operatorname{grad}(");
-  s = s.replace(/\\nabla\s*\{/g, "\\operatorname{grad}{");
-  return s;
+  return normalizeCalcLatex(latex);
 }
 
-function extractTriple(json: unknown): string[] | null {
-  if (!Array.isArray(json)) return null;
-  const head = json[0];
-  if (head === "List" || head === "Tuple" || head === "Sequence") {
-    const parts = json.slice(1).filter((p) => p != null);
-    if (parts.length === 3) {
-      return parts.map((p) => ce.box(p as never).latex).filter(Boolean) as string[];
-    }
-  }
-  if (head === "Delimiter") {
-    const inner = json[2];
-    return extractTriple(inner);
-  }
-  if (head === "Matrix" || head === "MatrixExpression") {
-    const rows = json.slice(1);
-    const flat: string[] = [];
-    for (const row of rows) {
-      if (Array.isArray(row)) flat.push(...(extractTriple(row) ?? []));
-      else flat.push(ce.box(row as never).latex);
-    }
-    if (flat.length === 3) return flat;
-  }
-  return null;
-}
+export { extractTriple } from "./calcOps.js";
 
-function isGradErrorNode(node: unknown): boolean {
+function isUnaryOpErrorNode(node: unknown, names: RegExp): boolean {
   if (!Array.isArray(node) || node[0] !== "Error") return false;
   const msg = String(node[1] ?? "").toLowerCase();
   const lit = node[2];
@@ -161,17 +160,24 @@ function isGradErrorNode(node: unknown): boolean {
     Array.isArray(lit) && lit[0] === "LatexString"
       ? String(lit[1] ?? "").replace(/^'+|'+$/g, "").toLowerCase()
       : "";
-  return msg.includes("unexpected-command") && /\\?(grad|nabla)/.test(latexStr);
+  return msg.includes("unexpected-command") && names.test(latexStr);
+}
+
+function isGradErrorNode(node: unknown): boolean {
+  return isUnaryOpErrorNode(node, /\\?(grad|nabla)/);
+}
+
+function isCurlErrorNode(node: unknown): boolean {
+  return isUnaryOpErrorNode(node, /\\?curl/);
 }
 
 function scalarFromGradJson(json: unknown): string | null {
   if (!Array.isArray(json)) return null;
   const head = String(json[0]);
-  if (head === "Multiply" && String(json[1]).toLowerCase() === "grad" && json[2] != null) {
-    return ce.box(json[2] as never).latex;
-  }
-  if (head === "grad" || head === "Gradient" || head === "nabla") {
-    if (json[1] != null) return ce.box(json[1] as never).latex;
+  const inner = scalarFromUnaryOpJson(json, "grad");
+  if (inner) return inner;
+  if ((head === "grad" || head === "Gradient" || head === "nabla") && json[1] != null) {
+    return ce.box(json[1] as never).latex;
   }
   if (head === "Tuple" && json.length >= 3 && isGradErrorNode(json[1]) && json[2] != null) {
     return ce.box(json[2] as never).latex;
@@ -184,11 +190,51 @@ function looksLikeGrad(src: string, json: unknown): string | null {
   if (fromJson) return fromJson.trim();
 
   const lower = src.toLowerCase();
+  if (/\\nabla\s*\^|\^2|\\laplacian|\\Delta|\\nabla\s*\\cdot|\\nabla\s*\\times/i.test(lower)) {
+    return null;
+  }
   if (/\\grad|\\nabla|\\operatorname\s*\{\s*grad/.test(lower)) {
     const m = src.match(
       /\\(?:operatorname\s*\{\s*grad\s*\}|grad|nabla)\s*(?:\\left)?[\{\(]?\s*([\s\S]+?)\s*(?:\\right)?[\}\)]?\s*$/,
     );
     if (m?.[1]) return m[1].trim();
+  }
+  return null;
+}
+
+function tripleFromUnaryOpWithError(
+  json: unknown,
+  op: string,
+  errorTest: (node: unknown) => boolean,
+): string[] | null {
+  const fromJson = tripleFromUnaryOpJson(json, op);
+  if (fromJson?.length === 3) return fromJson;
+  if (!Array.isArray(json)) return null;
+  const head = String(json[0]);
+  if (head === "Tuple" && json.length >= 3 && errorTest(json[1]) && json[2] != null) {
+    return extractTriple(json[2]);
+  }
+  return null;
+}
+
+function looksLikeCurl(src: string, json: unknown): string[] | null {
+  const fromJson = tripleFromUnaryOpWithError(json, "curl", isCurlErrorNode);
+  if (fromJson?.length === 3) return fromJson;
+
+  if (/\\curl|\\operatorname\s*\{\s*curl/i.test(src)) {
+    const m = src.match(
+      /\\(?:operatorname\s*\{\s*curl\s*\}|curl)\s*(?:\\left)?[\{\(]?\s*([\s\S]+?)\s*(?:\\right)?[\}\)]?\s*$/,
+    );
+    if (m?.[1]) {
+      try {
+        const inner = ce.parse(m[1].trim());
+        const j = inner?.json ?? (typeof inner?.toJSON === "function" ? inner.toJSON() : null);
+        const triple = extractTriple(j);
+        if (triple?.length === 3) return triple;
+      } catch {
+        /* fall through */
+      }
+    }
   }
   return null;
 }
@@ -224,6 +270,15 @@ export function classifyVectorExpr(raw: string): ClassifiedVectorExpr {
     };
   }
 
+  const curlParts = looksLikeCurl(src, j);
+  if (curlParts) {
+    return {
+      kind: "curl",
+      label: "curl field",
+      compileParts: curlParts,
+    };
+  }
+
   const triple = extractTriple(j);
   if (triple?.length === 3) {
     return {
@@ -234,7 +289,7 @@ export function classifyVectorExpr(raw: string): ClassifiedVectorExpr {
   }
 
   throw new Error(
-    "Flow fields need a 3-component tuple like (Fx, Fy, Fz) or a gradient like \\grad f",
+    "Flow fields need a 3-component tuple like (Fx, Fy, Fz), \\grad f, or \\curl(Fx,Fy,Fz)",
   );
 }
 
@@ -263,6 +318,62 @@ export function compileVectorExpr(raw: string): CompiledVectorExpr {
       bindScalar(params: Record<string, number> = {}) {
         return bindScalar(scalarLatex, freeParams)(params);
       },
+    };
+  }
+
+  if (classified.kind === "curl") {
+    const compLatex = classified.compileParts;
+    const compiled = compLatex.map((latex) => {
+      const r = compileLatex(latex);
+      if (!r?.success || typeof r.run !== "function") {
+        throw new Error(`Could not compile curl component: ${latex}`);
+      }
+      return r;
+    });
+
+    const freeSet = new Set<string>();
+    let usesSpace = false;
+    for (let i = 0; i < compiled.length; i++) {
+      const { freeParams, usesSpace: us } = collectFreeParams(
+        compiled[i]!.freeSymbols,
+        compLatex[i]!,
+      );
+      for (const p of freeParams) freeSet.add(p);
+      if (us) usesSpace = true;
+    }
+    const freeParams = [...freeSet].sort();
+    if (!usesSpace) throw new Error("Curl field must depend on x, y, or z");
+
+    const bindTuple = (params: Record<string, number> = {}) => {
+      const fns = compLatex.map((latex, i) => {
+        const fp = collectFreeParams(compiled[i]!.freeSymbols, latex).freeParams;
+        const run = compiled[i]!.run!;
+        return (x: number, y: number, z: number) => {
+          const { r, theta, phi, rho } = polarFromCartesian(x, y, z);
+          const scope: Record<string, number> = { x, y, z, r, theta, phi, rho };
+          for (const name of fp) {
+            const v = params[name];
+            scope[name] = Number.isFinite(v) ? v : 1;
+          }
+          return coerceNumber(run(scope));
+        };
+      });
+      return (x: number, y: number, z: number): [number, number, number] => [
+        fns[0]!(x, y, z),
+        fns[1]!(x, y, z),
+        fns[2]!(x, y, z),
+      ];
+    };
+
+    return {
+      freeParams,
+      usesSpace,
+      kind: "curl",
+      classifyLabel: classified.label,
+      bind(params: Record<string, number> = {}) {
+        return bindCurlFromVector(bindTuple(params));
+      },
+      bindTuple,
     };
   }
 
@@ -316,26 +427,127 @@ export function compileVectorExpr(raw: string): CompiledVectorExpr {
   };
 }
 
-/** Gaussian dye blob centered in the box (Chebyshev-root grid). */
-export function seedFlowDye(M: number, half: number): Float32Array {
-  const dye = new Float32Array(M * M * M);
-  const sigma = half * 0.22;
-  const invSigma2 = 1 / (sigma * sigma);
-  for (let ix = 0; ix < M; ix++) {
-    const xi = Math.cos((Math.PI * (2 * ix + 1)) / (2 * M));
-    const x = xi * half;
-    for (let iy = 0; iy < M; iy++) {
-      const yi = Math.cos((Math.PI * (2 * iy + 1)) / (2 * M));
-      const y = yi * half;
-      for (let iz = 0; iz < M; iz++) {
-        const zi = Math.cos((Math.PI * (2 * iz + 1)) / (2 * M));
-        const z = zi * half;
-        const r2 = x * x + y * y + z * z;
-        dye[ix + iy * M + iz * M * M] = Math.exp(-r2 * invSigma2);
-      }
-    }
+/** 1 where |V| is nonzero, else 0 — masks stagnation without magnitude weighting. */
+export function flowPresenceSlice(
+  fx: Float32Array,
+  fy: Float32Array,
+  fz: Float32Array,
+  M: number,
+): Float32Array {
+  const volN = M * M * M;
+  const out = new Float32Array(volN);
+  for (let i = 0; i < volN; i++) {
+    out[i] = Math.hypot(fx[i]!, fy[i]!, fz[i]!) > 1e-5 ? 1 : 0;
   }
-  return dye;
+  return out;
+}
+
+/** |V| on the Chebyshev grid. */
+export function flowSpeedSlice(
+  fx: Float32Array,
+  fy: Float32Array,
+  fz: Float32Array,
+  M: number,
+): Float32Array {
+  const volN = M * M * M;
+  const out = new Float32Array(volN);
+  for (let i = 0; i < volN; i++) {
+    out[i] = Math.hypot(fx[i]!, fy[i]!, fz[i]!);
+  }
+  return out;
+}
+
+function cross3(
+  ax: number, ay: number, az: number,
+  bx: number, by: number, bz: number,
+): [number, number, number] {
+  return [
+    ay * bz - az * by,
+    az * bx - ax * bz,
+    ax * by - ay * bx,
+  ];
+}
+
+function norm3(x: number, y: number, z: number): number {
+  return Math.hypot(x, y, z);
+}
+
+/** Spatial phase coordinate: k·p for stream-aligned flow; azimuth in plane ⊥ (p×V) for rotation. */
+export function flowSpatialPhase(
+  vx: number,
+  vy: number,
+  vz: number,
+  px: number,
+  py: number,
+  pz: number,
+  half: number,
+): number {
+  const speed = Math.hypot(vx, vy, vz);
+  if (speed < 1e-12) return 0;
+  const kx = vx / speed;
+  const ky = vy / speed;
+  const kz = vz / speed;
+  const along = kx * px + ky * py + kz * pz;
+  const r = norm3(px, py, pz);
+  const align = r > 1e-4 ? Math.abs(along / r) : 0;
+  const spinMix = 1 - Math.min(1, align / 0.35);
+  let azimuth = Math.atan2(py, px) * (half / Math.PI);
+  const [ax, ay, az] = cross3(px, py, pz, vx, vy, vz);
+  const axisLen = norm3(ax, ay, az);
+  if (axisLen > 1e-4) {
+    const axis = [ax / axisLen, ay / axisLen, az / axisLen] as const;
+    let rx = 0; let ry = 0; let rz = 1;
+    if (Math.abs(axis[0] * rx + axis[1] * ry + axis[2] * rz) > 0.9) {
+      rx = 0; ry = 1; rz = 0;
+    }
+    if (Math.abs(axis[0] * rx + axis[1] * ry + axis[2] * rz) > 0.9) {
+      rx = 1; ry = 0; rz = 0;
+    }
+    let [ux, uy, uz] = cross3(rx, ry, rz, axis[0], axis[1], axis[2]);
+    const uNorm = norm3(ux, uy, uz);
+    const uxN = ux / uNorm;
+    const uyN = uy / uNorm;
+    const uzN = uz / uNorm;
+    const [vx2, vy2, vz2] = cross3(axis[0], axis[1], axis[2], uxN, uyN, uzN);
+    const theta = Math.atan2(
+      px * vx2 + py * vy2 + pz * vz2,
+      px * uxN + py * uyN + pz * uzN,
+    );
+    azimuth = theta * (half / Math.PI);
+  }
+  return along * (1 - spinMix) + azimuth * spinMix;
+}
+
+/** Phase φ = spatial·stripeScale − t·timeScale with k ∥ V. */
+export function flowPhaseAt(
+  vx: number,
+  vy: number,
+  vz: number,
+  px: number,
+  py: number,
+  pz: number,
+  t: number,
+  stripeScale: number,
+  timeScale: number,
+  half: number = 2.5,
+): number {
+  const spatial = flowSpatialPhase(vx, vy, vz, px, py, pz, half);
+  return spatial * stripeScale - t * timeScale;
+}
+
+/** Soft sine band in 0..1. */
+export function flowSoftBand(phi: number): number {
+  return 0.5 + 0.5 * Math.sin(phi);
+}
+
+/** Fixed base opacity modulated by soft sine band; zero at stagnation. */
+export function flowPhaseOpacity(
+  speed: number,
+  phi: number,
+  opacity: number,
+): number {
+  if (speed < 1e-5) return 0;
+  return opacity * (0.12 + 0.88 * flowSoftBand(phi));
 }
 
 export function fitVectorField(
@@ -345,6 +557,40 @@ export function fitVectorField(
   deg: number,
   opts: { skipL2?: boolean } = {},
 ): VectorFitResult {
+  if (compiled.kind === "curl" && compiled.bindTuple) {
+    const tupleFn = compiled.bindTuple();
+    const fitX = fitChebyshev3D((x, y, z) => tupleFn(x, y, z)[0]!, half, deg, {
+      skipL2: opts.skipL2 ?? true,
+      skipMono: true,
+    });
+    const fitY = fitChebyshev3D((x, y, z) => tupleFn(x, y, z)[1]!, half, deg, {
+      skipL2: opts.skipL2 ?? true,
+      skipMono: true,
+    });
+    const fitZ = fitChebyshev3D((x, y, z) => tupleFn(x, y, z)[2]!, half, deg, {
+      skipL2: opts.skipL2 ?? true,
+      skipMono: true,
+    });
+    const curl = idctChebCurl3D(fitX.cheb, fitY.cheb, fitZ.cheb, deg, deg + 1);
+    const scale = 1 / half;
+    const fx = new Float32Array(curl.fx.length);
+    const fy = new Float32Array(curl.fy.length);
+    const fz = new Float32Array(curl.fz.length);
+    for (let i = 0; i < fx.length; i++) {
+      fx[i] = curl.fx[i]! * scale;
+      fy[i] = curl.fy[i]! * scale;
+      fz[i] = curl.fz[i]! * scale;
+    }
+    return {
+      fx,
+      fy,
+      fz,
+      fitRel: fitX.fitRelL2,
+      M: curl.M,
+      source: "curl",
+    };
+  }
+
   if (compiled.kind === "gradient" && compiled.bindScalar) {
     const scalarFn = compiled.bindScalar();
     const fit = fitChebyshev3D(scalarFn, half, deg, {

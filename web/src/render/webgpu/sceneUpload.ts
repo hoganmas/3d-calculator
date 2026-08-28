@@ -1,7 +1,8 @@
 import type { CloudLayer, FlowLayer, IsosurfaceLayer, KeyframeBlend, KeyframeFrame } from "../../types/models.js";
 import { MAX_DENS_LAYERS, gpu, DEFAULT_DENS_RGB, DEFAULT_DENS_RGB2, type RgbTriplet } from "./gpuState.js";
 import { normalizeRgbStops, writeLayerColors } from "./uniforms.js";
-import { uploadFlowLayers, resetFlowGpuLayers } from "./flowAdvect.js";
+import { hasFlowGpuLayers } from "./flowGpu.js";
+import { flowPresenceSlice } from "../../math/fitVector.js";
 
 const MAX_FLOW_LAYERS = 4;
 
@@ -78,7 +79,7 @@ export function uploadSceneVolumes(scene: SceneUploadPayload | null): SceneUploa
   const scalarDens = (scene.cloudLayers || []).slice(0, Math.max(0, MAX_DENS_LAYERS - flow.length));
   const flowAsDens: CloudLayer[] = flow.map((f) => ({
     id: f.id,
-    dens: f.dye,
+    dens: flowPresenceSlice(f.fx, f.fy, f.fz, M),
     color: f.color,
     color2: f.color2,
     colors: f.colors,
@@ -96,7 +97,7 @@ export function uploadSceneVolumes(scene: SceneUploadPayload | null): SceneUploa
       : 1;
     consFloats += K * consStride * volN;
   }
-  const totalFloats = consFloats + dens.length * volN;
+  const totalFloats = consFloats + dens.length * volN + flow.length * volN * 3;
   gpu.scenePacked = totalFloats > 0 ? new Float32Array(Math.max(volN, totalFloats)) : null;
   let off = 0;
   const putVol = (src: Float32Array | undefined) => {
@@ -143,22 +144,26 @@ export function uploadSceneVolumes(scene: SceneUploadPayload | null): SceneUploa
   });
   gpu.densBase = off;
   gpu.densPacked = dens.length > 0;
-  const flowDensOffsets: number[] = [];
+  gpu.flowLayerStart = flow.length > 0 ? scalarDens.length : -1;
   if (gpu.densPacked && gpu.scenePacked) {
     for (let i = 0; i < dens.length; i++) {
-      if (i >= scalarDens.length) flowDensOffsets.push(off);
       putVol(dens[i]!.dens);
     }
   }
-
-  if (flow.length) {
-    uploadFlowLayers(flow, M, half, flowDensOffsets);
-  } else {
-    resetFlowGpuLayers();
+  gpu.flowVelBase = off;
+  if (gpu.densPacked && gpu.scenePacked && flow.length) {
+    for (let i = 0; i < flow.length; i++) {
+      const f = flow[i]!;
+      putVol(f.fx);
+      putVol(f.fy);
+      putVol(f.fz);
+    }
   }
 
+  const packedFloats = off;
+
   gpu.sceneEpoch++;
-  ensureVolumeBuf(Math.max(volN, gpu.scenePacked ? gpu.scenePacked.length : volN));
+  ensureVolumeBuf(Math.max(volN, packedFloats > 0 ? packedFloats : volN));
   if (gpu.scenePacked && gpu.volumeBuf) gpu.device.queue.writeBuffer(gpu.volumeBuf, 0, gpu.scenePacked);
   writeLayerColors(gpu.device, gpu.colorBuf, gpu.densGradStops);
 
@@ -222,7 +227,7 @@ export function patchConstraintKeyframeFrame(
 export function hasUploadedVolume(): boolean {
   return (
     gpu.sceneM > 0 &&
-    (gpu.densLayerCount > 0 || gpu.sceneConstraints.length > 0 || (gpu.flowGridM ?? 0) > 0)
+    (gpu.densLayerCount > 0 || gpu.sceneConstraints.length > 0 || hasFlowGpuLayers())
   );
 }
 

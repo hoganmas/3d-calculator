@@ -2,6 +2,8 @@
 
 import { compile, ComputeEngine } from "@cortex-js/compute-engine";
 import { MAX_DEG } from "./limits.js";
+import { extractTriple, normalizeCalcLatex, scalarFromUnaryOpJson, tripleFromUnaryOpJson } from "./calcOps.js";
+import { idctCheb3D, idctChebDivergence3D, idctChebLaplacian3D } from "./idct.js";
 import type {
   ChebFitResult,
   ClassifiedExpr,
@@ -9,6 +11,8 @@ import type {
   CompiledParam,
   FieldKind,
   PresetDef,
+  ScalarFitResult,
+  ChebFitTiming,
 } from "../types/models.js";
 
 type MathJsonArray = unknown[];
@@ -433,12 +437,208 @@ export function formatParamLatexValue(v: number) {
  *   bind: (params?: Record<string, number>) => (x: number, y: number, z: number) => number,
  * }}
  */
+function bindLaplacianFromScalar(
+  scalarFn: (x: number, y: number, z: number) => number,
+  eps = 1e-5,
+): (x: number, y: number, z: number) => number {
+  const h2 = eps * eps;
+  return (x: number, y: number, z: number) => {
+    const c = scalarFn(x, y, z);
+    const d2x =
+      (scalarFn(x + eps, y, z) - 2 * c + scalarFn(x - eps, y, z)) / h2;
+    const d2y =
+      (scalarFn(x, y + eps, z) - 2 * c + scalarFn(x, y - eps, z)) / h2;
+    const d2z =
+      (scalarFn(x, y, z + eps) - 2 * c + scalarFn(x, y, z - eps)) / h2;
+    return d2x + d2y + d2z;
+  };
+}
+
+function bindDivergenceFromVector(
+  vectorFn: (x: number, y: number, z: number) => [number, number, number],
+  eps = 1e-5,
+): (x: number, y: number, z: number) => number {
+  return (x: number, y: number, z: number) => {
+    const dVx_dx =
+      (vectorFn(x + eps, y, z)[0]! - vectorFn(x - eps, y, z)[0]!) / (2 * eps);
+    const dVy_dy =
+      (vectorFn(x, y + eps, z)[1]! - vectorFn(x, y - eps, z)[1]!) / (2 * eps);
+    const dVz_dz =
+      (vectorFn(x, y, z + eps)[2]! - vectorFn(x, y, z - eps)[2]!) / (2 * eps);
+    return dVx_dx + dVy_dy + dVz_dz;
+  };
+}
+
+function scalarFromUnaryOpJsonLocal(json: unknown, op: string): string | null {
+  return scalarFromUnaryOpJson(json, op);
+}
+
+function tripleFromUnaryOpJsonLocal(json: unknown, op: string): string[] | null {
+  return tripleFromUnaryOpJson(json, op);
+}
+
+function looksLikeLaplacian(src: string, json: unknown): string | null {
+  const fromJson = scalarFromUnaryOpJsonLocal(json, "laplacian");
+  if (fromJson) return fromJson.trim();
+
+  if (/\\laplacian|\\Delta|\\nabla\s*\^|\\operatorname\s*\{\s*laplacian/i.test(src)) {
+    const m = src.match(
+      /\\(?:operatorname\s*\{\s*laplacian\s*\}|laplacian|Delta)\s*(?:\\left)?[\{\(]?\s*([\s\S]+?)\s*(?:\\right)?[\}\)]?\s*$/i,
+    );
+    if (m?.[1]) return m[1].trim();
+    const m2 = src.match(
+      /\\nabla\s*\^\s*\{?\s*2\s*\}?\s*(?:\\left)?[\{\(]?\s*([\s\S]+?)\s*(?:\\right)?[\}\)]?\s*$/i,
+    );
+    if (m2?.[1]) return m2[1].trim();
+  }
+  return null;
+}
+
+function looksLikeDivergence(src: string, json: unknown): string[] | null {
+  const fromJson = tripleFromUnaryOpJsonLocal(json, "div");
+  if (fromJson?.length === 3) return fromJson;
+
+  if (/\\div|\\operatorname\s*\{\s*div/i.test(src)) {
+    const m = src.match(
+      /\\(?:operatorname\s*\{\s*div\s*\}|div)\s*(?:\\left)?[\{\(]?\s*([\s\S]+?)\s*(?:\\right)?[\}\)]?\s*$/i,
+    );
+    if (m?.[1]) {
+      try {
+        const inner = ce.parse(m[1].trim());
+        const j = inner?.json ?? (typeof inner?.toJSON === "function" ? inner.toJSON() : null);
+        const triple = extractTriple(j);
+        if (triple?.length === 3) return triple;
+      } catch {
+        /* fall through */
+      }
+    }
+  }
+  return null;
+}
+
+function bindScalarFromLatex(latex: string, freeParams: string[]) {
+  const result = compileLatex(latex);
+  if (!result?.success || typeof result.run !== "function") {
+    const why = result?.unsupported?.length
+      ? `unsupported: ${result.unsupported.join(", ")}`
+      : "could not compile";
+    throw new Error(`Expression ${why}`);
+  }
+  const { run } = result;
+  return (params: Record<string, number> = {}) =>
+    (x: number, y: number, z: number) => {
+      const { r, theta, phi, rho } = polarFromCartesian(x, y, z);
+      const scope: Record<string, number> = { x, y, z, r, theta, phi, rho };
+      for (const name of freeParams) {
+        const v = params[name];
+        scope[name] = Number.isFinite(v) ? v : 1;
+      }
+      return coerceNumber(run(scope));
+    };
+}
+
+function bindTupleFromLatex(parts: string[]) {
+  const compiled = parts.map((latex) => {
+    const r = compileLatex(latex);
+    if (!r?.success || typeof r.run !== "function") {
+      throw new Error(`Could not compile vector component: ${latex}`);
+    }
+    return r;
+  });
+  return (params: Record<string, number> = {}) =>
+    (x: number, y: number, z: number): [number, number, number] => {
+      const { r, theta, phi, rho } = polarFromCartesian(x, y, z);
+      const out: [number, number, number] = [0, 0, 0];
+      for (let i = 0; i < parts.length; i++) {
+        const fp = collectFreeParams(compiled[i]!.freeSymbols, parts[i]!).freeParams;
+        const scope: Record<string, number> = { x, y, z, r, theta, phi, rho };
+        for (const name of fp) {
+          const v = params[name];
+          scope[name] = Number.isFinite(v) ? v : 1;
+        }
+        out[i] = coerceNumber(compiled[i]!.run!(scope));
+      }
+      return out;
+    };
+}
+
+function compileLaplacianExpr(
+  raw: string,
+  scalarLatex: string,
+  classified: ClassifiedExpr,
+): CompiledExpr {
+  const scalarResult = compileLatex(scalarLatex);
+  if (!scalarResult?.success || typeof scalarResult.run !== "function") {
+    throw new Error("Could not compile scalar inside laplacian");
+  }
+  const { freeParams, usesSpace } = collectFreeParams(scalarResult.freeSymbols, scalarLatex);
+  if (!usesSpace) throw new Error("Laplacian field must depend on x, y, or z");
+  const shade = classified.shade === "none" ? "none" : classified.shade;
+  return {
+    freeParams,
+    usesSpace,
+    kind: classified.kind as FieldKind,
+    shade,
+    isoLevel: classified.isoLevel,
+    classifyLabel: "laplacian field",
+    operator: "laplacian",
+    scalarCompileLatex: scalarLatex,
+    bind(params: Record<string, number> = {}) {
+      const scalar = bindScalarFromLatex(scalarLatex, freeParams)(params);
+      return bindLaplacianFromScalar(scalar);
+    },
+    bindScalar(params: Record<string, number> = {}) {
+      return bindScalarFromLatex(scalarLatex, freeParams)(params);
+    },
+  };
+}
+
+function compileDivergenceExpr(
+  raw: string,
+  parts: [string, string, string],
+  classified: ClassifiedExpr,
+): CompiledExpr {
+  const compiled = parts.map((latex) => compileLatex(latex));
+  const freeSet = new Set<string>();
+  let usesSpace = false;
+  for (let i = 0; i < compiled.length; i++) {
+    const { freeParams, usesSpace: us } = collectFreeParams(
+      compiled[i]!.freeSymbols,
+      parts[i]!,
+    );
+    for (const p of freeParams) freeSet.add(p);
+    if (us) usesSpace = true;
+  }
+  const freeParams = [...freeSet].sort();
+  if (!usesSpace) throw new Error("Divergence field must depend on x, y, or z");
+  const shade = classified.shade === "none" ? "none" : classified.shade;
+  return {
+    freeParams,
+    usesSpace,
+    kind: classified.kind as FieldKind,
+    shade,
+    isoLevel: classified.isoLevel,
+    classifyLabel: "divergence field",
+    operator: "divergence",
+    divergenceParts: parts,
+    bind(params: Record<string, number> = {}) {
+      const tuple = bindTupleFromLatex(parts)(params);
+      return bindDivergenceFromVector(tuple);
+    },
+    bindTuple(params: Record<string, number> = {}) {
+      return bindTupleFromLatex(parts)(params);
+    },
+  };
+}
+
 /**
  * Flow-field syntax must use compileVectorExpr / flow role — not scalar compileExpr.
  * Cheap pre-check avoids CE "Tuple + \\grad" console noise.
  */
 function isLikelyFlowLatex(raw: string): boolean {
   const s = String(raw ?? "").trim();
+  if (/\\curl|\\nabla\s*\\times/i.test(s)) return true;
+  if (/\\nabla\s*\^|\^2|\\laplacian|\\Delta|\\div|\\nabla\s*\\cdot/i.test(s)) return false;
   if (/\\grad|\\nabla/i.test(s)) return true;
   const m = s.match(/^\(([\s\S]+)\)$/);
   if (m) {
@@ -457,8 +657,30 @@ function isLikelyFlowLatex(raw: string): boolean {
 
 export function compileExpr(raw: string): CompiledExpr {
   if (isLikelyFlowLatex(raw)) {
-    throw new Error("Vector field — use flow role (tuple or \\grad)");
+    throw new Error("Vector field — use flow role (tuple, \\grad, or \\curl)");
   }
+
+  const normalized = normalizeCalcLatex(normalizeLatexFunctions(String(raw ?? "").trim()));
+  if (normalized) {
+    let box;
+    try {
+      box = ce.parse(normalized);
+    } catch {
+      box = null;
+    }
+    const j = box?.json ?? (typeof box?.toJSON === "function" ? box.toJSON() : null);
+    const lapInner = looksLikeLaplacian(normalized, j);
+    if (lapInner) {
+      const classified = classifyExpr(raw);
+      return compileLaplacianExpr(raw, lapInner, classified);
+    }
+    const divParts = looksLikeDivergence(normalized, j);
+    if (divParts?.length === 3) {
+      const classified = classifyExpr(raw);
+      return compileDivergenceExpr(raw, divParts as [string, string, string], classified);
+    }
+  }
+
   const classified = classifyExpr(raw);
   const src = classified.compileLatex;
 
@@ -861,5 +1083,72 @@ export function fitChebyshev3D(
       l2Ms,
       totalMs,
     },
+  };
+}
+
+/** Bake scalar density with optional spectral laplacian / divergence operators. */
+export function fitScalarField(
+  compiled: CompiledExpr,
+  fn: (x: number, y: number, z: number) => number,
+  half: number,
+  deg: number,
+  opts: { skipL2?: boolean; skipMono?: boolean } = {},
+): ScalarFitResult & { fitRelL2: number; timing?: ChebFitTiming } {
+  const skipL2 = opts.skipL2 ?? false;
+  const skipMono = opts.skipMono ?? false;
+
+  if (compiled.operator === "laplacian" && compiled.bindScalar) {
+    const fit = fitChebyshev3D(compiled.bindScalar(), half, deg, { skipL2, skipMono });
+    const lap = idctChebLaplacian3D(fit.cheb, deg, deg + 1);
+    const scale = (1 / half) ** 2;
+    const dens = new Float32Array(lap.dens.length);
+    for (let i = 0; i < dens.length; i++) dens[i] = lap.dens[i]! * scale;
+    return {
+      dens,
+      cheb: fit.cheb,
+      fitRelL2: fit.fitRelL2,
+      M: lap.M,
+      deg: fit.deg,
+      timing: fit.timing,
+    };
+  }
+
+  if (compiled.operator === "divergence" && compiled.bindTuple) {
+    const tupleFn = compiled.bindTuple();
+    const fitX = fitChebyshev3D((x, y, z) => tupleFn(x, y, z)[0]!, half, deg, {
+      skipL2,
+      skipMono,
+    });
+    const fitY = fitChebyshev3D((x, y, z) => tupleFn(x, y, z)[1]!, half, deg, {
+      skipL2,
+      skipMono,
+    });
+    const fitZ = fitChebyshev3D((x, y, z) => tupleFn(x, y, z)[2]!, half, deg, {
+      skipL2,
+      skipMono,
+    });
+    const div = idctChebDivergence3D(fitX.cheb, fitY.cheb, fitZ.cheb, deg, deg + 1);
+    const scale = 1 / half;
+    const dens = new Float32Array(div.dens.length);
+    for (let i = 0; i < dens.length; i++) dens[i] = div.dens[i]! * scale;
+    return {
+      dens,
+      cheb: fitX.cheb,
+      fitRelL2: fitX.fitRelL2,
+      M: div.M,
+      deg: fitX.deg,
+      timing: fitX.timing,
+    };
+  }
+
+  const fit = fitChebyshev3D(fn, half, deg, { skipL2, skipMono });
+  const idct = idctCheb3D(fit.cheb, fit.deg, fit.deg + 1);
+  return {
+    dens: idct.dens,
+    cheb: fit.cheb,
+    fitRelL2: fit.fitRelL2,
+    M: idct.M,
+    deg: fit.deg,
+    timing: fit.timing,
   };
 }

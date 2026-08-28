@@ -12,6 +12,7 @@ import {
   hasUploadedVolume,
   clearClipGpuFrame,
 } from "../render/webgpu/march.js";
+import { flowPresenceSlice } from "../math/fitVector.js";
 import { els, viewportSize } from "./dom.js";
 import { state } from "./state.js";
 import {
@@ -126,7 +127,8 @@ export function ensureDensSumForWebGl() {
     for (let i = 0; i < densSum.length; i++) densSum[i] += d.dens[i] || 0;
   }
   for (const f of flowLayers ?? []) {
-    for (let i = 0; i < densSum.length; i++) densSum[i] += f.dye[i] || 0;
+    const presence = flowPresenceSlice(f.fx, f.fy, f.fz, M);
+    for (let i = 0; i < densSum.length; i++) densSum[i] += presence[i]! * state.flowOpacity;
   }
   state.lastSceneBake.dens = densSum;
   return densSum;

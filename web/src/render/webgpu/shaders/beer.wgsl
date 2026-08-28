@@ -12,6 +12,12 @@ struct DrawParams {
   m0: vec4f,
   m1: vec4f,
   m2: vec4f,
+  flowLayerStart: f32,
+  flowVelBase: f32,
+  flowTime: f32,
+  flowTimeScale: f32,
+  flowStripeScale: f32,
+  flowOpacity: f32,
 }
 
 @group(0) @binding(0) var<uniform> draw: DrawParams;
@@ -68,6 +74,28 @@ fn sampleLayer(base: u32, p: vec3f) -> f32 {
   let c011 = densAtBase(base, x0, y0 + 1, z0 + 1); let c111 = densAtBase(base, x0 + 1, y0 + 1, z0 + 1);
   return mix(mix(mix(c000, c100, tx), mix(c010, c110, tx), ty),
               mix(mix(c001, c101, tx), mix(c011, c111, tx), ty), tz);
+}
+
+// For V = ω×r, axis ∥ p×V; measure azimuth in the plane ⊥ axis (not always xy).
+fn flowSpatialPhase(k: vec3f, V: vec3f, p: vec3f, half: f32) -> f32 {
+  let along = dot(k, p);
+  let r = length(p);
+  let align = select(0.0, abs(dot(k, p / r)), r > 1e-4);
+  let spinMix = 1.0 - clamp(align / 0.35, 0.0, 1.0);
+  var azimuth = atan2(p.y, p.x) * half * 0.318309886;
+  let axisRaw = cross(p, V);
+  let axisLen = length(axisRaw);
+  if (axisLen > 1e-4) {
+    let axis = axisRaw / axisLen;
+    var axisRef = vec3f(0.0, 0.0, 1.0);
+    if (abs(dot(axis, axisRef)) > 0.9) { axisRef = vec3f(0.0, 1.0, 0.0); }
+    if (abs(dot(axis, axisRef)) > 0.9) { axisRef = vec3f(1.0, 0.0, 0.0); }
+    let u = normalize(cross(axisRef, axis));
+    let v = cross(axis, u);
+    let theta = atan2(dot(p, v), dot(p, u));
+    azimuth = theta * half * 0.318309886;
+  }
+  return mix(along, azimuth, spinMix);
 }
 
 @fragment
@@ -127,11 +155,35 @@ fn fsMain(in: VSOut) -> FSOut {
       if (L >= nLay) { break; }
       var dval = sampleLayer(densBase + L * volN, p);
       if (dval != dval) { dval = 0.0; }
+      var col: vec3f;
+      let isFlow = f32(L) >= draw.flowLayerStart && draw.flowLayerStart >= 0.0;
+      if (isFlow) {
+        let flowIdx = L - u32(draw.flowLayerStart);
+        let velBase = u32(draw.flowVelBase) + flowIdx * volN * 3u;
+        let V = vec3f(
+          sampleLayer(velBase, p),
+          sampleLayer(velBase + volN, p),
+          sampleLayer(velBase + volN * 2u, p),
+        );
+        let speed = length(V);
+        if (speed > 1e-5) {
+          let k = V / speed;
+          let spatial = flowSpatialPhase(k, V, p, half);
+          let phi = spatial * draw.flowStripeScale - draw.flowTime * draw.flowTimeScale;
+          let band = 0.5 + 0.5 * sin(phi);
+          dval = draw.flowOpacity * (0.12 + 0.88 * band);
+        } else {
+          dval = 0.0;
+        }
+        let gt = gradientT(p, half);
+        col = sampleLayerGrad(L, gt);
+      } else {
+        let gt = gradientT(p, half);
+        col = sampleLayerGrad(L, gt);
+      }
       dval = clamp(dval, -4.0, 8.0);
       let sig = min(max(0.0, draw.scale * dval), 40.0);
       if (sig > 1e-8) {
-        let gt = gradientT(p, half);
-        let col = sampleLayerGrad(L, gt);
         sigma += sig;
         emitAcc += col * sig;
       }

@@ -370,15 +370,6 @@
       .expr-vis.is-off {
         color: var(--stroke);
       }
-      .expr-role {
-        flex-shrink: 0;
-        min-width: 28px;
-        height: 28px;
-        padding: 0 6px;
-        font-size: 11px;
-        font-weight: 600;
-        letter-spacing: 0.02em;
-      }
       #panel .brand {
         display: flex;
         align-items: center;
