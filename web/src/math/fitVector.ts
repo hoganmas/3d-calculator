@@ -457,6 +457,81 @@ export function flowSpeedSlice(
   return out;
 }
 
+/** Min/max |V| over a velocity grid (ignores near-stagnation cells). */
+export function flowSpeedMinMax(
+  fx: Float32Array,
+  fy: Float32Array,
+  fz: Float32Array,
+): [min: number, max: number] {
+  let vmin = Infinity;
+  let vmax = 0;
+  const n = fx.length;
+  for (let i = 0; i < n; i++) {
+    const s = Math.hypot(fx[i]!, fy[i]!, fz[i]!);
+    if (s <= 1e-8) continue;
+    if (s < vmin) vmin = s;
+    if (s > vmax) vmax = s;
+  }
+  if (!Number.isFinite(vmin) || vmax <= vmin) return [0, 1];
+  return [vmin, vmax];
+}
+
+/** Robust speed range on a velocity grid (percentile spread avoids outlier compression). */
+export function flowSpeedPercentileMinMax(
+  fx: Float32Array,
+  fy: Float32Array,
+  fz: Float32Array,
+  loPct = 0.05,
+  hiPct = 0.95,
+): [min: number, max: number] {
+  const speeds: number[] = [];
+  const n = fx.length;
+  for (let i = 0; i < n; i++) {
+    const s = Math.hypot(fx[i]!, fy[i]!, fz[i]!);
+    if (s > 1e-8) speeds.push(s);
+  }
+  if (speeds.length < 2) return flowSpeedMinMax(fx, fy, fz);
+  speeds.sort((a, b) => a - b);
+  const lo = speeds[Math.floor(speeds.length * loPct)]!;
+  const hi = speeds[Math.min(speeds.length - 1, Math.floor(speeds.length * hiPct))]!;
+  if (!(hi > lo)) return flowSpeedMinMax(fx, fy, fz);
+  return [lo, hi];
+}
+
+/** Min/max speed among live particles and their trail history. */
+export function flowParticleSpeedMinMax(
+  posAge: Float32Array,
+  trailHist: Float32Array | null,
+  count: number,
+  trailSteps: number,
+): [min: number, max: number] | null {
+  let vmin = Infinity;
+  let vmax = 0;
+  let samples = 0;
+  const note = (s: number) => {
+    if (s <= 1e-8) return;
+    samples++;
+    if (s < vmin) vmin = s;
+    if (s > vmax) vmax = s;
+  };
+  for (let i = 0; i < count; i++) {
+    const o = i * FLOW_PARTICLE_STRIDE;
+    note(posAge[o + 4]!);
+    if (trailHist && trailSteps >= 2) {
+      const ho = flowTrailBaseIndex(i);
+      for (let j = 0; j < trailSteps; j++) {
+        note(trailHist[ho + j * FLOW_TRAIL_SLOT_STRIDE + 4]!);
+      }
+    }
+  }
+  if (samples < 2 || !Number.isFinite(vmin)) return null;
+  if (vmax <= vmin) {
+    const s = Math.max(vmax, 1e-8);
+    return [Math.max(0, s * 0.55), s * 1.05];
+  }
+  return [vmin, vmax];
+}
+
 /** CPU mirror: distance to nearest axis-aligned grid plane. */
 function ibfvGridLineDist(coord: number, spacing: number): number {
   const s = Math.max(spacing, 1e-4);
@@ -661,7 +736,7 @@ export const FLOW_PARTICLE_STRIDE = 5;
 export const FLOW_TRAIL_SLOT_STRIDE = 5;
 
 export const MAX_FLOW_TRAIL_STEPS = 32;
-export const DEFAULT_FLOW_TRAIL_STEPS = 12;
+export const DEFAULT_FLOW_TRAIL_STEPS = 32;
 
 export function flowTrailBaseIndex(particleIndex: number): number {
   return particleIndex * MAX_FLOW_TRAIL_STEPS * FLOW_TRAIL_SLOT_STRIDE;
@@ -787,6 +862,144 @@ export interface FlowParticleAdvectParams {
   frameIdx: number;
 }
 
+export const FLOW_PARTICLE_DENSITY_GRID = 8;
+
+export function flowParticleCellIndex(
+  x: number,
+  y: number,
+  z: number,
+  half: number,
+  res: number,
+): number {
+  const h = Math.max(half, 1e-6);
+  const fx = Math.min(res - 1, Math.max(0, Math.floor(((x / h) * 0.5 + 0.5) * res)));
+  const fy = Math.min(res - 1, Math.max(0, Math.floor(((y / h) * 0.5 + 0.5) * res)));
+  const fz = Math.min(res - 1, Math.max(0, Math.floor(((z / h) * 0.5 + 0.5) * res)));
+  return fx + fy * res + fz * res * res;
+}
+
+/** Coarse occupancy counts for particle redistribution. */
+export function buildFlowParticleDensityGrid(
+  posAge: Float32Array,
+  count: number,
+  half: number,
+  res = FLOW_PARTICLE_DENSITY_GRID,
+): Uint16Array {
+  const cells = new Uint16Array(res * res * res);
+  for (let i = 0; i < count; i++) {
+    const o = i * FLOW_PARTICLE_STRIDE;
+    const ci = flowParticleCellIndex(posAge[o]!, posAge[o + 1]!, posAge[o + 2]!, half, res);
+    if (cells[ci]! < 65535) cells[ci] = (cells[ci]! + 1) as number;
+  }
+  return cells;
+}
+
+function randomGridPointInCell(
+  cell: number,
+  res: number,
+  half: number,
+  seed: number,
+  layer: number,
+  frameIdx: number,
+  gridSpacing: number,
+  gridPoints: boolean,
+): [number, number, number] | null {
+  const fz = Math.floor(cell / (res * res));
+  const rem = cell % (res * res);
+  const fy = Math.floor(rem / res);
+  const fx = rem % res;
+  const cellSize = (2 * half) / res;
+  for (let t = 0; t < 20; t++) {
+    const px = -half + (fx + hash01(seed, t, frameIdx)) * cellSize;
+    const py = -half + (fy + hash01(seed + 3, t, frameIdx + 1)) * cellSize;
+    const pz = -half + (fz + hash01(seed + 7, t, frameIdx + 2)) * cellSize;
+    const g = ibfvBackgroundGrid(px, py, pz, gridSpacing, gridPoints);
+    if (g >= 0.12) return [px, py, pz];
+  }
+  return null;
+}
+
+/** Pick a spawn point in an under-populated cell (inverse local density). */
+export function pickLowDensitySpawn(
+  density: Uint16Array,
+  res: number,
+  half: number,
+  seed: number,
+  layer: number,
+  frameIdx: number,
+  gridSpacing: number,
+  gridPoints: boolean,
+): [number, number, number] | null {
+  let minCount = Infinity;
+  for (let c = 0; c < density.length; c++) {
+    if (density[c]! < minCount) minCount = density[c]!;
+  }
+  const target = minCount;
+  for (let attempt = 0; attempt < 48; attempt++) {
+    const cell = (hash01(seed, attempt, frameIdx + layer) * density.length) | 0;
+    if (density[cell]! > target + 1) continue;
+    const pt = randomGridPointInCell(cell, res, half, seed + attempt, layer, frameIdx, gridSpacing, gridPoints);
+    if (pt) return pt;
+  }
+  for (let c = 0; c < density.length; c++) {
+    if (density[c]! > target + 1) continue;
+    const pt = randomGridPointInCell(c, res, half, seed + c, layer, frameIdx, gridSpacing, gridPoints);
+    if (pt) return pt;
+  }
+  return null;
+}
+
+function applyParticleSpawn(
+  posAge: Float32Array,
+  i: number,
+  px: number,
+  py: number,
+  pz: number,
+  trailHist: Float32Array | null | undefined,
+  trailSteps: number,
+): void {
+  const o = i * FLOW_PARTICLE_STRIDE;
+  posAge[o] = px;
+  posAge[o + 1] = py;
+  posAge[o + 2] = pz;
+  posAge[o + 3] = 0;
+  posAge[o + 4] = 0;
+  resetFlowTrailHistSlot(trailHist, trailSteps, i, px, py, pz, 0, 0);
+}
+
+/** Move particles out of overcrowded cells into sparse regions. */
+export function redistributeOvercrowdedFlowParticles(
+  posAge: Float32Array,
+  layerIds: Uint32Array,
+  count: number,
+  half: number,
+  gridSpacing: number,
+  gridPoints: boolean,
+  frameIdx: number,
+  trailHist: Float32Array | null,
+  trailSteps: number,
+  res = FLOW_PARTICLE_DENSITY_GRID,
+): void {
+  const density = buildFlowParticleDensityGrid(posAge, count, half, res);
+  const cellCount = res * res * res;
+  const mean = count / Math.max(cellCount, 1);
+  const threshold = Math.max(4, Math.ceil(mean * 2.5));
+  for (let i = 0; i < count; i++) {
+    const o = i * FLOW_PARTICLE_STRIDE;
+    const ci = flowParticleCellIndex(posAge[o]!, posAge[o + 1]!, posAge[o + 2]!, half, res);
+    if (density[ci]! <= threshold) continue;
+    const layer = layerIds[i]!;
+    const picked = pickLowDensitySpawn(
+      density, res, half, i, layer, frameIdx, gridSpacing, gridPoints,
+    );
+    if (!picked) continue;
+    applyParticleSpawn(posAge, i, picked[0], picked[1], picked[2], trailHist, trailSteps);
+    density[ci] = Math.max(0, density[ci]! - 1) as number;
+    const ni = flowParticleCellIndex(picked[0], picked[1], picked[2], half, res);
+    if (density[ni]! < 65535) density[ni] = (density[ni]! + 1) as number;
+  }
+}
+
 function respawnParticle(
   posAge: Float32Array,
   i: number,
@@ -795,7 +1008,20 @@ function respawnParticle(
   gridSpacing: number,
   gridPoints: boolean,
   frameIdx: number,
+  trailHist?: Float32Array | null,
+  trailSteps?: number,
+  density?: Uint16Array | null,
+  densityRes = FLOW_PARTICLE_DENSITY_GRID,
 ): void {
+  if (density) {
+    const picked = pickLowDensitySpawn(
+      density, densityRes, half, i, layer, frameIdx, gridSpacing, gridPoints,
+    );
+    if (picked) {
+      applyParticleSpawn(posAge, i, picked[0], picked[1], picked[2], trailHist, trailSteps ?? 0);
+      return;
+    }
+  }
   const o = i * FLOW_PARTICLE_STRIDE;
   for (let t = 0; t < 24; t++) {
     const px = (hash01(i, t, frameIdx + layer) * 2 - 1) * half;
@@ -808,10 +1034,21 @@ function respawnParticle(
     posAge[o + 2] = pz;
     posAge[o + 3] = 0;
     posAge[o + 4] = 0;
+    resetFlowTrailHistSlot(trailHist, trailSteps ?? 0, i, px, py, pz, 0, 0);
     return;
   }
   posAge[o + 3] = 0;
   posAge[o + 4] = 0;
+  resetFlowTrailHistSlot(
+    trailHist,
+    trailSteps ?? 0,
+    i,
+    posAge[o]!,
+    posAge[o + 1]!,
+    posAge[o + 2]!,
+    0,
+    0,
+  );
 }
 
 /** Fill all trail slots for one particle (e.g. on respawn). */
@@ -859,6 +1096,23 @@ export function seedFlowTrailHist(
   }
 }
 
+/** Update slot 0 only (current head) without shifting history. */
+export function updateFlowTrailHead(
+  posAge: Float32Array,
+  trailHist: Float32Array,
+  count: number,
+): void {
+  for (let i = 0; i < count; i++) {
+    const po = i * FLOW_PARTICLE_STRIDE;
+    const ho = flowTrailBaseIndex(i);
+    trailHist[ho] = posAge[po]!;
+    trailHist[ho + 1] = posAge[po + 1]!;
+    trailHist[ho + 2] = posAge[po + 2]!;
+    trailHist[ho + 3] = posAge[po + 3]!;
+    trailHist[ho + 4] = posAge[po + 4]!;
+  }
+}
+
 /** Shift trail history and insert the current particle state at slot 0. */
 export function pushFlowTrailHist(
   posAge: Float32Array,
@@ -896,6 +1150,8 @@ export function advectFlowParticles(
   params: FlowParticleAdvectParams,
   trailHist: Float32Array | null = null,
   trailSteps = 0,
+  density: Uint16Array | null = null,
+  densityRes = FLOW_PARTICLE_DENSITY_GRID,
 ): void {
   const { dt, vMax, half, alpha, gridSpacing, gridPoints, ageMax, frameIdx } = params;
   const n = layerIds.length;
@@ -911,24 +1167,18 @@ export function advectFlowParticles(
     const [vx, vy, vz] = sampleVelGridAt(vel.fx, vel.fy, vel.fz, M, half, px, py, pz);
     const speed = Math.hypot(vx, vy, vz);
     const [cx, cy, cz] = ibfvClampVelocity(vx, vy, vz, vMax);
-    const outOfBounds =
-      Math.abs(px) > half || Math.abs(py) > half || Math.abs(pz) > half;
     const expired = age > ageMax;
     const stuck = speed <= 1e-5 && age > ageMax * 0.5;
-    if (outOfBounds || expired || stuck) {
-      respawnParticle(posAge, i, layer, half, gridSpacing, gridPoints, frameIdx);
+    if (expired || stuck) {
+      respawnParticle(posAge, i, layer, half, gridSpacing, gridPoints, frameIdx, trailHist, trailSteps, density, densityRes);
       continue;
     }
     px += cx * dt;
     py += cy * dt;
     pz += cz * dt;
     age += dt;
-    if (Math.abs(px) > half || Math.abs(py) > half || Math.abs(pz) > half) {
-      respawnParticle(posAge, i, layer, half, gridSpacing, gridPoints, frameIdx);
-      continue;
-    }
     if (alpha > 1e-6 && hash01(i, frameIdx, 919) < alpha) {
-      respawnParticle(posAge, i, layer, half, gridSpacing, gridPoints, frameIdx);
+      respawnParticle(posAge, i, layer, half, gridSpacing, gridPoints, frameIdx, trailHist, trailSteps, density, densityRes);
       continue;
     }
     posAge[o] = px;

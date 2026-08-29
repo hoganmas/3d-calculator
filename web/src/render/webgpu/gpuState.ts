@@ -214,7 +214,7 @@ export const gpu: GpuState = {
   flowDyeDummy: null,
 };
 
-export const PIPELINE_EPOCH = 60;
+export const PIPELINE_EPOCH = 69;
 export const labelVertScratch = new Float32Array(18 * 6);
 
 export function resetPipelinesOnDeviceLost(): void {

@@ -232,4 +232,6 @@ export function initScene() {
     if (els.themePref && els.themePref.value !== pref) els.themePref.value = pref;
   });
   onThemeChange(() => applyThemeToScene());
+  // initTheme() runs before listeners are registered; sync scene colors now.
+  applyThemeToScene();
 }

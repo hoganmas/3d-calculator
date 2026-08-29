@@ -8,24 +8,34 @@ import {
   FLOW_PARTICLE_STRIDE,
   FLOW_TRAIL_SLOT_STRIDE,
   flowTrailBaseIndex,
+  buildFlowParticleDensityGrid,
+  flowParticleSpeedMinMax,
+  flowSpeedPercentileMinMax,
+  FLOW_PARTICLE_DENSITY_GRID,
   MAX_FLOW_TRAIL_STEPS,
   pushFlowTrailHist,
+  redistributeOvercrowdedFlowParticles,
+  sampleVelGridAt,
   seedFlowParticles,
   seedFlowTrailHist,
   sortFlowParticlesByDepth,
+  updateFlowTrailHead,
   type FlowParticleLayerVel,
 } from "../../math/fitVector.js";
-import { effectiveFlowDt, effectiveFlowVRef } from "./flowIbfv.js";
+import { effectiveFlowDt } from "./flowIbfv.js";
 import { getFlowParticlesShader } from "./shaders/compose.js";
 
 export const DEFAULT_FLOW_PARTICLE_COUNT = 1000;
 export const MAX_FLOW_PARTICLE_COUNT = 32000;
+/** Shift trail ring buffer every N frames to stretch visible history in time. */
+const TRAIL_PUSH_INTERVAL = 3;
 
 let posAge: Float32Array | null = null;
 let layerIds: Uint32Array | null = null;
 let trailHist: Float32Array | null = null;
 let sortScratch: Uint32Array | null = null;
 let flowParticleFrameIdx = 0;
+let trailPushCounter = 0;
 let flowParticlesBuiltEpoch = -1;
 
 function trailSteps(): number {
@@ -58,6 +68,7 @@ export function destroyFlowParticleBuffers(): void {
   trailHist = null;
   sortScratch = null;
   flowParticleFrameIdx = 0;
+  trailPushCounter = 0;
 }
 
 export function ensureFlowParticleBuffers(layerCount: number, half: number): void {
@@ -120,6 +131,7 @@ export function ensureFlowParticleBuffers(layerCount: number, half: number): voi
   gpu.flowLayerCount = layerCount;
   gpu.flowHalf = half;
   flowParticleFrameIdx = 0;
+  trailPushCounter = 0;
 }
 
 export function reseedFlowParticles(): void {
@@ -144,6 +156,7 @@ export function reseedFlowParticles(): void {
   device.queue.writeBuffer(gpu.flowParticleLayerBuf, 0, layerIds);
   if (gpu.flowTrailBuf) device.queue.writeBuffer(gpu.flowTrailBuf, 0, trailHist);
   flowParticleFrameIdx = 0;
+  trailPushCounter = 0;
 }
 
 function extractFlowLayers(): FlowParticleLayerVel[] {
@@ -206,6 +219,7 @@ export function tickFlowParticles(
   if (!layers.length) return;
 
   const steps = trailSteps();
+  const density = buildFlowParticleDensityGrid(posAge, gpu.flowParticleCount, gpu.flowHalf);
   advectFlowParticles(
     posAge,
     layerIds,
@@ -223,9 +237,28 @@ export function tickFlowParticles(
     },
     trailHist,
     steps,
+    density,
+    FLOW_PARTICLE_DENSITY_GRID,
   );
+  redistributeOvercrowdedFlowParticles(
+    posAge,
+    layerIds,
+    gpu.flowParticleCount,
+    gpu.flowHalf,
+    state.flowNoiseScale,
+    state.flowGridPoints,
+    flowParticleFrameIdx,
+    trailHist,
+    steps,
+  );
+  refreshTrailSpeeds(layers, gpu.sceneM, gpu.flowHalf, gpu.flowParticleCount, steps);
   if (trailHist && gpu.flowTrailBuf) {
-    pushFlowTrailHist(posAge, trailHist, steps, gpu.flowParticleCount);
+    updateFlowTrailHead(posAge, trailHist, gpu.flowParticleCount);
+    trailPushCounter++;
+    if (trailPushCounter >= TRAIL_PUSH_INTERVAL) {
+      pushFlowTrailHist(posAge, trailHist, steps, gpu.flowParticleCount);
+      trailPushCounter = 0;
+    }
   }
   sortFlowParticlesByDepth(posAge, sortScratch, ro, viewDir);
   reorderBySortOrder();
@@ -286,6 +319,79 @@ export async function ensureFlowParticlesPipeline(): Promise<boolean> {
   return true;
 }
 
+function flowSpeedRange(layers: FlowParticleLayerVel[]): [number, number] {
+  let vmin = Infinity;
+  let vmax = 0;
+  for (const { fx, fy, fz } of layers) {
+    const [lo, hi] = flowSpeedPercentileMinMax(fx, fy, fz);
+    if (lo < vmin) vmin = lo;
+    if (hi > vmax) vmax = hi;
+  }
+  if (!Number.isFinite(vmin) || vmax <= vmin) return [0, 1];
+  return [vmin, vmax];
+}
+
+function resolveFlowSpeedRange(layers: FlowParticleLayerVel[]): [number, number] {
+  const live = posAge && gpu.flowParticleCount > 0
+    ? flowParticleSpeedMinMax(
+      posAge,
+      trailHist,
+      gpu.flowParticleCount,
+      trailSteps(),
+    )
+    : null;
+  if (live) {
+    let lo = live[0];
+    let hi = live[1];
+    const minSpan = Math.max(hi * 0.1, 1e-6);
+    if (hi - lo < minSpan) lo = Math.max(0, hi - minSpan);
+    return [lo, hi];
+  }
+  return layers.length ? flowSpeedRange(layers) : [0, 1];
+}
+
+function refreshTrailSpeeds(
+  layers: FlowParticleLayerVel[],
+  M: number,
+  half: number,
+  count: number,
+  trailSteps: number,
+): void {
+  if (!posAge || !layerIds) return;
+  for (let i = 0; i < count; i++) {
+    const layer = layerIds[i]!;
+    const vel = layers[layer];
+    if (!vel) continue;
+    const o = i * FLOW_PARTICLE_STRIDE;
+    const [vx, vy, vz] = sampleVelGridAt(
+      vel.fx, vel.fy, vel.fz, M, half,
+      posAge[o]!, posAge[o + 1]!, posAge[o + 2]!,
+    );
+    posAge[o + 4] = Math.hypot(vx, vy, vz);
+    if (!trailHist || trailSteps < 2) continue;
+    const ho = flowTrailBaseIndex(i);
+    for (let j = 0; j < trailSteps; j++) {
+      const to = ho + j * FLOW_TRAIL_SLOT_STRIDE;
+      const [tvx, tvy, tvz] = sampleVelGridAt(
+        vel.fx, vel.fy, vel.fz, M, half,
+        trailHist[to]!, trailHist[to + 1]!, trailHist[to + 2]!,
+      );
+      trailHist[to + 4] = Math.hypot(tvx, tvy, tvz);
+    }
+  }
+}
+
+function flowLayerColorPair(): { col1: [number, number, number]; col2: [number, number, number] } {
+  const li = gpu.flowLayerStart;
+  const stops = li >= 0 ? gpu.densGradStops[li] : null;
+  if (stops?.length) {
+    const c1 = stops[0]!;
+    const c2 = stops[stops.length - 1]!;
+    return { col1: c1, col2: c2 };
+  }
+  return { col1: [1, 0.4, 0.1], col2: [1, 0.92, 0] };
+}
+
 function packFlowParticleParams(
   viewProj: Float32Array,
   ro: [number, number, number],
@@ -293,11 +399,14 @@ function packFlowParticleParams(
   dirMatrix: Float64Array | Float32Array | number[],
   fbW: number,
   fbH: number,
+  cameraFovDeg: number,
+  speedRange: [number, number],
 ): Float32Array {
   const steps = trailSteps();
   const segCount = Math.max(1, steps - 1);
-  const f = new Float32Array(48);
+  const f = new Float32Array(64);
   const u = new Uint32Array(f.buffer);
+  const { col1, col2 } = flowLayerColorPair();
   f.set(viewProj, 0);
   f[16] = ro[0]; f[17] = ro[1]; f[18] = ro[2]; f[19] = half;
   f[20] = dirMatrix[0]; f[21] = dirMatrix[1]; f[22] = dirMatrix[2];
@@ -313,7 +422,17 @@ function packFlowParticleParams(
   u[40] = segCount >>> 0;
   u[41] = 0;
   f[42] = state.flowTrailWidth;
-  f[43] = effectiveFlowVRef(half);
+  f[43] = speedRange[0];
+  f[44] = speedRange[1];
+  const dt = effectiveFlowDt();
+  const vMax = state.flowVMax > 1e-8 ? state.flowVMax : state.flowNoiseScale / dt;
+  f[45] = Math.max(half * 0.2, dt * vMax * 2.5 * TRAIL_PUSH_INTERVAL);
+  const fovRad = (cameraFovDeg * Math.PI) / 180;
+  f[46] = (2 * Math.tan(fovRad / 2)) / Math.max(fbH, 1);
+  u[47] = gpu.sceneM >>> 0;
+  f[48] = gpu.flowVelBase;
+  f[49] = col1[0]; f[50] = col1[1]; f[51] = col1[2]; f[52] = 0;
+  f[53] = col2[0]; f[54] = col2[1]; f[55] = col2[2];
   return f;
 }
 
@@ -327,6 +446,8 @@ function recordRibbonDraw(
   half: number,
   fbW: number,
   fbH: number,
+  cameraFovDeg: number,
+  speedRange: [number, number],
   vertexCount: number,
   instanceCount: number,
 ): void {
@@ -334,12 +455,13 @@ function recordRibbonDraw(
   device.queue.writeBuffer(
     gpu.flowParticlesParamBuf!,
     0,
-    packFlowParticleParams(viewProj, ro, half, dirMatrix, fbW, fbH),
+    packFlowParticleParams(viewProj, ro, half, dirMatrix, fbW, fbH, cameraFovDeg, speedRange),
   );
   const bg = device.createBindGroup({
     layout: gpu.flowParticlesPipeline!.getBindGroupLayout(0),
     entries: [
       { binding: 0, resource: { buffer: gpu.flowParticlesParamBuf! } },
+      { binding: 1, resource: { buffer: gpu.volumeBuf! } },
       { binding: 2, resource: { buffer: gpu.flowParticleLayerBuf! } },
       { binding: 3, resource: { buffer: gpu.colorBuf! } },
       { binding: 4, resource: occlIsoView },
@@ -369,7 +491,7 @@ export function drawFlowParticlesPass(
 ): void {
   if (state.flowVizMode !== "particles") return;
   if (!gpu.flowParticlesPipeline || !gpu.flowParticlesParamBuf) return;
-  if (!gpu.flowParticleBuf || !gpu.flowParticleLayerBuf || !gpu.flowTrailBuf || !gpu.colorBuf) return;
+  if (!gpu.flowParticleBuf || !gpu.flowParticleLayerBuf || !gpu.flowTrailBuf || !gpu.colorBuf || !gpu.volumeBuf) return;
   if (gpu.flowParticleCount <= 0) return;
 
   const { device } = gpu;
@@ -390,6 +512,8 @@ export function drawFlowParticlesPass(
 
   const steps = trailSteps();
   const segCount = Math.max(1, steps - 1);
+  const layers = extractFlowLayers();
+  const speedRange = resolveFlowSpeedRange(layers);
   recordRibbonDraw(
     device,
     sceneView,
@@ -400,6 +524,8 @@ export function drawFlowParticlesPass(
     half,
     fbW,
     fbH,
+    camera.fov,
+    speedRange,
     segCount * 6,
     gpu.flowParticleCount,
   );

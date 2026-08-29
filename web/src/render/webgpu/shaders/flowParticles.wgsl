@@ -16,7 +16,16 @@ struct FlowParticleParams {
   trailSegCount: u32,
   _pad1: u32,
   trailWidth: f32,
-  flowVRef: f32,
+  flowVMin: f32,
+  flowVMax: f32,
+  maxSegLen: f32,
+  ribbonPxToWorld: f32,
+  _padGrid: u32,
+  _padVelBase: f32,
+  flowCol1: vec3f,
+  _padC1: f32,
+  flowCol2: vec3f,
+  _padC2: f32,
 }
 
 @group(0) @binding(0) var<uniform> u: FlowParticleParams;
@@ -31,18 +40,69 @@ const TRAIL_STRIDE: u32 = 5u;
 
 fn sampleGradStopsLayer(layer: u32, t: f32) -> vec3f {
   let base = layer * MAX_GRAD_STOPS;
-  let n = max(min(u32(layerGrads[base].w), MAX_GRAD_STOPS), 1u);
-  if (n <= 1u) { return layerGrads[base].xyz; }
+  var stops: array<vec4f, MAX_GRAD_STOPS>;
+  for (var i: u32 = 0u; i < MAX_GRAD_STOPS; i++) {
+    stops[i] = layerGrads[base + i];
+  }
+  let n = max(min(u32(stops[0].w), MAX_GRAD_STOPS), 1u);
+  if (n <= 1u) { return stops[0].xyz; }
   let x = clamp(t, 0.0, 1.0) * f32(n - 1u);
   let i = min(u32(floor(x)), n - 2u);
   let f = fract(x);
-  return mix(layerGrads[base + i].xyz, layerGrads[base + i + 1u].xyz, f);
+  return mix(stops[i].xyz, stops[i + 1u].xyz, f);
 }
 
-fn speedColor(layer: u32, speed: f32) -> vec3f {
-  let speedNorm = clamp(speed / max(u.flowVRef, 1e-6), 0.0, 1.0);
-  let col1 = sampleGradStopsLayer(layer, 0.0);
-  let col2 = sampleGradStopsLayer(layer, 1.0);
+fn chebIndex(xi: f32) -> f32 {
+  let x = clamp(xi, -1.0, 1.0);
+  return f32(u.gridM) / 3.141592653589793 * acos(x) - 0.5;
+}
+
+fn volAt(base: u32, ix: i32, iy: i32, iz: i32) -> f32 {
+  let M = i32(u.gridM);
+  let x = clamp(ix, 0, M - 1);
+  let y = clamp(iy, 0, M - 1);
+  let z = clamp(iz, 0, M - 1);
+  return volume[base + u32(x) + u32(y) * u.gridM + u32(z) * u.gridM * u.gridM];
+}
+
+fn sampleVelLayer(flowIdx: u32, p: vec3f) -> vec3f {
+  let half = u.half;
+  let xi = clamp(p / half, vec3f(-1.0), vec3f(1.0));
+  let M2 = u.gridM * u.gridM;
+  let volN = M2 * u.gridM;
+  let velBase = u32(u.flowVelBase) + flowIdx * volN * 3u;
+  var v = vec3f(0.0);
+  for (var c: u32 = 0u; c < 3u; c++) {
+    let compBase = velBase + c * volN;
+    let fx = chebIndex(xi.x);
+    let fy = chebIndex(xi.y);
+    let fz = chebIndex(xi.z);
+    let x0 = i32(floor(fx));
+    let y0 = i32(floor(fy));
+    let z0 = i32(floor(fz));
+    let tx = clamp(fx - f32(x0), 0.0, 1.0);
+    let ty = clamp(fy - f32(y0), 0.0, 1.0);
+    let tz = clamp(fz - f32(z0), 0.0, 1.0);
+    let c000 = volAt(compBase, x0, y0, z0);
+    let c100 = volAt(compBase, x0 + 1, y0, z0);
+    let c010 = volAt(compBase, x0, y0 + 1, z0);
+    let c110 = volAt(compBase, x0 + 1, y0 + 1, z0);
+    let c001 = volAt(compBase, x0, y0, z0 + 1);
+    let c101 = volAt(compBase, x0 + 1, y0, z0 + 1);
+    let c011 = volAt(compBase, x0, y0 + 1, z0 + 1);
+    let c111 = volAt(compBase, x0 + 1, y0 + 1, z0 + 1);
+    v[c] = mix(mix(mix(c000, c100, tx), mix(c010, c110, tx), ty),
+               mix(mix(c001, c101, tx), mix(c011, c111, tx), ty), tz);
+  }
+  return v;
+}
+
+fn speedColor(speed: f32, flowIdx: u32) -> vec3f {
+  let densLayer = u32(max(u.flowLayerStart, 0.0)) + flowIdx;
+  let col1 = sampleGradStopsLayer(densLayer, 0.0);
+  let col2 = sampleGradStopsLayer(densLayer, 1.0);
+  let vRange = max(u.flowVMax - u.flowVMin, u.flowVMax * 0.08);
+  let speedNorm = clamp((speed - u.flowVMin) / vRange, 0.0, 1.0);
   return mix(col1, col2, speedNorm);
 }
 
@@ -57,6 +117,15 @@ fn trailPosAge(pIdx: u32, slot: u32) -> vec4f {
 
 fn trailSpeed(pIdx: u32, slot: u32) -> f32 {
   return trailHist[trailSlotBase(pIdx, slot) + 4u];
+}
+
+fn boxFade(world: vec3f) -> f32 {
+  let half = u.half;
+  let ox = max(abs(world.x) - half, 0.0);
+  let oy = max(abs(world.y) - half, 0.0);
+  let oz = max(abs(world.z) - half, 0.0);
+  let outside = length(vec3f(ox, oy, oz));
+  return 1.0 - smoothstep(0.0, half * 0.4, outside);
 }
 
 // slot 0 = newest (leading edge), slot N-1 = oldest (trailing edge); u=0 newest, u=1 oldest.
@@ -76,32 +145,31 @@ fn ribbonAlphaEnvelope(u: f32) -> f32 {
   return width * tailFade;
 }
 
-fn clipToPixel(c: vec4f) -> vec2f {
-  let iw = 1.0 / max(abs(c.w), 1e-6);
-  return vec2f(
-    (c.x * iw * 0.5 + 0.5) * u.fbW,
-    (0.5 - c.y * iw * 0.5) * u.fbH,
-  );
-}
-
-fn pixelToClip(px: vec2f, clipW: f32) -> vec2f {
-  let ndc = vec2f(px.x / max(u.fbW, 1.0) * 2.0 - 1.0, 1.0 - px.y / max(u.fbH, 1.0) * 2.0);
-  return ndc * clipW;
-}
-
-fn screenPerp(p0: vec3f, p1: vec3f) -> vec2f {
-  let px0 = clipToPixel(u.viewProj * vec4f(p0, 1.0));
-  let px1 = clipToPixel(u.viewProj * vec4f(p1, 1.0));
-  let t = px1 - px0;
+// Trail centerline tangent: from newest toward older samples (trail behind the head).
+fn trailTangent(pNew: vec3f, pOld: vec3f) -> vec3f {
+  let t = pOld - pNew;
   let len = length(t);
-  if (len < 1e-4) { return vec2f(0.0, 1.0); }
-  let dir = t / len;
-  return vec2f(-dir.y, dir.x);
+  if (len < 1e-6) { return vec3f(0.0); }
+  return t / len;
 }
 
-fn distPxScale(world: vec3f) -> f32 {
+// Camera-facing ribbon side: width axis perpendicular to both view and flow tangent.
+fn ribbonSide(tangent: vec3f, world: vec3f) -> vec3f {
+  let view = normalize(u.ro - world);
+  var side = cross(view, tangent);
+  let len = length(side);
+  if (len < 1e-5) {
+    var axis = vec3f(0.0, 0.0, 1.0);
+    if (abs(dot(tangent, axis)) > 0.92) { axis = vec3f(0.0, 1.0, 0.0); }
+    side = cross(tangent, axis);
+  }
+  return normalize(side);
+}
+
+fn ribbonHalfWidthWorld(world: vec3f, widthMix: f32) -> f32 {
   let dist = max(length(world - u.ro), u.half * 0.06);
-  return (u.trailWidth * u.half) / dist;
+  let halfWPx = max(0.5 * u.trailWidth * u.half / dist * widthMix, 0.25);
+  return halfWPx * dist * u.ribbonPxToWorld;
 }
 
 struct VSOut {
@@ -139,7 +207,8 @@ fn vsMain(
 
   let pNew = trailPosAge(pIdx, slotNew);
   let pOld = trailPosAge(pIdx, slotOld);
-  if (length(pNew.xyz - pOld.xyz) < 1e-5) { return o; }
+  let segLen = length(pNew.xyz - pOld.xyz);
+  if (segLen < 1e-5 || segLen > u.maxSegLen) { return o; }
 
   let corner = SEG_QUAD[vi % 6u];
   let tAlong = corner.x;
@@ -152,23 +221,25 @@ fn vsMain(
   let wNew = ribbonWidthEnvelope(uNew);
   let wOld = ribbonWidthEnvelope(uOld);
   let widthMix = mix(wNew, wOld, tAlong);
-  let halfWPx = max(0.5 * distPxScale(mix(pNew.xyz, pOld.xyz, tAlong)) * widthMix, 0.25);
 
   let world = mix(pNew.xyz, pOld.xyz, tAlong);
-  let clipCenter = u.viewProj * vec4f(world, 1.0);
+  let tangent = trailTangent(pNew.xyz, pOld.xyz);
+  if (length(tangent) < 1e-6) { return o; }
 
-  let perp = screenPerp(pNew.xyz, pOld.xyz);
-  let centerPx = clipToPixel(clipCenter);
-  let offsetPx = centerPx + perp * (tSide * halfWPx);
-  let clipOffset = pixelToClip(offsetPx, clipCenter.w);
+  let side = ribbonSide(tangent, world);
+  let halfW = ribbonHalfWidthWorld(world, widthMix);
+  let worldOffset = world + side * (tSide * halfW);
+  let clipPos = u.viewProj * vec4f(worldOffset, 1.0);
 
-  let layer = u32(u.flowLayerStart) + particleLayers[pIdx];
-  let spd = mix(trailSpeed(pIdx, slotNew), trailSpeed(pIdx, slotOld), tAlong);
-  let rgb = speedColor(layer, spd);
-  let alpha = u.flowOpacity * max(ribbonAlphaEnvelope(ribbonPos), widthMix * 0.15) * clamp(length(rgb), 0.0, 1.0);
+  let flowIdx = particleLayers[pIdx];
+  let spdNew = trailSpeed(pIdx, slotNew);
+  let spdOld = trailSpeed(pIdx, slotOld);
+  let spd = mix(spdNew, spdOld, tAlong);
+  let rgb = speedColor(spd, flowIdx);
+  let alpha = u.flowOpacity * max(ribbonAlphaEnvelope(ribbonPos), widthMix * 0.15) * boxFade(world);
 
-  o.clip = vec4f(clipOffset, clipCenter.z, clipCenter.w);
-  o.world = world;
+  o.clip = clipPos;
+  o.world = worldOffset;
   o.color = vec4f(rgb * alpha, alpha);
   o.uv = vec2f(tSide, ribbonPos);
   return o;

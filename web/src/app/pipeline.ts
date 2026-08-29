@@ -568,10 +568,10 @@ export function wirePipelineDom() {
     state.flowDt = Math.max(0.001, Number(els.flowDt!.value) || 0);
   });
   els.flowSpeed?.addEventListener("input", () => {
-    state.flowSpeed = Math.max(0.05, Math.min(10, Number(els.flowSpeed!.value) || 1));
+    state.flowSpeed = Math.max(0.05, Math.min(10, Number(els.flowSpeed!.value) || 0.1));
   });
   els.flowTrailSteps?.addEventListener("change", () => {
-    state.flowTrailSteps = Math.max(2, Math.min(32, Number(els.flowTrailSteps!.value) || 12));
+    state.flowTrailSteps = Math.max(2, Math.min(32, Number(els.flowTrailSteps!.value) || 32));
     reseedFlowParticles();
   });
   els.flowTrailWidth?.addEventListener("input", () => {
@@ -581,7 +581,7 @@ export function wirePipelineDom() {
     state.flowVMax = Math.max(0, Number(els.flowVMax!.value) || 0);
   });
   els.flowOpacity?.addEventListener("input", () => {
-    state.flowOpacity = Math.max(0.01, Math.min(2, Number(els.flowOpacity!.value) || 0));
+    state.flowOpacity = Math.max(0.01, Math.min(2, Number(els.flowOpacity!.value) || 0.5));
   });
   els.flowAgeMax?.addEventListener("input", () => {
     state.flowAgeMax = Math.max(1, Math.min(120, Number(els.flowAgeMax!.value) || 30));
