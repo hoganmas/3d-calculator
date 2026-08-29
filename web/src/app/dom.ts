@@ -51,6 +51,7 @@ export interface DomElements {
   shareScene: HTMLButtonElement | null;
   sceneFileInput: HTMLInputElement | null;
   autosaveStatus: HTMLElement | null;
+  autosaveStatusBar: HTMLElement | null;
 }
 
 export const els: DomElements = {
@@ -90,6 +91,7 @@ export const els: DomElements = {
   shareScene: document.getElementById("shareScene") as HTMLButtonElement | null,
   sceneFileInput: document.getElementById("sceneFileInput") as HTMLInputElement | null,
   autosaveStatus: document.getElementById("autosaveStatus"),
+  autosaveStatusBar: document.getElementById("autosaveStatusBar"),
 };
 
 export function viewportSize() {

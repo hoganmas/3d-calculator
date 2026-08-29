@@ -8,10 +8,11 @@ import {
   recompileAllParams,
   evalParamEquations,
 } from "../model/params.js";
-import { SymbolRegistry, isDeclSymbolKind, type SymbolEntry } from "../model/symbols.js";
+import { SymbolRegistry, type SymbolEntry } from "../model/symbols.js";
 import {
   listExpressions,
   setExpressions,
+  clearExpressions,
   updateExprSilent,
   hexToRgb01,
   resolveExprRole,
@@ -103,27 +104,30 @@ export function ensureParamExprRows(names: string[]) {
   return true;
 }
 
+function listNonemptyExprs() {
+  return listExpressions().filter((e) => String(e.latex || "").trim());
+}
+
 /** Names referenced by field free-symbols or parameter RHS deps. */
 export function collectParamReferences() {
-  const items = listExpressions().filter((e) => e.enabled && String(e.latex || "").trim());
-  const { registry } = buildSymbolRegistry(items);
+  const allItems = listNonemptyExprs();
+  const enabledItems = allItems.filter((e) => e.enabled);
+  const { registry } = buildSymbolRegistry(allItems);
   const refs = new Set<string>();
-  for (const item of items) {
-    if (!item.enabled || !String(item.latex || "").trim()) continue;
+  for (const item of enabledItems) {
     try {
       const classified = classifyExpr(item.latex);
-      if (isDeclSymbolKind(classified.kind)) {
-        if (classified.kind === "parameter") {
-          const compiled = compileParamLatex(item.latex, classified.paramName!);
-          for (const p of compiled.freeParams) refs.add(p);
-        }
+      if (classified.kind === "parameter") {
+        const compiled = compileParamLatex(item.latex, classified.paramName!);
+        for (const p of compiled.freeParams) refs.add(p);
         continue;
       }
-      const role = resolveExprRole(item.role, classified.kind, item.latex);
+      const fieldLatex = classified.compileLatex;
+      const role = resolveExprRole(item.role, classified.kind, fieldLatex, registry);
       const compiled =
         role === "flow"
-          ? compileVectorExpr(item.latex, registry)
-          : compileExpr(item.latex, registry);
+          ? compileVectorExpr(fieldLatex, registry)
+          : compileExpr(fieldLatex, registry);
       for (const p of compiled.freeParams) refs.add(p);
     } catch {
       /* ignore */
@@ -174,9 +178,11 @@ interface CompileOpts {
  */
 export function compileAllExprs(opts: CompileOpts = {}): CompileAllResult {
   const rebuildUi = opts.rebuildUi !== false;
-  const items = listExpressions().filter((e) => e.enabled && String(e.latex || "").trim());
+  const allItems = listNonemptyExprs();
+  const enabledItems = allItems.filter((e) => e.enabled);
 
-  const { registry, warnings: registryWarnings } = buildSymbolRegistry(items);
+  // Declarations stay in scope when hidden — visibility only skips rendering layers.
+  const { registry, warnings: registryWarnings } = buildSymbolRegistry(allItems);
   const paramRows: { item: ExprItem; name: string }[] = [];
   const layers: CompileLayerResult[] = [];
   const freeSet = new Set<string>();
@@ -184,7 +190,7 @@ export function compileAllExprs(opts: CompileOpts = {}): CompileAllResult {
   const warnings: [string, string][] = [...registryWarnings];
   replaceExprWarnings([]);
 
-  for (const item of items) {
+  for (const item of allItems) {
     let classified;
     try {
       classified = classifyExpr(item.latex);
@@ -200,15 +206,16 @@ export function compileAllExprs(opts: CompileOpts = {}): CompileAllResult {
       paramRows.push({ item, name });
       continue;
     }
-    if (classified.kind === "alias" || classified.kind === "funcdef") {
-      continue;
-    }
+    if (!item.enabled) continue;
 
-    const role = resolveExprRole(item.role, classified.kind, item.latex);
+    const fieldLatex = classified.compileLatex;
+    const role = resolveExprRole(item.role, classified.kind, fieldLatex, registry);
 
     if (role === "flow") {
       try {
-        const vectorCompiled = compileVectorExpr(item.latex, registry);
+        const rowWarnings: string[] = [];
+        const vectorCompiled = compileVectorExpr(fieldLatex, registry, rowWarnings);
+        for (const w of rowWarnings) warnings.push([item.id, w]);
         for (const p of vectorCompiled.freeParams) freeSet.add(p);
         if (!vectorCompiled.usesSpace) continue;
         layers.push({
@@ -227,7 +234,9 @@ export function compileAllExprs(opts: CompileOpts = {}): CompileAllResult {
     }
 
     try {
-      const compiled = compileExpr(item.latex, registry);
+      const rowWarnings: string[] = [];
+      const compiled = compileExpr(fieldLatex, registry, rowWarnings);
+      for (const w of rowWarnings) warnings.push([item.id, w]);
       for (const p of compiled.freeParams) freeSet.add(p);
       if (!compiled.usesSpace || compiled.shade === "none") continue;
       layers.push({
@@ -341,6 +350,19 @@ export function applyPreset(key: string) {
     compileAllExprs({ rebuildUi: false });
   } catch {
     /* uploadFit / syncExprCompileState will surface errors */
+  }
+  state.exprListApi?.render();
+}
+
+/** Clear all expression rows and recompile (empty scene). */
+export function clearAllExprs() {
+  clearExpressions();
+  state.pendingParamSeed = {};
+  replaceExprWarnings([]);
+  try {
+    compileAllExprs({ rebuildUi: false });
+  } catch {
+    /* syncExprCompileState will surface errors */
   }
   state.exprListApi?.render();
 }

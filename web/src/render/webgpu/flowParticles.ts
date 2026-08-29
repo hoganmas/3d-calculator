@@ -14,7 +14,7 @@ import {
   redistributeOvercrowdedFlowParticles,
   flowSpeedPercentileMinMax,
   flowTrailBaseIndex,
-  resolveFlowParticleColorRangeFast,
+  resolveFlowParticleColorRange,
   sampleVelGridAt,
   seedFlowParticles,
   seedFlowTrailHist,
@@ -513,14 +513,14 @@ function flowFieldSpeedRange(): [number, number] | null {
 
 function resolveFlowSpeedRange(): [number, number] {
   const t0 = performance.now();
-  const range = posAge
-    ? resolveFlowParticleColorRangeFast(
-      posAge,
-      gpu.flowParticleCount,
-      effectiveVMax(),
-      flowFieldSpeedRange(),
-    )
-    : [0, effectiveVMax()] as [number, number];
+  // Shader tints by trail slot speeds — normalize using trail min/max (not head-only).
+  const range = resolveFlowParticleColorRange(
+    trailHist,
+    gpu.flowParticleCount,
+    trailSteps(),
+    effectiveVMax(),
+    flowFieldSpeedRange(),
+  );
   profile.speedRangeMs = smoothMs(profile.speedRangeMs, performance.now() - t0);
   profile.speedMin = range[0];
   profile.speedMax = range[1];

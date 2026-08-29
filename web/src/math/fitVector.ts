@@ -7,7 +7,7 @@ import { fitChebyshev3D } from "./fit.js";
 import { idctCheb3D, idctChebCurl3D, idctChebGrad3D } from "./idct.js";
 import {
   extractTriple,
-  normalizeCalcLatex,
+  mathJsonHasError,
   scalarFromUnaryOpJson,
   tripleFromUnaryOpJson,
 } from "./calcOps.js";
@@ -17,7 +17,7 @@ import type {
   VectorFieldKind,
   VectorFitResult,
 } from "../types/models.js";
-import { expandDefinitions } from "./fit.js";
+import { expandVectorOperatorArgs, normalizeForCe } from "./fit.js";
 import type { SymbolRegistry } from "../model/symbols.js";
 
 const ce = new ComputeEngine();
@@ -86,6 +86,10 @@ function compileLatex(latex: string): CeCompileResult {
   } catch {
     return { success: false, unsupported: ["parse"], run: null, freeSymbols: [] };
   }
+  const j = box?.json ?? (typeof box?.toJSON === "function" ? box.toJSON() : null);
+  if (mathJsonHasError(j)) {
+    return { success: false, unsupported: ["parse"], run: null, freeSymbols: [] };
+  }
   return compile(box) as CeCompileResult;
 }
 
@@ -149,7 +153,7 @@ function bindCurlFromVector(
 
 /** Normalize vector-calculus LaTeX for CE parsing. */
 export function normalizeVectorLatex(latex: string): string {
-  return normalizeCalcLatex(latex);
+  return normalizeForCe(latex);
 }
 
 export { extractTriple } from "./calcOps.js";
@@ -241,10 +245,33 @@ function looksLikeCurl(src: string, json: unknown): string[] | null {
   return null;
 }
 
+/** Syntax-only vector-field check (before alias/funcdef expansion). */
+function looksLikeVectorFieldSyntax(raw: string): boolean {
+  const src = normalizeVectorLatex(String(raw ?? "").trim());
+  if (/\\operatorname\s*\{\s*curl\s*\}|\\curl|\\nabla\s*\\times/i.test(src)) return true;
+  if (/\\nabla\s*\^|\^2|\\laplacian|\\Delta|\\div|\\nabla\s*\\cdot/i.test(src)) return false;
+  if (/\\operatorname\s*\{\s*grad\s*\}|\\grad|\\nabla/i.test(src)) return true;
+  const m = src.match(/^\(([\s\S]+)\)$/);
+  if (m) {
+    let depth = 0;
+    let parts = 0;
+    for (let i = 0; i < m[1]!.length; i++) {
+      const c = m[1]![i];
+      if (c === "(") depth++;
+      else if (c === ")") depth--;
+      else if (c === "," && depth === 0) parts++;
+    }
+    if (parts === 2) return true;
+  }
+  return false;
+}
+
 /** Quick check for auto role inference. */
-export function isVectorFieldLatex(raw: string): boolean {
+export function isVectorFieldLatex(raw: string, registry?: SymbolRegistry): boolean {
+  if (looksLikeVectorFieldSyntax(raw)) return true;
   try {
-    classifyVectorExpr(raw);
+    const expanded = registry ? expandVectorOperatorArgs(raw, registry) : raw;
+    classifyVectorExpr(expanded);
     return true;
   } catch {
     return false;
@@ -295,8 +322,12 @@ export function classifyVectorExpr(raw: string): ClassifiedVectorExpr {
   );
 }
 
-export function compileVectorExpr(raw: string, registry?: SymbolRegistry): CompiledVectorExpr {
-  const expandedRaw = registry ? expandDefinitions(raw, registry) : raw;
+export function compileVectorExpr(
+  raw: string,
+  registry?: SymbolRegistry,
+  expandWarnings?: string[],
+): CompiledVectorExpr {
+  const expandedRaw = registry ? expandVectorOperatorArgs(raw, registry, expandWarnings) : raw;
   const classified = classifyVectorExpr(expandedRaw);
 
   if (classified.kind === "gradient") {

@@ -44,6 +44,11 @@ export class SymbolRegistry {
     return this.funcdefs.get(name);
   }
 
+  /** Registered user function names (for call-site expansion). */
+  listFuncdefNames(): string[] {
+    return [...this.funcdefs.keys()];
+  }
+
   getParam(name: string) {
     return this.params.get(name);
   }

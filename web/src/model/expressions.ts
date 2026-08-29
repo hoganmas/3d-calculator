@@ -4,8 +4,8 @@
  */
 
 import type { ExprItem, ExprRole, LayerRole, ExprKind } from "../types/models.js";
-import { isDeclSymbolKind } from "./symbols.js";
 import { isVectorFieldLatex } from "../math/fitVector.js";
+import type { SymbolRegistry } from "./symbols.js";
 
 export type { ExprItem, ExprRole, AnimMode } from "../types/models.js";
 
@@ -303,6 +303,15 @@ export function setExpressions(list: Partial<ExprItem>[]) {
   emit();
 }
 
+/** Remove all expressions and leave one blank row (Desmos-style). */
+export function clearExpressions() {
+  nextId = 1;
+  exprWarnings.clear();
+  items = [createExprItem({ latex: "" })];
+  selectedId = items[0]?.id ?? null;
+  emit();
+}
+
 /**
  * Insert a row at `index` without selecting it or notifying listeners.
  * @param {number} index
@@ -468,10 +477,11 @@ export function resolveExprRole(
   role: ExprRole,
   kind: ExprKind,
   latex?: string,
+  registry?: SymbolRegistry,
 ): LayerRole {
   const r = normalizeExprRole(role as string);
-  if (isDeclSymbolKind(kind)) return "parameter";
+  if (kind === "parameter") return "parameter";
   if (r === "cloud" || r === "isosurface" || r === "flow") return r;
-  if (r === "auto" && latex && isVectorFieldLatex(latex)) return "flow";
+  if (r === "auto" && latex && isVectorFieldLatex(latex, registry)) return "flow";
   return kind === "constraint" ? "isosurface" : "cloud";
 }

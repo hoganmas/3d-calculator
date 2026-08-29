@@ -29,7 +29,6 @@ import { reseedFlowParticles } from "../render/webgpu/flowParticles.js";
 import { compileExpr, classifyExpr } from "../math/fit.js";
 import { fitVectorField } from "../math/fitVector.js";
 import { listExpressions, resolveExprRole } from "../model/expressions.js";
-import { isDeclSymbolKind } from "../model/symbols.js";
 import { els, viewportSize } from "./dom.js";
 import { state, FIT_DEBOUNCE_MS } from "./state.js";
 import type {
@@ -636,18 +635,19 @@ export function handleColorChange() {
       let classified;
       try {
         classified = classifyExpr(item.latex);
-        if (isDeclSymbolKind(classified.kind)) continue;
+        if (classified.kind === "parameter") continue;
       } catch {
         continue;
       }
-      const role = resolveExprRole(item.role, classified.kind, item.latex);
+      const fieldLatex = classified.compileLatex;
+      const role = resolveExprRole(item.role, classified.kind, fieldLatex);
       const rgb = layerRgbFromItem(item);
       if (role === "isosurface") isoCols.push(rgb);
       else if (role === "flow") flowCols.push(rgb);
       else {
         let compiled;
         try {
-          compiled = compileExpr(item.latex);
+          compiled = compileExpr(fieldLatex);
         } catch {
           continue;
         }

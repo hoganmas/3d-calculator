@@ -107,6 +107,30 @@
         min-height: 48px;
         flex: 1;
       }
+      #exprList {
+        padding: 0;
+        gap: 0;
+      }
+      .expr-sidebar {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 48px;
+      }
+      .expr-sidebar-toolbar {
+        display: flex;
+        justify-content: flex-end;
+        padding: 0 2px 6px;
+        flex-shrink: 0;
+      }
+      .expr-clear-btn {
+        font-size: 12px;
+        padding: 4px 12px;
+        min-height: 28px;
+      }
+      .expr-sidebar .expr-list {
+        flex: 1;
+      }
       .expr-row {
         --expr-c0: #e85a10;
         --expr-c1: #f5d020;
@@ -1082,6 +1106,17 @@
       }
       .autosave-status[data-state="dirty"] {
         color: var(--accent, #c080ff);
+      }
+      .autosave-status[data-state="error"] {
+        color: var(--err);
+      }
+      .autosave-status-bar {
+        margin-top: auto;
+        padding-top: 8px;
+        border-top: 1px solid var(--stroke);
+        font-size: 11px;
+        font-variant-numeric: tabular-nums;
+        flex-shrink: 0;
       }
       .settings-dialog label {
         display: flex;

@@ -1,6 +1,5 @@
 import { classifyExpr } from "../../math/fit.js";
 import { getParam } from "../../model/params.js";
-import { isDeclSymbolKind } from "../../model/symbols.js";
 import type { ExprItem } from "../../types/models.js";
 
 export const ANIM_OPTS_ICON = `<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 3.2a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Zm0 3.7a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Zm0 3.7a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Z"/></svg>`;
@@ -191,10 +190,15 @@ export function fmtAnimSpeed(speed: number): string {
   return Number.isInteger(s) ? String(s) : s.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 }
 
-/** True for parameter / alias / funcdef declaration rows (no layer gradient). */
-export function isDeclarationRow(latex: string): boolean {
+/** True for parameter declaration rows (`a=1`) — no layer gradient or visibility chrome. */
+export function isParameterRow(latex: string): boolean {
   const classified = classifyKind(latex);
-  return isDeclSymbolKind(classified?.kind);
+  return classified?.kind === "parameter";
+}
+
+/** @deprecated Use {@link isParameterRow} — alias/funcdef rows are graphable layers. */
+export function isDeclarationRow(latex: string): boolean {
+  return isParameterRow(latex);
 }
 
 /** Params needed under a row: owning `a=…` declaration only. */

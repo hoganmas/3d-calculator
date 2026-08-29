@@ -23,6 +23,6 @@ fn sampleGradStops(stops: ptr<function, array<vec4f, {{MAX_GRAD_STOPS}}>>, t: f3
   if (n <= 1u) { return (*stops)[0].xyz; }
   let x = clamp(t, 0.0, 1.0) * f32(n - 1u);
   let i = min(u32(floor(x)), n - 2u);
-  let f = fract(x);
+  let f = x - f32(i);
   return mix((*stops)[i].xyz, (*stops)[i + 1u].xyz, f);
 }
