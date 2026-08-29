@@ -15,7 +15,10 @@ src/
     webglFallback.ts        WebGL Beer march (no WebGPU)
     presentation.ts         Resize, march downscale, GPU/CPU presentation
     hud.ts                  Metrics HUD + compile status
-    loop.ts                 requestAnimationFrame loop
+    loop.ts                 setAnimationLoop (XR-aware) frame loop
+    xr/
+      session.ts            immersive-vr session + Enter XR button
+      nav.ts                Controller grab-orbit + recenter
     persistence/            Scene document v1, IndexedDB autosave, file import/export
   math/
     fit.ts                  LaTeX compile + Chebyshev least-squares fit

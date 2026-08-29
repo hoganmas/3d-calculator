@@ -168,6 +168,8 @@ function applyDisplaySize(
 }
 
 export function resize() {
+  // WebXR owns the framebuffer while presenting — do not fight setSize.
+  if (state.xrActive) return;
   const { vw, vh } = viewportSize();
   applyDisplaySize(vw, vh, vw, vh, { markClipDirty: true });
   // Present canvas at display resolution; raymarch targets stay at mw×mh.
@@ -189,8 +191,9 @@ export function syncClipPresentation() {
   worldGrid.visible = !gpu && showGrid;
   worldLabels.visible = !gpu && showGrid;
   boxHelper.visible = !gpu;
-  labelRenderer.domElement.style.visibility = gpu ? "hidden" : "visible";
-  setClipGpuCanvasVisible(isClipBakeGpuReady());
+  const hideLabels = gpu || state.xrActive;
+  labelRenderer.domElement.style.visibility = hideLabels ? "hidden" : "visible";
+  setClipGpuCanvasVisible(isClipBakeGpuReady() && !state.xrActive);
 }
 
 export function markMarchDirty() {

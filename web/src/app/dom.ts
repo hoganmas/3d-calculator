@@ -23,6 +23,7 @@ export interface DomElements {
   boxSize: HTMLInputElement;
   marchDownscale: HTMLInputElement;
   toggleGridAxes: HTMLButtonElement | null;
+  enterXr: HTMLButtonElement | null;
   marchScaleLabel: HTMLElement | null;
   reset: HTMLButtonElement;
   togglePanel: HTMLButtonElement | null;
@@ -65,6 +66,7 @@ export const els: DomElements = {
   boxSize: el("boxSize"),
   marchDownscale: el("marchDownscale"),
   toggleGridAxes: document.getElementById("toggleGridAxes") as HTMLButtonElement | null,
+  enterXr: document.getElementById("enterXr") as HTMLButtonElement | null,
   marchScaleLabel: document.getElementById("marchScaleLabel"),
   reset: el("reset"),
   togglePanel: document.getElementById("togglePanel") as HTMLButtonElement | null,

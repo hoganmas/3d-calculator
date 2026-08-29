@@ -18,11 +18,15 @@ uniform sampler2D uVolumeTex;
 uniform float uGridM;
 uniform float uFbW;
 uniform float uFbH;
+/** Framebuffer viewport (x, y, width, height) — required for stereo XR eyes. */
+uniform vec4 uViewport;
 uniform float uHalf;
 uniform float uScale;
 uniform int uSteps;
 uniform vec3 uCameraPos;
 uniform mat3 uDirM;
+/** Inverse of xrWorld matrixWorld — volume box stays local to the grab root. */
+uniform mat4 uInvXrWorld;
 uniform vec3 uAbsorbColor;
 uniform vec3 uEmitColor;
 
@@ -77,10 +81,13 @@ float sampleVolume(vec3 p) {
 }
 
 void main() {
-  float ndcX = -1.0 + 2.0 * gl_FragCoord.x / uFbW;
-  float ndcY = -1.0 + 2.0 * gl_FragCoord.y / uFbH;
-  vec3 dirRaw = uDirM * vec3(ndcX, ndcY, 1.0);
-  vec3 ro = uCameraPos;
+  float vw = max(uViewport.z, 1.0);
+  float vh = max(uViewport.w, 1.0);
+  float ndcX = -1.0 + 2.0 * (gl_FragCoord.x - uViewport.x) / vw;
+  float ndcY = -1.0 + 2.0 * (gl_FragCoord.y - uViewport.y) / vh;
+  vec3 dirWorld = uDirM * vec3(ndcX, ndcY, 1.0);
+  vec3 ro = (uInvXrWorld * vec4(uCameraPos, 1.0)).xyz;
+  vec3 dirRaw = mat3(uInvXrWorld) * dirWorld;
 
   float tEnter, tExit;
   if (!intersectBox(ro, dirRaw, uHalf, tEnter, tExit)) discard;

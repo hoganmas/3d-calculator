@@ -23,6 +23,9 @@ import type { AnimMode, ExprItem } from "../types/models.js";
 import { applyPreset } from "./compile.js";
 import { getRenderSettingsSnapshot, serializeExpr, serializeParam } from "./persistence/document.js";
 import { els } from "./dom.js";
+import { state } from "./state.js";
+import { resetXrView } from "./xr/session.js";
+import { XR_DEFAULT_POSITION } from "./xr/nav.js";
 import { syncExprCompileState, buildMetricsReport, refreshMetricsDump, getExpressionErrorReport } from "./hud.js";
 import {
   scheduleUploadFit,
@@ -31,7 +34,6 @@ import {
 } from "./pipeline.js";
 import { syncMarchSlider } from "./presentation.js";
 import { camera, controls, resetCameraView } from "./scene.js";
-import { state } from "./state.js";
 import { buildCapabilities } from "./webmcpCapabilities.js";
 
 const PRESET_KEYS = Object.keys(PRESETS);
@@ -102,8 +104,21 @@ export async function setRenderSettings(patch: {
 }
 
 export function resetCamera() {
+  if (state.xrActive) {
+    resetXrView();
+    state.clipDirty = true;
+    return ok({
+      mode: "xr",
+      position: {
+        x: XR_DEFAULT_POSITION.x,
+        y: XR_DEFAULT_POSITION.y,
+        z: XR_DEFAULT_POSITION.z,
+      },
+    });
+  }
   resetCameraView();
   return ok({
+    mode: "flat",
     position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
     target: { x: controls.target.x, y: controls.target.y, z: controls.target.z },
   });

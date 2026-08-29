@@ -21,6 +21,7 @@ import { initPresentation, resize, bindHudText } from "./app/presentation.js";
 import { hudText, copyMetricsToClipboard } from "./app/hud.js";
 import { startRenderLoop } from "./app/loop.js";
 import { state } from "./app/state.js";
+import { initXr, resetXrView } from "./app/xr/session.js";
 import { initWebMCP } from "./app/webmcp.js";
 import { initWebmcpSetupDialog } from "./app/webmcpSetupDialog.js";
 import { initSplash, markSplashSidebarReady, forceSplashDismiss } from "./app/splash.js";
@@ -103,9 +104,16 @@ async function bootstrap() {
   });
 
   els.reset.addEventListener("click", () => {
-    resetCameraView();
+    if (state.xrActive) {
+      resetXrView();
+      state.clipDirty = true;
+    } else {
+      resetCameraView();
+    }
     scheduleAutosave();
   });
+
+  initXr();
 
   els.copyMetrics?.addEventListener("click", (ev) => {
     ev.preventDefault();

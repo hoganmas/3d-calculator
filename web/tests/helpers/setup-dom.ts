@@ -47,6 +47,11 @@ function makeElement(id: string, tag = "div"): HTMLElement {
     (node as { getAttribute: (name: string) => string | null }).getAttribute = (name: string) =>
       name === "aria-pressed" ? "true" : null;
   }
+  if (id === "enterXr") {
+    node.hidden = true;
+    (node as { getAttribute: (name: string) => string | null }).getAttribute = (name: string) =>
+      name === "aria-pressed" ? "false" : null;
+  }
   if (id === "preset") node.value = "sincos";
   return node as unknown as HTMLElement;
 }

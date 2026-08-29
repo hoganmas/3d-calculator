@@ -8,7 +8,7 @@ Multi-expression 3D polynomial calculator (Three.js + WebGPU).
 
 Details: [`research/poly/notes/cheb-idct-volume.md`](../research/poly/notes/cheb-idct-volume.md).
 
-Source layout: [`STRUCTURE.md`](STRUCTURE.md).
+Source layout: [`STRUCTURE.md`](STRUCTURE.md). WebXR immersive view notes: [`docs/webxr.md`](docs/webxr.md).
 
 ## Run locally
 
@@ -17,6 +17,7 @@ npm install
 npm run dev
 ```
 
+WebXR requires a secure context (`localhost` or HTTPS). See [`docs/webxr.md`](docs/webxr.md) for the Enter XR smoke checklist.
 ## Tests
 
 Simulation correctness (fit → IDCT → volume) runs in Node — no browser needed:

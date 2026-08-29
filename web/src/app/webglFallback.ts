@@ -1,6 +1,11 @@
 import * as THREE from "three";
 import { clipGridVertex, clipGridFragment } from "../render/webgl/marchShaders.js";
-import { ndcToDirMatrix, perspectiveDirScale, offsetDirMatrix } from "../render/camera.js";
+import {
+  ndcToDirMatrix,
+  perspectiveDirScale,
+  offsetDirMatrix,
+  dirMatrixFromProjection,
+} from "../render/camera.js";
 import {
   initClipBakeGpu,
   isClipGpuUploadReady,
@@ -19,10 +24,10 @@ import { flowPresenceSlice } from "../math/fitVector.js";
 import { els, viewportSize } from "./dom.js";
 import { state } from "./state.js";
 import {
-  scene,
   camera,
   renderer,
   themeColors,
+  xrWorld,
 } from "./scene.js";
 import {
   compositionNdcOffsetX,
@@ -46,16 +51,21 @@ volumeTex.needsUpdate = true;
 let clipVolumeTex: THREE.DataTexture | null = null;
 let clipVolumeM = 0;
 
+const _viewport = new THREE.Vector4();
+const _invXrWorld = new THREE.Matrix4();
+
 export const clipUniforms = {
   uVolumeTex: { value: volumeTex },
   uGridM: { value: 2 },
   uFbW: { value: 1 },
   uFbH: { value: 1 },
+  uViewport: { value: new THREE.Vector4(0, 0, 1, 1) },
   uHalf: { value: 2.5 },
   uScale: { value: 2.5 },
   uSteps: { value: 32 },
   uCameraPos: { value: new THREE.Vector3() },
   uDirM: { value: new THREE.Matrix3() },
+  uInvXrWorld: { value: new THREE.Matrix4() },
   uAbsorbColor: { value: new THREE.Color(...themeColors.beerAbsorb) },
   uEmitColor: { value: new THREE.Color(...themeColors.beerEmit) },
 };
@@ -78,7 +88,37 @@ const clipMat = new THREE.ShaderMaterial({
 export const clipQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), clipMat);
 clipQuad.frustumCulled = false;
 clipQuad.visible = false;
-scene.add(clipQuad);
+xrWorld.add(clipQuad);
+
+/** Per-eye (and mono) uniform sync — required for stereo XR viewports. */
+clipQuad.onBeforeRender = (rend, _sc, cam) => {
+  const eye = cam as THREE.Camera;
+  eye.updateMatrixWorld(true);
+  rend.getCurrentViewport(_viewport);
+  clipUniforms.uViewport.value.copy(_viewport);
+  clipUniforms.uFbW.value = Math.max(1, _viewport.z);
+  clipUniforms.uFbH.value = Math.max(1, _viewport.w);
+  clipUniforms.uCameraPos.value.setFromMatrixPosition(eye.matrixWorld);
+
+  xrWorld.updateMatrixWorld(true);
+  _invXrWorld.copy(xrWorld.matrixWorld).invert();
+  clipUniforms.uInvXrWorld.value.copy(_invXrWorld);
+
+  let M: Float64Array | Float32Array | number[];
+  if (state.xrActive) {
+    M = dirMatrixFromProjection(eye);
+  } else {
+    const persp = eye as THREE.PerspectiveCamera;
+    const { sx, sy } = perspectiveDirScale(persp);
+    const { vw, vh } = viewportSize();
+    M = offsetDirMatrix(
+      ndcToDirMatrix(persp, sx, sy),
+      compositionNdcOffsetX(vw),
+      compositionNdcOffsetY(vh),
+    );
+  }
+  clipUniforms.uDirM.value.set(M[0], M[1], M[2], M[3], M[4], M[5], M[6], M[7], M[8]);
+};
 
 export function applyVolumeTexture(dens: Float32Array, M: number) {
   const h = M * M;
@@ -100,24 +140,34 @@ export function applyVolumeTexture(dens: Float32Array, M: number) {
   clipUniforms.uGridM.value = M;
 }
 
+/** @deprecated Prefer clipQuad.onBeforeRender; kept for callers that sync once pre-render. */
 export function syncClipFiberUniforms() {
-  // CPU/WebGL path draws into the full Three.js canvas — NDC must use that
-  // buffer size, not the march-downscale size (that is GPU-canvas only).
   camera.updateMatrixWorld(true);
   const { vw, vh } = viewportSize();
-  const { sx, sy } = perspectiveDirScale(camera);
-  const M = offsetDirMatrix(
-    ndcToDirMatrix(camera, sx, sy),
-    compositionNdcOffsetX(vw),
-    compositionNdcOffsetY(vh),
-  );
   clipUniforms.uFbW.value = Math.max(1, renderer.domElement.width);
   clipUniforms.uFbH.value = Math.max(1, renderer.domElement.height);
-  clipUniforms.uDirM.value.set(M[0], M[1], M[2], M[3], M[4], M[5], M[6], M[7], M[8]);
+  clipUniforms.uViewport.value.set(0, 0, clipUniforms.uFbW.value, clipUniforms.uFbH.value);
+  if (state.xrActive) {
+    const M = dirMatrixFromProjection(camera);
+    clipUniforms.uDirM.value.set(M[0], M[1], M[2], M[3], M[4], M[5], M[6], M[7], M[8]);
+  } else {
+    const { sx, sy } = perspectiveDirScale(camera);
+    const M = offsetDirMatrix(
+      ndcToDirMatrix(camera, sx, sy),
+      compositionNdcOffsetX(vw),
+      compositionNdcOffsetY(vh),
+    );
+    clipUniforms.uDirM.value.set(M[0], M[1], M[2], M[3], M[4], M[5], M[6], M[7], M[8]);
+  }
   clipUniforms.uCameraPos.value.copy(camera.position);
+  xrWorld.updateMatrixWorld(true);
+  _invXrWorld.copy(xrWorld.matrixWorld).invert();
+  clipUniforms.uInvXrWorld.value.copy(_invXrWorld);
 }
 
 export function useGpuClipPath() {
+  // Immersive WebXR is WebGL-composited; force Beer fallback while presenting.
+  if (state.xrActive) return false;
   return isClipBakeGpuReady() && isClipMarchReady();
 }
 
@@ -301,7 +351,6 @@ export function syncClipCpuVolume() {
     return;
   }
   if (state.clipDirty || !clipVolumeTex) bakeChebVolume();
-  syncClipFiberUniforms();
   setClipGpuCanvasVisible(false);
   clipQuad.visible = true;
   state.clipDirty = false;
@@ -314,5 +363,5 @@ export async function prepareClipGpuForDegree(deg: number, source = "unknown") {
 }
 
 export function initWebglFallback() {
-  // clipQuad already added to scene at module load
+  // clipQuad already added to xrWorld at module load
 }

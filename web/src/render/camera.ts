@@ -1,9 +1,11 @@
 /**
  * Camera / NDC helpers for the volume march.
  */
-import type { Camera, PerspectiveCamera } from "three";
+import { Vector4, type Camera, type PerspectiveCamera } from "three";
 
 export type DirMatrix = Float64Array | Float32Array | number[];
+
+const _clip = new Vector4();
 
 /**
  * Map NDC (x, y, 1) → world dir_raw = R · (sx x, sy y, −1).
@@ -27,6 +29,45 @@ export function ndcToDirMatrix(camera: Camera, sx: number, sy: number): Float64A
 export function perspectiveDirScale(camera: PerspectiveCamera): { sx: number; sy: number } {
   const tan = Math.tan((camera.fov * Math.PI) / 180 / 2);
   return { sx: tan * camera.aspect, sy: tan };
+}
+
+/**
+ * Build the same M · (ndcX, ndcY, 1) → world dir_raw map from an arbitrary
+ * projection (including asymmetric XR eye frusta). Uses the near-plane
+ * unprojection so stereo views stay correct under Three.js WebXR.
+ */
+export function dirMatrixFromProjection(camera: Camera): Float64Array {
+  camera.updateMatrixWorld(true);
+  const invP = camera.projectionMatrixInverse;
+  const mw = camera.matrixWorld.elements;
+
+  function worldDir(ndcX: number, ndcY: number): [number, number, number] {
+    _clip.set(ndcX, ndcY, -1, 1).applyMatrix4(invP);
+    const iw = 1 / (_clip.w || 1e-8);
+    const x = _clip.x * iw;
+    const y = _clip.y * iw;
+    const z = _clip.z * iw;
+    return [
+      mw[0] * x + mw[4] * y + mw[8] * z,
+      mw[1] * x + mw[5] * y + mw[9] * z,
+      mw[2] * x + mw[6] * y + mw[10] * z,
+    ];
+  }
+
+  const c = worldDir(0, 0);
+  const r = worldDir(1, 0);
+  const u = worldDir(0, 1);
+  const M = new Float64Array(9);
+  M[0] = r[0] - c[0];
+  M[1] = u[0] - c[0];
+  M[2] = c[0];
+  M[3] = r[1] - c[1];
+  M[4] = u[1] - c[1];
+  M[5] = c[1];
+  M[6] = r[2] - c[2];
+  M[7] = u[2] - c[2];
+  M[8] = c[2];
+  return M;
 }
 
 /**

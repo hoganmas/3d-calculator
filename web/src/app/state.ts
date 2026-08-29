@@ -70,6 +70,9 @@ export const state = {
   flowTrailSteps: 32,
   /** Trail stroke width in pixels. */
   flowTrailWidth: 10,
+
+  /** True while an immersive WebXR session is presenting. */
+  xrActive: false,
 };
 
 export const FIT_DEBOUNCE_MS = 320;

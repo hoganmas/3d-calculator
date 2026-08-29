@@ -38,6 +38,7 @@ import { hudText, refreshMetricsDump } from "./hud.js";
 import { isSplashContentReady, markSplashFrameReady } from "./splash.js";
 import { startupMark } from "./startupProfile.js";
 import { syncKeyframeLoadBar } from "./keyframeLoadBar.js";
+import { tickXrNav } from "./xr/nav.js";
 
 let splashFrameReported = false;
 
@@ -49,7 +50,7 @@ function reportSplashFrameReady() {
   markSplashFrameReady();
 }
 
-function frame(rafNow: number) {
+function frame(rafNow: number, _xrFrame?: XRFrame) {
   const t0 = performance.now();
   if (state.lastRafAt > 0) {
     const rafDt = rafNow > 0 ? rafNow - state.lastRafAt : t0 - state.lastRafAt;
@@ -103,7 +104,12 @@ function frame(rafNow: number) {
     refreshMetricsDump();
   }
 
-  controls.update();
+  if (state.xrActive) {
+    tickXrNav();
+  } else {
+    controls.update();
+  }
+
   clipUniforms.uCameraPos.value.copy(camera.position);
 
   if (!useGpuClipPath()) {
@@ -111,11 +117,15 @@ function frame(rafNow: number) {
   }
 
   lavaBg.setTime(t0 / 1000);
-  lavaBg.syncCamera(camera);
+  if (state.xrActive) {
+    lavaBg.syncCamera(renderer.xr.getCamera());
+  } else {
+    lavaBg.syncCamera(camera);
+  }
   renderer.autoClear = true;
   renderer.render(scene, camera);
 
-  if (isClipBakeGpuReady()) {
+  if (!state.xrActive && isClipBakeGpuReady()) {
     if (hasUploadedVolume() && useGpuClipPath()) {
       drawClipGpuFrame();
     } else if (!hasUploadedVolume()) {
@@ -125,7 +135,7 @@ function frame(rafNow: number) {
     }
   }
 
-  if (!useGpuClipPath()) {
+  if (!state.xrActive && !useGpuClipPath()) {
     labelRenderer.render(labelScene, camera);
   }
 
@@ -137,8 +147,6 @@ function frame(rafNow: number) {
   // Keyframe progressive fill runs after draw so animation stays smooth.
   if (anyParamAnimating()) tickKeyframePump();
   syncKeyframeLoadBar();
-
-  requestAnimationFrame(frame);
 }
 
 export function startRenderLoop() {
@@ -155,7 +163,8 @@ export function startRenderLoop() {
   });
 
   startupMark("boot.render-loop-started");
-  requestAnimationFrame(frame);
+  // Three.js XR-aware loop (uses XRSession.requestAnimationFrame while presenting).
+  renderer.setAnimationLoop(frame);
 
   void initClipBakeGpu(els.viewport, "render-loop").then((ok) => {
     if (ok) void scheduleMarchPipelines(state.fitDeg);

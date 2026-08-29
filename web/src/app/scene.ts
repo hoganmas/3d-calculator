@@ -49,17 +49,25 @@ controls.screenSpacePanning = true;
 controls.target.set(0, 0, 0);
 renderer.domElement.addEventListener("contextmenu", (e) => e.preventDefault());
 
+/**
+ * Content root for XR grab-orbit / recenter. Desktop keeps identity transform;
+ * immersive sessions place this group in front of the viewer.
+ */
+export const xrWorld = new THREE.Group();
+xrWorld.name = "xrWorld";
+scene.add(xrWorld);
+
 export const boxMat = new THREE.LineBasicMaterial({ color: themeColors.boxEdge });
 export const boxHelper = new THREE.LineSegments(
   new THREE.EdgesGeometry(new THREE.BoxGeometry(4, 4, 4)),
   boxMat,
 );
-scene.add(boxHelper);
+xrWorld.add(boxHelper);
 
 /** World reference frame: unit grids + RGB axes (calculator-style). */
 export const worldGrid = new THREE.Group();
 worldGrid.renderOrder = -1;
-scene.add(worldGrid);
+xrWorld.add(worldGrid);
 /** Axis letter sprites — own overlay canvas so volumes never cover them. */
 export const worldLabels = new THREE.Group();
 labelScene.add(worldLabels);
@@ -237,6 +245,7 @@ export function applyThemeToScene() {
 }
 
 export function initScene() {
+  renderer.xr.enabled = true;
   rebuildWorldGrid(2);
 
   onThemeChange((_split, pref) => {
