@@ -11,6 +11,7 @@ import {
   noteKeyframeLayer,
   ensureLayerKeyframes,
   sampleLayerKeyframes,
+  sampleFlowLayerKeyframes,
   peekKeyframeBlend,
 } from "../model/keyframes.js";
 import {
@@ -324,6 +325,44 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
       }
 
       if (L.role === "flow") {
+        const kfParam =
+          fromAnim && depends && dirty && L.vectorCompiled
+            ? keyframeAnimParam(L.vectorCompiled.freeParams, dirty)
+            : null;
+        if (kfParam && L.vectorCompiled && L.vectorFn) {
+          noteKeyframeLayer();
+          keyframedCount++;
+          const sample = sampleFlowLayerKeyframes({
+            layerId: L.item.id,
+            latex: L.item.latex,
+            role: "flow",
+            paramName: kfParam,
+            vectorCompiled: L.vectorCompiled,
+            baseParams,
+            half,
+            deg,
+          });
+          if (sample.baked) keyframeBaked = true;
+          M = sample.M || M;
+          flowLayers.push({
+            id: L.item.id,
+            fx: sample.fx,
+            fy: sample.fy,
+            fz: sample.fz,
+            color,
+            color2,
+            colors,
+            cheb: sample.cheb,
+            fitRel: sample.fitRel,
+          });
+          densKeyframedCpu = true;
+          if (!cheb && sample.cheb) {
+            cheb = sample.cheb;
+            fitRel = sample.fitRel ?? fitRel;
+          }
+          continue;
+        }
+
         const skipHeavy = fromAnim || layers.length > 1;
         const fit = fitVectorField(
           L.vectorCompiled!,

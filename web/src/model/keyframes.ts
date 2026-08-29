@@ -1,13 +1,16 @@
 /**
- * Dens/iso keyframe cache for animated free parameters.
+ * Dens/iso/flow keyframe cache for animated free parameters.
  */
 
 import { fitChebyshev3D } from "../math/fit.js";
+import { fitVectorField } from "../math/fitVector.js";
 import { idctCheb3D, idctChebGrad3D } from "../math/idct.js";
 import { getParam } from "./params.js";
-import type { CompiledExpr, KeyframeFrame } from "../types/models.js";
+import type { CompiledExpr, CompiledVectorExpr, KeyframeFrame } from "../types/models.js";
 
 export const DEFAULT_KEYFRAME_K = 8;
+
+type KeyframeRole = "cloud" | "isosurface" | "flow";
 
 interface BakeStages {
   sampleMs: number;
@@ -19,10 +22,11 @@ interface BakeStages {
 interface BakeFrameOpts {
   layerId: string;
   latex: string;
-  role: "cloud" | "isosurface";
+  role: KeyframeRole;
   isoLevel: number;
   paramName: string;
-  compiled: { bind: CompiledExpr["bind"] };
+  compiled?: { bind: CompiledExpr["bind"] };
+  vectorCompiled?: CompiledVectorExpr;
   baseParams: Record<string, number>;
   half: number;
   deg: number;
@@ -38,7 +42,7 @@ interface LayerKeyframeCache {
   K: number;
   deg: number;
   half: number;
-  role: "cloud" | "isosurface";
+  role: KeyframeRole;
   isoLevel: number;
   latex: string;
   frames: (KeyframeFrame | null)[];
@@ -60,10 +64,11 @@ interface KeyframeProgressInfo {
 interface EnsureKeyframesOpts {
   layerId: string;
   latex: string;
-  role: "cloud" | "isosurface";
-  isoLevel: number;
+  role: KeyframeRole;
+  isoLevel?: number;
   paramName: string;
-  compiled: { bind: CompiledExpr["bind"] };
+  compiled?: { bind: CompiledExpr["bind"] };
+  vectorCompiled?: CompiledVectorExpr;
   baseParams: Record<string, number>;
   half: number;
   deg: number;
@@ -180,8 +185,36 @@ export function keyframeAnimParam(freeParams: string[], dirty: Set<string>) {
 function lerpFloat32(a: Float32Array, b: Float32Array, t: number, out: Float32Array) {
   const n = out.length;
   const u = 1 - t;
-  for (let i = 0; i < n; i++) out[i] = u * a[i] + t * b[i];
+  for (let i = 0; i < n; i++) out[i] = u * a[i]! + t * b[i]!;
   return out;
+}
+
+function frameVolumeN(frame: KeyframeFrame): number {
+  if (frame.dens?.length) return frame.dens.length;
+  if (frame.fx?.length) return frame.fx.length;
+  return 0;
+}
+
+function gridMFromFrame(frame: KeyframeFrame): number {
+  const n = frameVolumeN(frame);
+  return n > 0 ? Math.round(Math.cbrt(n)) : 0;
+}
+
+function allocScratch(role: KeyframeRole, n: number): KeyframeFrame {
+  if (role === "flow") {
+    return {
+      fx: new Float32Array(n),
+      fy: new Float32Array(n),
+      fz: new Float32Array(n),
+    };
+  }
+  const scratch: KeyframeFrame = { dens: new Float32Array(n) };
+  if (role === "isosurface") {
+    scratch.gx = new Float32Array(n);
+    scratch.gy = new Float32Array(n);
+    scratch.gz = new Float32Array(n);
+  }
+  return scratch;
 }
 
 /**
@@ -266,6 +299,24 @@ function bakeFrameAt(opts: BakeFrameOpts, k: number, stages: BakeStages | null):
   const K = opts.K ?? DEFAULT_KEYFRAME_K;
   const a = min + ((max - min) * k) / Math.max(1, K - 1);
   const params = { ...opts.baseParams, [opts.paramName]: a };
+
+  if (opts.role === "flow") {
+    if (!opts.vectorCompiled) throw new Error("flow keyframes require vectorCompiled");
+    const vectorFn = opts.vectorCompiled.bind(params);
+    const fit = fitVectorField(opts.vectorCompiled, vectorFn, opts.half, opts.deg, {
+      skipL2: true,
+      params,
+    });
+    return {
+      fx: fit.fx,
+      fy: fit.fy,
+      fz: fit.fz,
+      cheb: fit.cheb,
+      fitRel: fit.fitRel,
+    };
+  }
+
+  if (!opts.compiled) throw new Error("scalar keyframes require compiled");
   const fn = opts.compiled.bind(params);
   const fit = fitChebyshev3D(fn, opts.half, opts.deg, { skipL2: true, skipMono: true });
   if (fit.timing && stages) {
@@ -377,7 +428,7 @@ function scheduleAsyncFill(layerId: string, cache: LayerKeyframeCache) {
       ...stages,
       frames: 1,
       deg: live.deg,
-      M: Math.round(Math.cbrt(frame.dens.length)),
+      M: Math.round(Math.cbrt(frameVolumeN(frame))),
       role: live.role,
       layerId,
       paramName: live.paramName,
@@ -472,6 +523,7 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
         isoLevel: opts.isoLevel ?? 0,
         paramName: opts.paramName,
         compiled: opts.compiled,
+        vectorCompiled: opts.vectorCompiled,
         baseParams: { ...opts.baseParams },
         half: opts.half,
         deg: opts.deg,
@@ -488,6 +540,7 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
       ...cache.bakeOpts,
       baseParams: { ...opts.baseParams },
       compiled: opts.compiled,
+      vectorCompiled: opts.vectorCompiled,
     };
   }
 
@@ -505,13 +558,11 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
 
   // Allocate scratch once we know volume size.
   const proto = cache.frames[blend.i0] || cache.frames[blend.i1];
-  if (proto && (!cache.scratch.dens || cache.scratch.dens.length !== proto.dens.length)) {
-    const n = proto.dens.length;
-    cache.scratch = { dens: new Float32Array(n) };
-    if (opts.role === "isosurface") {
-      cache.scratch.gx = new Float32Array(n);
-      cache.scratch.gy = new Float32Array(n);
-      cache.scratch.gz = new Float32Array(n);
+  if (proto) {
+    const n = frameVolumeN(proto);
+    const scratchN = frameVolumeN(cache.scratch);
+    if (n > 0 && scratchN !== n) {
+      cache.scratch = allocScratch(opts.role, n);
     }
   }
 
@@ -523,7 +574,7 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
       ...stages,
       frames: syncCount,
       deg: opts.deg,
-      M: Math.round(Math.cbrt(proto?.dens.length || 0)),
+      M: gridMFromFrame(proto ?? { dens: new Float32Array(0) }),
       role: opts.role,
       layerId: opts.layerId,
       paramName: opts.paramName,
@@ -546,7 +597,7 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
     blend,
     cheb: blend.t < 0.5 ? a.cheb : b.cheb,
     fitRel: blend.t < 0.5 ? a.fitRel : b.fitRel,
-    M: Math.round(Math.cbrt(a.dens.length)),
+    M: gridMFromFrame(a),
     baked,
     readyCount: cache.readyCount,
     complete: cache.readyCount >= cache.K,
@@ -567,13 +618,49 @@ export function sampleLayerKeyframes(opts: EnsureKeyframesOpts) {
   const a = cache.frames[i0];
   const b = cache.frames[i1];
   if (!a || !b) throw new Error("sync keyframe pair missing");
+  if (!a.dens || !b.dens) throw new Error("scalar keyframe pair missing dens");
   const out = cache.scratch;
-  lerpFloat32(a.dens, b.dens, t, out.dens);
+  lerpFloat32(a.dens, b.dens, t, out.dens!);
   lerpMsAcc += performance.now() - tLerp;
   lastLerpMs = lerpMsAcc;
 
   return {
-    dens: out.dens,
+    dens: out.dens!,
+    cheb: ensured.cheb,
+    fitRel: ensured.fitRel,
+    M: ensured.M,
+    baked: ensured.baked,
+    readyCount: ensured.readyCount,
+    complete: ensured.complete,
+    frames: ensured.frames,
+  };
+}
+
+/** CPU-lerp fx/fy/fz velocity grids at the current param value. */
+export function sampleFlowLayerKeyframes(opts: EnsureKeyframesOpts) {
+  if (opts.role !== "flow") throw new Error("sampleFlowLayerKeyframes requires role flow");
+  const ensured = ensureLayerKeyframes(opts);
+  const cache = caches.get(opts.layerId);
+  if (!cache) throw new Error("keyframe cache missing after ensure");
+  const tLerp = performance.now();
+  const { i0, i1, t } = ensured.blend;
+  const a = cache.frames[i0];
+  const b = cache.frames[i1];
+  if (!a || !b) throw new Error("sync keyframe pair missing");
+  if (!a.fx || !a.fy || !a.fz || !b.fx || !b.fy || !b.fz) {
+    throw new Error("flow keyframe pair missing velocity grids");
+  }
+  const out = cache.scratch;
+  lerpFloat32(a.fx, b.fx, t, out.fx!);
+  lerpFloat32(a.fy, b.fy, t, out.fy!);
+  lerpFloat32(a.fz, b.fz, t, out.fz!);
+  lerpMsAcc += performance.now() - tLerp;
+  lastLerpMs = lerpMsAcc;
+
+  return {
+    fx: out.fx!.slice(),
+    fy: out.fy!.slice(),
+    fz: out.fz!.slice(),
     cheb: ensured.cheb,
     fitRel: ensured.fitRel,
     M: ensured.M,
