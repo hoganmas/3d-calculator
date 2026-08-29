@@ -33,6 +33,7 @@ html:not([data-booting]) #splash {
   border-radius: 28px;
   transform: translateZ(0);
   contain: layout style paint;
+  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

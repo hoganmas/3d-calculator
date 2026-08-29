@@ -7,25 +7,30 @@
         animation: splash-bg-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
       }
 
-      .splash-symbol {
-        transform-box: fill-box;
-        transform-origin: center;
-        opacity: 0;
-        animation: splash-symbol-in 0.65s 0.12s cubic-bezier(0.22, 1, 0.36, 1) both;
+      .splash-nabla-sweep {
+        stroke-dasharray: 100;
+        stroke-dashoffset: 100;
+        animation: splash-nabla-draw 0.9s 0.2s cubic-bezier(0.45, 0, 0.2, 1) forwards;
       }
 
       .splash-two-stroke {
         stroke-dasharray: 26;
         stroke-dashoffset: 26;
-        animation:
-          splash-two-draw 0.75s 0.42s cubic-bezier(0.45, 0, 0.2, 1) forwards,
-          splash-two-pulse 2.8s 1.35s ease-in-out infinite;
+        animation: splash-two-draw 0.72s 1.08s cubic-bezier(0.45, 0, 0.2, 1) forwards;
       }
 
       .splash-loop {
         transform-box: fill-box;
         transform-origin: center;
-        animation: splash-breathe 3.2s 1.2s ease-in-out infinite;
+        animation: splash-breathe 3.2s 2s ease-in-out infinite;
+      }
+
+      .splash-exit .splash-loop {
+        animation: none;
+      }
+
+      .splash-exit .splash-two-stroke {
+        animation: splash-two-exit 0.68s cubic-bezier(0.55, 0, 1, 0.45) forwards;
       }
     }
 
@@ -40,14 +45,9 @@
       }
     }
 
-    @keyframes splash-symbol-in {
-      from {
-        opacity: 0;
-        transform: scale(0.82);
-      }
+    @keyframes splash-nabla-draw {
       to {
-        opacity: 1;
-        transform: scale(1);
+        stroke-dashoffset: 0;
       }
     }
 
@@ -57,13 +57,12 @@
       }
     }
 
-    @keyframes splash-two-pulse {
-      0%,
-      100% {
-        opacity: 1;
+    @keyframes splash-two-exit {
+      from {
+        stroke-dashoffset: 0;
       }
-      50% {
-        opacity: 0.72;
+      to {
+        stroke-dashoffset: 26;
       }
     }
 
@@ -118,6 +117,31 @@
       <rect width="32" height="32" fill="black"/>
       <g transform="translate(23.5 9) scale(0.88) translate(-10 -10.535)" filter="url(#twoMaskBlur)">
         <use href="#two" stroke="white" stroke-width="11" fill="none"/>
+      </g>
+    </mask>
+
+    <mask id="nablaRevealMask" maskUnits="userSpaceOnUse" x="0" y="0" width="32" height="32">
+      <rect width="32" height="32" fill="black"/>
+      <g transform="translate(14.5 17.5) scale(1.18) translate(-16 -15)">
+        <path
+          class="splash-nabla-sweep"
+          pathLength="100"
+          fill="none"
+          stroke="white"
+          stroke-width="7.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="
+            M 12 9.515
+            L 20 9.515
+            Q 25.5 9.515 22.75 14.278
+            L 18.75 21.207
+            Q 16 25.97 13.25 21.207
+            L 9.25 14.278
+            Q 6.5 9.515 12 9.515
+            Z
+          "
+        />
       </g>
     </mask>
 
@@ -219,36 +243,45 @@
       Q 13.15 13.355 14.95 13.355
       Z
     "/>
-    <path id="two" class="splash-two-stroke" fill="none" stroke="white" stroke-width="3"
-      stroke-linecap="round" stroke-linejoin="round" pathLength="26" d="
-      M 6.56 8.12
-      C 6.06 6.0 13.94 5.85 13.77 9.25
-      C 13.53 11.08 8.03 12.22 6.8 14
-      Q 7 15.2 8.1 15.4
-      L 13.44 15.4
-    "/>
+
+    <path
+      id="two"
+      class="splash-two-stroke"
+      fill="none"
+      stroke="white"
+      stroke-width="3"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      pathLength="26"
+      d="
+        M 6.56 8.12
+        C 6.06 6.0 13.94 5.85 13.77 9.25
+        C 13.53 11.08 8.03 12.22 6.8 14
+        Q 7 15.2 8.1 15.4
+        L 13.44 15.4
+      "
+    />
   </defs>
 
   <g class="splash-loop">
     <rect class="splash-bg" width="32" height="32" rx="8" fill="#1a1228" filter="url(#glassPlate)"/>
 
-    <g class="splash-symbol" opacity="1">
-      <g opacity="1">
+    <g class="splash-symbol">
+      <g mask="url(#nablaRevealMask)">
         <g transform="translate(14.5 17.5) scale(1.18) translate(-16 -15)">
           <use href="#r" fill="black" filter="url(#ssaoBg)"/>
         </g>
-        <g transform="translate(23.5 9) scale(0.88) translate(-10 -10.535)">
-          <use href="#two" stroke="black" stroke-width="3.4" fill="none" filter="url(#ssaoBg)"/>
+        <g transform="translate(14.5 17.5) scale(1.18) translate(-16 -15)">
+          <use href="#r" fill="white" filter="url(#sdfNabla)"/>
+        </g>
+        <g transform="translate(14.5 17.5) scale(1.18) translate(-16 -15)" mask="url(#twoOccMask)">
+          <use href="#r" fill="white" filter="url(#sdfNablaOcc)"/>
         </g>
       </g>
 
-      <g transform="translate(14.5 17.5) scale(1.18) translate(-16 -15)">
-        <use href="#r" fill="white" filter="url(#sdfNabla)"/>
+      <g transform="translate(23.5 9) scale(0.88) translate(-10 -10.535)">
+        <use href="#two" stroke="black" stroke-width="3.4" fill="none" filter="url(#ssaoBg)"/>
       </g>
-      <g transform="translate(14.5 17.5) scale(1.18) translate(-16 -15)" mask="url(#twoOccMask)">
-        <use href="#r" fill="white" filter="url(#sdfNablaOcc)"/>
-      </g>
-
       <g transform="translate(23.5 9) scale(0.88) translate(-10 -10.535)">
         <use href="#two" filter="url(#sdfTwo)"/>
       </g>

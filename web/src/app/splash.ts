@@ -1,6 +1,7 @@
 import { setErr } from "./hud.js";
 
 const SPLASH_TIMEOUT_MS = 15_000;
+const SPLASH_EXIT_MS = 700;
 
 let splashEl: HTMLElement | null = null;
 let timeoutId = 0;
@@ -13,20 +14,21 @@ function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
+function getSplashSvg(): SVGSVGElement | null {
+  if (!splashEl) return null;
+  const obj = splashEl.querySelector("object.splash-logo");
+  if (!(obj instanceof HTMLObjectElement)) return null;
+  const root = obj.contentDocument?.documentElement;
+  return root instanceof SVGSVGElement ? root : null;
+}
+
 function removeSplash() {
   if (!splashEl?.isConnected) return;
   splashEl.remove();
   splashEl = null;
 }
 
-function dismissSplash() {
-  if (dismissed) return;
-  dismissed = true;
-  if (timeoutId) {
-    clearTimeout(timeoutId);
-    timeoutId = 0;
-  }
-
+function fadeSplashOut() {
   const root = document.documentElement;
   delete root.dataset.booting;
 
@@ -45,6 +47,29 @@ function dismissSplash() {
   };
   splashEl.addEventListener("transitionend", onEnd);
   window.setTimeout(removeSplash, 500);
+}
+
+function dismissSplash() {
+  if (dismissed) return;
+  dismissed = true;
+  if (timeoutId) {
+    clearTimeout(timeoutId);
+    timeoutId = 0;
+  }
+
+  if (prefersReducedMotion()) {
+    fadeSplashOut();
+    return;
+  }
+
+  const svg = getSplashSvg();
+  if (svg) {
+    svg.classList.add("splash-exit");
+    window.setTimeout(fadeSplashOut, SPLASH_EXIT_MS);
+    return;
+  }
+
+  fadeSplashOut();
 }
 
 function tryDismiss() {

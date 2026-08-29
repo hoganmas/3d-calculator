@@ -327,8 +327,10 @@ export async function ensureFlowParticlesPipeline(): Promise<boolean> {
   return true;
 }
 
-/** Throttled console diagnostics for particle speed → color2 mapping. */
-const FLOW_PARTICLE_COLOR_DEBUG = true;
+/** Opt-in: add ?debugFlowColor=1 to the URL. */
+const FLOW_PARTICLE_COLOR_DEBUG =
+  typeof location !== "undefined"
+  && new URLSearchParams(location.search).has("debugFlowColor");
 const FLOW_PARTICLE_COLOR_DEBUG_MS = 2000;
 let flowParticleColorDebugAt = 0;
 
