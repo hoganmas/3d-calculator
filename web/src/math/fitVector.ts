@@ -1289,6 +1289,9 @@ export function pickLowDensitySpawn(
   return null;
 }
 
+/** One trail-sample spacing for spawn backfill (≈ dt × push interval at default settings). */
+export const FLOW_TRAIL_BACKFILL_STEP_SCALE = 0.12;
+
 function applyParticleSpawn(
   posAge: Float32Array,
   i: number,
@@ -1298,6 +1301,7 @@ function applyParticleSpawn(
   trailHist: Float32Array | null | undefined,
   trailSteps: number,
   speed = 0,
+  vel: [number, number, number] | null = null,
 ): void {
   const o = i * FLOW_PARTICLE_STRIDE;
   posAge[o] = px;
@@ -1305,7 +1309,45 @@ function applyParticleSpawn(
   posAge[o + 2] = pz;
   posAge[o + 3] = 0;
   posAge[o + 4] = speed;
-  resetFlowTrailHistSlot(trailHist, trailSteps, i, px, py, pz, 0, speed);
+  resetFlowTrailHistSlot(trailHist, trailSteps, i, px, py, pz, 0, speed, vel);
+}
+
+/** True while a particle is fading its trail after death (speed slot holds negative countdown). */
+export function isFlowParticleGhost(posAge: Float32Array, i: number): boolean {
+  return posAge[i * FLOW_PARTICLE_STRIDE + 4]! < -0.5;
+}
+
+/** Begin post-death trail fade; trail history is left intact. */
+export function beginFlowParticleGhost(
+  posAge: Float32Array,
+  i: number,
+  trailSteps: number,
+): void {
+  const o = i * FLOW_PARTICLE_STRIDE;
+  posAge[o + 4] = -Math.max(2, trailSteps);
+}
+
+function pushFlowTrailHistGhostSlot(
+  trailHist: Float32Array,
+  trailSteps: number,
+  i: number,
+): void {
+  const ho = flowTrailBaseIndex(i);
+  for (let j = trailSteps - 1; j >= 1; j--) {
+    const dst = ho + j * FLOW_TRAIL_SLOT_STRIDE;
+    const src = ho + (j - 1) * FLOW_TRAIL_SLOT_STRIDE;
+    trailHist[dst] = trailHist[src]!;
+    trailHist[dst + 1] = trailHist[src + 1]!;
+    trailHist[dst + 2] = trailHist[src + 2]!;
+    trailHist[dst + 3] = trailHist[src + 3]!;
+    trailHist[dst + 4] = trailHist[src + 4]!;
+  }
+  const s1 = ho + FLOW_TRAIL_SLOT_STRIDE;
+  trailHist[ho] = trailHist[s1]!;
+  trailHist[ho + 1] = trailHist[s1 + 1]!;
+  trailHist[ho + 2] = trailHist[s1 + 2]!;
+  trailHist[ho + 3] = trailHist[s1 + 3]!;
+  trailHist[ho + 4] = trailHist[s1 + 4]!;
 }
 
 /** Move particles out of overcrowded cells into sparse regions. */
@@ -1330,6 +1372,7 @@ export function redistributeOvercrowdedFlowParticles(
   const mean = (count / Math.max(layerCount, 1)) / Math.max(cellCount, 1);
   const threshold = Math.max(4, Math.ceil(mean * 2.5));
   for (let i = 0; i < count; i++) {
+    if (isFlowParticleGhost(posAge, i)) continue;
     const o = i * FLOW_PARTICLE_STRIDE;
     const ci = flowParticleCellIndex(posAge[o]!, posAge[o + 1]!, posAge[o + 2]!, half, res);
     const layer = layerIds[i]!;
@@ -1340,10 +1383,17 @@ export function redistributeOvercrowdedFlowParticles(
       grid, res, half, i, layer, frameIdx, gridSpacing, gridPoints,
     );
     if (!picked) continue;
-    const speed = layers?.length && gridM > 0
-      ? sampleFlowParticleSpeedAt(layers, layer, gridM, half, picked[0], picked[1], picked[2])
-      : 0;
-    applyParticleSpawn(posAge, i, picked[0], picked[1], picked[2], trailHist, trailSteps, speed);
+    let speed = 0;
+    let vel: [number, number, number] | null = null;
+    const layerVel = layers?.[layer];
+    if (layerVel && gridM > 0) {
+      const [vx, vy, vz] = sampleVelGridAt(
+        layerVel.fx, layerVel.fy, layerVel.fz, gridM, half, picked[0], picked[1], picked[2],
+      );
+      speed = Math.hypot(vx, vy, vz);
+      vel = [vx, vy, vz];
+    }
+    applyParticleSpawn(posAge, i, picked[0], picked[1], picked[2], trailHist, trailSteps, speed, vel);
     if (grid[ci]! > 0) grid[ci] = (grid[ci]! - 1) as number;
     const ni = flowParticleCellIndex(picked[0], picked[1], picked[2], half, res);
     if (grid[ni]! < 65535) grid[ni] = (grid[ni]! + 1) as number;
@@ -1366,10 +1416,17 @@ function respawnParticle(
   gridM = 0,
 ): void {
   const spawnAt = (px: number, py: number, pz: number) => {
-    const speed = layers?.length && gridM > 0
-      ? sampleFlowParticleSpeedAt(layers, layer, gridM, half, px, py, pz)
-      : 0;
-    applyParticleSpawn(posAge, i, px, py, pz, trailHist, trailSteps ?? 0, speed);
+    let speed = 0;
+    let vel: [number, number, number] | null = null;
+    const layerVel = layers?.[layer];
+    if (layerVel && gridM > 0) {
+      const [vx, vy, vz] = sampleVelGridAt(
+        layerVel.fx, layerVel.fy, layerVel.fz, gridM, half, px, py, pz,
+      );
+      speed = Math.hypot(vx, vy, vz);
+      vel = [vx, vy, vz];
+    }
+    applyParticleSpawn(posAge, i, px, py, pz, trailHist, trailSteps ?? 0, speed, vel);
   };
   if (density) {
     const picked = pickLowDensitySpawn(
@@ -1403,14 +1460,37 @@ export function resetFlowTrailHistSlot(
   pz: number,
   age: number,
   speed = 0,
+  vel: [number, number, number] | null = null,
+  stepDist?: number,
 ): void {
   if (!trailHist || trailSteps < 2) return;
   const ho = flowTrailBaseIndex(i);
+  let dx = 0;
+  let dy = 0;
+  let dz = 0;
+  if (vel) {
+    const len = Math.hypot(vel[0]!, vel[1]!, vel[2]!);
+    if (len > 1e-8) {
+      dx = vel[0]! / len;
+      dy = vel[1]! / len;
+      dz = vel[2]! / len;
+    }
+  }
+  const step = stepDist ?? Math.max(speed, 1e-6) * FLOW_TRAIL_BACKFILL_STEP_SCALE;
+  const bx = px - dx * step;
+  const by = py - dy * step;
+  const bz = pz - dz * step;
   for (let j = 0; j < trailSteps; j++) {
     const o = ho + j * FLOW_TRAIL_SLOT_STRIDE;
-    trailHist[o] = px;
-    trailHist[o + 1] = py;
-    trailHist[o + 2] = pz;
+    if (j === 0) {
+      trailHist[o] = px;
+      trailHist[o + 1] = py;
+      trailHist[o + 2] = pz;
+    } else {
+      trailHist[o] = bx;
+      trailHist[o + 1] = by;
+      trailHist[o + 2] = bz;
+    }
     trailHist[o + 3] = age;
     trailHist[o + 4] = speed;
   }
@@ -1445,6 +1525,7 @@ export function updateFlowTrailHead(
   count: number,
 ): void {
   for (let i = 0; i < count; i++) {
+    if (isFlowParticleGhost(posAge, i)) continue;
     const po = i * FLOW_PARTICLE_STRIDE;
     const ho = flowTrailBaseIndex(i);
     trailHist[ho] = posAge[po]!;
@@ -1455,15 +1536,53 @@ export function updateFlowTrailHead(
   }
 }
 
+export interface FlowTrailPushContext {
+  layerIds: Uint32Array;
+  layers: FlowParticleLayerVel[];
+  M: number;
+  half: number;
+  gridSpacing: number;
+  gridPoints: boolean;
+  frameIdx: number;
+  density?: Uint16Array | Uint16Array[] | null;
+  densityRes?: number;
+}
+
 /** Shift trail history and insert the current particle state at slot 0. */
 export function pushFlowTrailHist(
   posAge: Float32Array,
   trailHist: Float32Array,
   trailSteps: number,
   count: number,
+  pushCtx?: FlowTrailPushContext | null,
 ): void {
   if (trailSteps < 2) return;
   for (let i = 0; i < count; i++) {
+    if (isFlowParticleGhost(posAge, i)) {
+      pushFlowTrailHistGhostSlot(trailHist, trailSteps, i);
+      const po = i * FLOW_PARTICLE_STRIDE;
+      posAge[po + 4] = posAge[po + 4]! + 1;
+      if (posAge[po + 4]! >= -0.5 && pushCtx) {
+        const layer = pushCtx.layerIds[i]!;
+        const layerDensity = flowParticleDensityForLayer(pushCtx.density ?? null, layer);
+        respawnParticle(
+          posAge,
+          i,
+          layer,
+          pushCtx.half,
+          pushCtx.gridSpacing,
+          pushCtx.gridPoints,
+          pushCtx.frameIdx,
+          trailHist,
+          trailSteps,
+          layerDensity,
+          pushCtx.densityRes ?? FLOW_PARTICLE_DENSITY_GRID,
+          pushCtx.layers,
+          pushCtx.M,
+        );
+      }
+      continue;
+    }
     const po = i * FLOW_PARTICLE_STRIDE;
     const ho = flowTrailBaseIndex(i);
     for (let j = trailSteps - 1; j >= 1; j--) {
@@ -1497,12 +1616,14 @@ export function advectFlowParticles(
 ): void {
   const { dt, vMax, half, alpha, gridSpacing, gridPoints, ageMax, frameIdx } = params;
   const n = layerIds.length;
+  const canGhostFade = !!(trailHist && trailSteps >= 2);
   for (let i = 0; i < n; i++) {
     const layer = layerIds[i]!;
     const vel = layers[layer];
     if (!vel) continue;
     const layerDensity = flowParticleDensityForLayer(density, layer);
     const o = i * FLOW_PARTICLE_STRIDE;
+    if (canGhostFade && isFlowParticleGhost(posAge, i)) continue;
     let px = posAge[o]!;
     let py = posAge[o + 1]!;
     let pz = posAge[o + 2]!;
@@ -1513,10 +1634,14 @@ export function advectFlowParticles(
     const expired = age > ageMax;
     const stuck = speed <= 1e-5 && age > ageMax * 0.5;
     if (expired || stuck) {
-      respawnParticle(
-        posAge, i, layer, half, gridSpacing, gridPoints, frameIdx,
-        trailHist, trailSteps, layerDensity, densityRes, layers, M,
-      );
+      if (canGhostFade) {
+        beginFlowParticleGhost(posAge, i, trailSteps);
+      } else {
+        respawnParticle(
+          posAge, i, layer, half, gridSpacing, gridPoints, frameIdx,
+          trailHist, trailSteps, layerDensity, densityRes, layers, M,
+        );
+      }
       continue;
     }
     px += cx * dt;
@@ -1524,10 +1649,14 @@ export function advectFlowParticles(
     pz += cz * dt;
     age += dt;
     if (alpha > 1e-6 && hash01(i, frameIdx, 919) < alpha) {
-      respawnParticle(
-        posAge, i, layer, half, gridSpacing, gridPoints, frameIdx,
-        trailHist, trailSteps, layerDensity, densityRes, layers, M,
-      );
+      if (canGhostFade) {
+        beginFlowParticleGhost(posAge, i, trailSteps);
+      } else {
+        respawnParticle(
+          posAge, i, layer, half, gridSpacing, gridPoints, frameIdx,
+          trailHist, trailSteps, layerDensity, densityRes, layers, M,
+        );
+      }
       continue;
     }
     posAge[o] = px;
