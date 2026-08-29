@@ -7,6 +7,7 @@ npm test              # all suites
 npm test flow          # filter by path segment
 npm test cloud
 npm test isosurface
+npm run test:bench:exprShare  # URL fragment length comparison table
 npm run test:coverage  # c8 line coverage (HTML → coverage/index.html)
 ```
 
@@ -22,7 +23,7 @@ npm run test:coverage  # c8 line coverage (HTML → coverage/index.html)
 | `model/` | — | Expressions list, param animation, keyframe cache |
 | `symbols/` | — | Classification, params, registry |
 | `expr/` | — | Expression error reporting |
-| `persistence/` | — | Document schema + IndexedDB storage |
+| `persistence/` | — | Document schema, IndexedDB storage, expr URL benchmarks |
 | `integration/` | — | Browser smoke tests (Playwright; needs `npm run dev`) |
 | `helpers/` | — | Shared assert, grid sampling, DOM stub, suite runner |
 
