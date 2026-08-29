@@ -586,17 +586,45 @@ export function flowTrailSpeedStats(
   return { min: vmin, max: vmax, mean: sum / nonzero, nonzero, total };
 }
 
-/** Particle color range: flowVMin=0; flowVMax from live trail speeds, vRef only if trails are empty. */
+function flowColorSpeedSpan(hi: number): number {
+  return Math.max(hi * 0.12, 1e-6);
+}
+
+/** Particle color range: trail min–max, widened with field percentiles when spread is tiny. */
 export function resolveFlowParticleColorRange(
   trailHist: Float32Array | null,
   count: number,
   trailSteps: number,
   vRef: number,
+  fieldRange: [number, number] | null = null,
 ): [min: number, max: number] {
-  const trailMax = trailHist && trailSteps >= 2
-    ? flowTrailSpeedMax(trailHist, count, trailSteps)
+  const stats = trailHist && trailSteps >= 2
+    ? flowTrailSpeedStats(trailHist, count, trailSteps)
     : null;
-  if (trailMax != null && trailMax > 1e-8) return [0, trailMax];
+
+  if (stats && stats.max > 1e-8) {
+    let lo = stats.min;
+    let hi = stats.max;
+    const span = hi - lo;
+    const minSpan = flowColorSpeedSpan(hi);
+    if (span < minSpan * 0.35 && fieldRange && fieldRange[1] > fieldRange[0] + 1e-8) {
+      lo = fieldRange[0];
+      hi = fieldRange[1];
+    } else if (span < minSpan) {
+      lo = Math.max(0, hi - minSpan);
+    }
+    return [lo, hi];
+  }
+
+  if (fieldRange && fieldRange[1] > 1e-8) {
+    const lo = fieldRange[0];
+    const hi = fieldRange[1];
+    const span = hi - lo;
+    const minSpan = flowColorSpeedSpan(hi);
+    if (span < minSpan) return [Math.max(0, hi - minSpan), hi];
+    return [lo, hi];
+  }
+
   return [0, Math.max(vRef, 1e-6)];
 }
 

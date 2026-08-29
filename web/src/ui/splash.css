@@ -30,7 +30,10 @@ html:not([data-booting]) #splash {
   display: block;
   width: 160px;
   height: 160px;
+  border: none;
   border-radius: 28px;
+  background: transparent;
+  overflow: hidden;
   transform: translateZ(0);
   contain: layout style paint;
   pointer-events: none;

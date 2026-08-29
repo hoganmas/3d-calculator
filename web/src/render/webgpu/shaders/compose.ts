@@ -53,9 +53,8 @@ export function getSsaoShader(): string {
   return ssaoWgsl;
 }
 
-export function getFlowParticlesShader(maxGradStops: number = MAX_GRAD_STOPS): string {
+export function getFlowParticlesShader(): string {
   return inject(flowParticlesWgsl, {
-    MAX_GRAD_STOPS: maxGradStops,
     MAX_FLOW_TRAIL_STEPS,
   });
 }

@@ -204,8 +204,8 @@ export async function run() {
         const trailHist = new Float32Array(MAX_FLOW_TRAIL_STEPS * 5);
         trailHist[4] = 4;
         const [lo, hi] = resolveFlowParticleColorRange(trailHist, 1, 2, 2);
-        assert(Math.abs(lo) < 1e-6, "flowVMin zero");
         assert(Math.abs(hi - 4) < 1e-6, "flowVMax uses trail max");
+        assert(lo < hi, "flowVMin below flowVMax when spread widened");
       },
     },
     {
@@ -214,8 +214,19 @@ export async function run() {
         const trailHist = new Float32Array(MAX_FLOW_TRAIL_STEPS * 5);
         trailHist[4] = 3.3;
         const [lo, hi] = resolveFlowParticleColorRange(trailHist, 1, 2, 60);
-        assert(Math.abs(lo) < 1e-6, "flowVMin zero");
         assert(Math.abs(hi - 3.3) < 1e-6, "flowVMax uses trail max not vMax clamp");
+        assert(lo < hi, "min-max span for shader");
+      },
+    },
+    {
+      name: "resolveFlowParticleColorRange uses field range when trail spread is narrow",
+      fn: () => {
+        const trailHist = new Float32Array(MAX_FLOW_TRAIL_STEPS * 5);
+        trailHist[4] = 2;
+        trailHist[9] = 2.05;
+        const [lo, hi] = resolveFlowParticleColorRange(trailHist, 1, 2, 60, [0.5, 4]);
+        assert(Math.abs(lo - 0.5) < 1e-6, "field lo");
+        assert(Math.abs(hi - 4) < 1e-6, "field hi");
       },
     },
     {
