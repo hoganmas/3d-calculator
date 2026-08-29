@@ -56,14 +56,6 @@ export function setupDismissStorageKey(origin = getPageOrigin()): string {
   return `laplacian-webmcp-setup-dismissed:${origin}`;
 }
 
-export function isSetupDismissed(origin = getPageOrigin()): boolean {
-  try {
-    return localStorage.getItem(setupDismissStorageKey(origin)) === "1";
-  } catch {
-    return false;
-  }
-}
-
 export function dismissSetupPrompt(origin = getPageOrigin()) {
   try {
     localStorage.setItem(setupDismissStorageKey(origin), "1");

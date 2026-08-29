@@ -1,9 +1,5 @@
-import {
-  buildMcpConfigJson,
-  dismissSetupPrompt,
-  getPageOrigin,
-  isSetupDismissed,
-} from "./webmcpConfig.js";
+import { buildMcpConfigJson, dismissSetupPrompt } from "./webmcpConfig.js";
+import { enableWebMCP } from "./webmcp.js";
 
 const DIALOG_ID = "webmcpSetupDialog";
 const SNIPPET_ID = "webmcpConfigSnippet";
@@ -22,6 +18,7 @@ export function openWebmcpSetupDialog() {
   const dialog = document.getElementById(DIALOG_ID) as HTMLDialogElement | null;
   if (!dialog || typeof dialog.showModal !== "function") return;
   refreshSnippet();
+  void enableWebMCP();
   if (!dialog.open) dialog.showModal();
 }
 
@@ -47,12 +44,6 @@ export function initWebmcpSetupDialog() {
     if (ev.target === dialog) closeWebmcpSetupDialog(true);
   });
   dialog?.addEventListener("close", () => refreshSnippet());
-}
-
-/** First visit with WebMCP enabled — show setup once per origin. */
-export function maybeShowWebmcpSetupPrompt() {
-  if (isSetupDismissed(getPageOrigin())) return;
-  openWebmcpSetupDialog();
 }
 
 async function copyMcpConfigSnippet(btn: HTMLButtonElement) {

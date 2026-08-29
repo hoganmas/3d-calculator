@@ -205,7 +205,7 @@ export function buildCapabilities() {
     tools: TOOL_CATALOG,
     webmcp: {
       enable:
-        "On by default in dev and production builds (any http(s) host). Opt out with ?webmcp=0 or localStorage laplacian-webmcp=0.",
+        "Off by default. Opt in via Setup MCP, ?webmcp=1, or localStorage laplacian-webmcp=1. Opt out with ?webmcp=0.",
       relay:
         `@mcp-b/webmcp-local-relay with --widget-origin ${getWidgetOriginsForRelay()}. Local dev includes both 127.0.0.1 and localhost when applicable.`,
       setupDialog:

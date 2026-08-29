@@ -10,7 +10,7 @@ const page = await browser.newPage();
 const logs = [];
 page.on("console", (msg) => logs.push(`[${msg.type()}] ${msg.text()}`));
 
-await page.goto("http://127.0.0.1:5173/", { waitUntil: "networkidle", timeout: 60000 });
+await page.goto("http://127.0.0.1:5173/?webmcp=1", { waitUntil: "networkidle", timeout: 60000 });
 await page.waitForTimeout(4000);
 
 const result = await page.evaluate(async () => {
