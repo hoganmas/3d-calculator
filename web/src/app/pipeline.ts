@@ -2,6 +2,18 @@ import { MAX_DEG } from "../math/limits.js";
 import { fitScalarField } from "../math/fit.js";
 import { idctChebGrad3D } from "../math/idct.js";
 import {
+  ensureLobattoDegree,
+  idctLobatto3D,
+  lobattoChebToSeries,
+} from "../math/chebLobatto.js";
+import {
+  clearLobattoFitCache,
+  getLobattoLayerCache,
+  isProgressiveLobattoEnabled,
+  scheduleProgressiveUploadFit,
+  setLobattoLayerCache,
+} from "./progressiveFit.js";
+import {
   beginKeyframePass,
   clearKeyframeCaches,
   getKeyframeMetrics,
@@ -96,18 +108,31 @@ export function tickGpuKeyframeBlends() {
   return true;
 }
 
-export function uploadFit(opts: { fromAnim?: boolean } = {}) {
+export function uploadFit(
+  opts: {
+    fromAnim?: boolean;
+    fitDeg?: number;
+    progressive?: boolean;
+    progressiveFinal?: boolean;
+  } = {},
+) {
   const fromAnim = !!opts.fromAnim;
+  const progressive = !!opts.progressive;
   setErr("");
   try {
     const boxSize = Number(els.boxSize.value);
-    const deg = Number(els.deg.value);
+    const uiDeg = Number(els.deg.value);
+    const deg = opts.fitDeg ?? uiDeg;
     const densScale = Number(els.scale.value);
     const steps = Math.min(96, Math.max(8, Number(els.steps.value) || 32));
     els.steps.value = String(steps);
     if (!(boxSize > 0)) throw new Error("box size must be > 0");
     if (deg < 1 || deg > MAX_DEG) throw new Error(`poly deg must be 1…${MAX_DEG}`);
     const half = 0.5 * boxSize;
+
+    if (!progressive && !fromAnim) {
+      clearLobattoFitCache();
+    }
 
     const tUpload = performance.now();
     const { layers } = compileAllExprs({ rebuildUi: false });
@@ -391,15 +416,39 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
         continue;
       }
 
-      const skipHeavy = fromAnim || layers.length > 1;
-      const scalarFit = fitScalarField(L.compiled!, L.fn!, half, deg, {
-        skipL2: skipHeavy,
-        skipMono: skipHeavy,
-      });
+      const skipHeavy = fromAnim || layers.length > 1 || progressive;
+      const useLobatto =
+        progressive &&
+        isProgressiveLobattoEnabled() &&
+        L.role === "cloud" &&
+        !L.compiled?.operator;
+
+      let scalarFit;
+      if (useLobatto && L.fn) {
+        const cached = getLobattoLayerCache(L.item.id);
+        const lob = ensureLobattoDegree(cached, L.fn, half, deg);
+        setLobattoLayerCache(L.item.id, lob);
+        const idct = idctLobatto3D(lob.cheb, lob.deg, lob.deg + 1);
+        scalarFit = {
+          dens: idct.dens,
+          cheb: lob.cheb,
+          fitRelL2: NaN,
+          M: idct.M,
+          deg: lob.deg,
+        };
+      } else {
+        scalarFit = fitScalarField(L.compiled!, L.fn!, half, deg, {
+          skipL2: skipHeavy,
+          skipMono: skipHeavy,
+        });
+      }
       fittedCount++;
       M = scalarFit.M;
       if (L.role === "isosurface") {
-        const grad = idctChebGrad3D(scalarFit.cheb, scalarFit.deg, scalarFit.deg + 1);
+        const gradCheb = useLobatto
+          ? lobattoChebToSeries(scalarFit.cheb, scalarFit.deg)
+          : scalarFit.cheb;
+        const grad = idctChebGrad3D(gradCheb, scalarFit.deg, scalarFit.deg + 1);
         isosurfaceLayers.push({
           id: L.item.id,
           dens: scalarFit.dens,
@@ -477,7 +526,7 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
     if (Number.isFinite(fitRel)) state.lastFitRel = fitRel;
 
     if (cheb) state.worldCheb = cheb;
-    else if (!fromAnim) state.worldCheb = null;
+    else if (!fromAnim && opts.progressiveFinal) state.worldCheb = null;
     state.fitDeg = deg;
     // GPU iso keyframes: upload only on bake / dens CPU lerp / full fit.
     // Warm anim ticks only update blend uniforms.
@@ -541,15 +590,7 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
 }
 
 export function scheduleUploadFit(delay = FIT_DEBOUNCE_MS, opts = {}) {
-  state.pendingFitOpts = opts && typeof opts === "object" ? opts : {};
-  if (state.fitTimer) clearTimeout(state.fitTimer);
-  state.fitTimer = window.setTimeout(() => {
-    state.fitTimer = 0;
-    const fitOpts = state.pendingFitOpts;
-    state.pendingFitOpts = {};
-    if (!syncExprCompileState()) return;
-    uploadFit(fitOpts);
-  }, delay);
+  scheduleProgressiveUploadFit(uploadFit, delay, opts);
 }
 
 /** Scale / steps: no refit — update render uniforms only. */

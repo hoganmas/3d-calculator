@@ -31,16 +31,30 @@ fitChebyshevLobattoProgressive(fn, half, targetDeg, onStep)
 
 Each further doubling saves more; asymptotically ~87.5% of nodes are nested at each step.
 
-## Open questions before shipping
+## Benchmark results (2026-08-29)
 
-1. **IDCT grid mismatch** — march pipeline expects Chebyshev-root grid; Lobatto endpoints at ±half need grid/index mapping changes in `idct.ts` and shaders.
-2. **Spectral operators** — grad/laplacian/curl on Lobatto coeffs should work (same T_k basis) but need validation.
-3. **Endpoint inclusion** — Lobatto includes box faces; may help boundary-heavy fields, may hurt Runge near corners for non-smooth data.
-4. **Async integration** — progressive ladder + `onStep` maps naturally to `scheduleUploadFit` with generation tokens (same pattern as keyframes).
+Run: `npm run bench:lobatto` (or `bench:lobatto:quick`)  
+Output: `research/poly/results/lobatto_accuracy_benchmark.json`
 
-## Next steps
+Degrees 8–64, half=1, six expressions, 12³ probe grid.
 
-- [ ] Compare L2 error vs Gauss roots across preset expressions
-- [ ] Wire progressive ladder into pipeline behind a flag
-- [ ] Benchmark sample savings at deg 16/32/64
-- [ ] Decide whether to switch IDCT grid or evaluate Lobatto coeffs on root grid for rendering
+| Finding | Detail |
+|---------|--------|
+| Probe L2 ratio (Lobatto/Gauss) | ~0.24–1.31; ~1.0 by deg 16+ on smooth fields |
+| Grid max error | Both ~1e-7 on native grids |
+| DCT-I convention | Off-grid probes need `evalLobattoChebTensor3D` (endpoint halving) |
+
+## Pipeline integration (done)
+
+| Module | Role |
+|--------|------|
+| `web/src/app/progressiveFit.ts` | Ladder scheduler, cancellation, per-layer Lobatto cache |
+| `pipeline.ts` | Cloud layers → Lobatto progressive; iso/flow/operators → Gauss |
+
+Ladder: 4 → 8 → 16 → … → target. Toggle via `USE_LOBATTO_PROGRESSIVE`.
+
+## Remaining open questions
+
+1. **March grid** — Lobatto volume uses endpoint-inclusive grid; shaders sample in Cheb-index space (may need validation).
+2. **Isosurface grad** — still Gauss-grid `idctChebGrad3D`; dens/grad grid mismatch if iso uses Lobatto.
+3. **Spectral operators** on Lobatto coeffs — untested.

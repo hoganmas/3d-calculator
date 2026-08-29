@@ -10,7 +10,9 @@ import {
   lobattoIDCT1D,
   lobattoNodes,
   lobattoWorld,
+  lobattoLadderDegrees,
   refineLobatto3D,
+  ensureLobattoDegree,
 } from "../../src/math/chebLobatto.ts";
 import { idctCheb3D } from "../../src/math/idct.ts";
 import { assert } from "../helpers/assert.ts";
@@ -97,6 +99,30 @@ export async function run() {
         const state = fitChebyshevLobattoProgressive(fn, 1, 16, (s) => steps.push(s.deg));
         assert(state.deg === 16, `final deg ${state.deg}`);
         assert(steps.join(",") === "4,8,16", `steps ${steps.join(",")}`);
+      },
+    },
+    {
+      name: "ensureLobattoDegree matches full fit",
+      fn: () => {
+        const fn = compileExpr(String.raw`\exp(-(x^2+y^2+z^2))`).bind({});
+        const half = 1;
+        let cache = null;
+        cache = ensureLobattoDegree(cache, fn, half, 4);
+        cache = ensureLobattoDegree(cache, fn, half, 8);
+        const full = fitChebyshevLobatto3D(fn, half, 8, { skipL2: true }).lobatto;
+        let maxDiff = 0;
+        for (let i = 0; i < cache.cheb.length; i++) {
+          maxDiff = Math.max(maxDiff, Math.abs(cache.cheb[i]! - full.cheb[i]!));
+        }
+        assert(maxDiff < 1e-10, `cached refine diff ${maxDiff}`);
+      },
+    },
+    {
+      name: "lobattoLadderDegrees",
+      fn: () => {
+        assert(lobattoLadderDegrees(16).join(",") === "4,8,16", "pow2");
+        assert(lobattoLadderDegrees(20).join(",") === "4,8,16,20", "non-pow2");
+        assert(lobattoLadderDegrees(3).join(",") === "3", "small");
       },
     },
     {

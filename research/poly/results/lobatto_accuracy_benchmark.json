@@ -1,0 +1,1159 @@
+{
+  "started": "2026-08-29T17:53:50.557Z",
+  "finished": "2026-08-29T17:54:41.113Z",
+  "half": 1,
+  "degs": [
+    8,
+    12,
+    16,
+    24,
+    32,
+    48,
+    64
+  ],
+  "probes": 12,
+  "cases": [
+    "quadratic",
+    "blob",
+    "two-blobs",
+    "sincos",
+    "shell",
+    "soft-ellipsoid"
+  ],
+  "results": [
+    {
+      "case": "quadratic",
+      "deg": 8,
+      "gauss": {
+        "sampleMs": 0.8874169999999992,
+        "chebMs": 0.6431670000000054,
+        "totalMs": 1.6502079999999921,
+        "gridMaxErr": 1.1488608908649667e-7,
+        "probeRelL2": 1.2283734549032165e-15
+      },
+      "lobatto": {
+        "sampleMs": 0.2467499999999916,
+        "chebMs": 1.27854099999999,
+        "totalMs": 1.6691250000000082,
+        "gridMaxErr": 9.545777590602711e-8,
+        "probeRelL2": 5.283782252950256e-16
+      },
+      "progressive": {
+        "totalMs": 1.4298339999999996,
+        "samplesEvaluated": 729,
+        "fullSamples": 729,
+        "sampleSavingsPct": 0
+      },
+      "ratio": {
+        "probeRelL2": 0.23711385725422504
+      }
+    },
+    {
+      "case": "quadratic",
+      "deg": 12,
+      "gauss": {
+        "sampleMs": 0.6870000000000118,
+        "chebMs": 0.38058300000000145,
+        "totalMs": 1.0826669999999865,
+        "gridMaxErr": 1.1841497116193977e-7,
+        "probeRelL2": 1.1188783065353695e-15
+      },
+      "lobatto": {
+        "sampleMs": 0.7207909999999913,
+        "chebMs": 0.8653750000000002,
+        "totalMs": 1.5932080000000042,
+        "gridMaxErr": 6.609153091474695e-8,
+        "probeRelL2": 1.1519601440148047e-15
+      },
+      "progressive": {
+        "totalMs": 1.8043750000000216,
+        "samplesEvaluated": 2926,
+        "fullSamples": 2197,
+        "sampleSavingsPct": -33.2
+      },
+      "ratio": {
+        "probeRelL2": 0.5436650799914995
+      }
+    },
+    {
+      "case": "quadratic",
+      "deg": 16,
+      "gauss": {
+        "sampleMs": 0.9243329999999901,
+        "chebMs": 0.43633299999999053,
+        "totalMs": 1.3676249999999754,
+        "gridMaxErr": 1.1546241029947168e-7,
+        "probeRelL2": 2.5266491492955984e-15
+      },
+      "lobatto": {
+        "sampleMs": 0.6050420000000258,
+        "chebMs": 1.870207999999991,
+        "totalMs": 2.486333000000002,
+        "gridMaxErr": 1.1535019828201598e-7,
+        "probeRelL2": 1.8019976197135955e-15
+      },
+      "progressive": {
+        "totalMs": 3.0517920000000345,
+        "samplesEvaluated": 4913,
+        "fullSamples": 4913,
+        "sampleSavingsPct": 0
+      },
+      "ratio": {
+        "probeRelL2": 0.5109659462647484
+      }
+    },
+    {
+      "case": "quadratic",
+      "deg": 24,
+      "gauss": {
+        "sampleMs": 2.27633400000002,
+        "chebMs": 1.4644170000000258,
+        "totalMs": 3.7525830000000155,
+        "gridMaxErr": 1.1816051692647989e-7,
+        "probeRelL2": 5.0124938957680575e-15
+      },
+      "lobatto": {
+        "sampleMs": 2.1345000000000027,
+        "chebMs": 9.187958000000037,
+        "totalMs": 11.337041999999997,
+        "gridMaxErr": 1.1748828621094276e-7,
+        "probeRelL2": 1.8252582718722836e-15
+      },
+      "progressive": {
+        "totalMs": 14.358542,
+        "samplesEvaluated": 20538,
+        "fullSamples": 15625,
+        "sampleSavingsPct": -31.4
+      },
+      "ratio": {
+        "probeRelL2": 0.3035775675642692
+      }
+    },
+    {
+      "case": "quadratic",
+      "deg": 32,
+      "gauss": {
+        "sampleMs": 4.745499999999993,
+        "chebMs": 4.333499999999958,
+        "totalMs": 9.090167000000065,
+        "gridMaxErr": 1.187121450030304e-7,
+        "probeRelL2": 2.990419169955956e-15
+      },
+      "lobatto": {
+        "sampleMs": 4.850791999999956,
+        "chebMs": 27.724667000000068,
+        "totalMs": 32.5970420000001,
+        "gridMaxErr": 1.1878927486108637e-7,
+        "probeRelL2": 3.0019130197103856e-15
+      },
+      "progressive": {
+        "totalMs": 33.72162500000002,
+        "samplesEvaluated": 35937,
+        "fullSamples": 35937,
+        "sampleSavingsPct": 0
+      },
+      "ratio": {
+        "probeRelL2": 0.752280121926018
+      }
+    },
+    {
+      "case": "quadratic",
+      "deg": 48,
+      "gauss": {
+        "sampleMs": 15.712125000000015,
+        "chebMs": 20.862499999999955,
+        "totalMs": 36.595625000000155,
+        "gridMaxErr": 1.188375127192387e-7,
+        "probeRelL2": 1.3448370154331636e-14
+      },
+      "lobatto": {
+        "sampleMs": 18.097667,
+        "chebMs": 135.28491600000007,
+        "totalMs": 153.40495800000008,
+        "gridMaxErr": 1.1878378902707709e-7,
+        "probeRelL2": 3.4979614606177273e-15
+      },
+      "progressive": {
+        "totalMs": 182.68733299999985,
+        "samplesEvaluated": 153586,
+        "fullSamples": 117649,
+        "sampleSavingsPct": -30.5
+      },
+      "ratio": {
+        "probeRelL2": 0.24210076453287951
+      }
+    },
+    {
+      "case": "quadratic",
+      "deg": 64,
+      "gauss": {
+        "sampleMs": 41.625916999999845,
+        "chebMs": 66.26150000000007,
+        "totalMs": 107.89970799999992,
+        "gridMaxErr": 1.1913670672214494e-7,
+        "probeRelL2": 1.798093400374651e-14
+      },
+      "lobatto": {
+        "sampleMs": 37.189666999999645,
+        "chebMs": 464.4153329999999,
+        "totalMs": 501.65512499999977,
+        "gridMaxErr": 1.1905216723562262e-7,
+        "probeRelL2": 6.378497462533711e-15
+      },
+      "progressive": {
+        "totalMs": 527.1611250000001,
+        "samplesEvaluated": 274625,
+        "fullSamples": 274625,
+        "sampleSavingsPct": 0
+      },
+      "ratio": {
+        "probeRelL2": 0.33604760762956687
+      }
+    },
+    {
+      "case": "blob",
+      "deg": 8,
+      "gauss": {
+        "sampleMs": 0.25187499999992724,
+        "chebMs": 0.029292000001078122,
+        "totalMs": 0.28504199999952107,
+        "gridMaxErr": 3.524402714116803e-8,
+        "probeRelL2": 0.000022063508953956635
+      },
+      "lobatto": {
+        "sampleMs": 0.14412499999889405,
+        "chebMs": 0.13037500000064028,
+        "totalMs": 0.2787079999998241,
+        "gridMaxErr": 3.874387866087403e-8,
+        "probeRelL2": 0.000021545081425554058
+      },
+      "progressive": {
+        "totalMs": 0.27583400000003166,
+        "samplesEvaluated": 729,
+        "fullSamples": 729,
+        "sampleSavingsPct": 0
+      },
+      "ratio": {
+        "probeRelL2": 0.9765029429153376
+      }
+    },
+    {
+      "case": "blob",
+      "deg": 12,
+      "gauss": {
+        "sampleMs": 0.799791000001278,
+        "chebMs": 0.1435830000009446,
+        "totalMs": 0.9488750000000437,
+        "gridMaxErr": 4.0945161816630105e-8,
+        "probeRelL2": 4.061500405178226e-8
+      },
+      "lobatto": {
+        "sampleMs": 0.449665999998615,
+        "chebMs": 0.680833000000348,
+        "totalMs": 1.1397909999996045,
+        "gridMaxErr": 3.625136058005296e-8,
+        "probeRelL2": 4.516972227835341e-8
+      },
+      "progressive": {
+        "totalMs": 1.4754589999993186,
+        "samplesEvaluated": 2926,
+        "fullSamples": 2197,
+        "sampleSavingsPct": -33.2
+      },
+      "ratio": {
+        "probeRelL2": 1.112143707005923
+      }
+    },
+    {
+      "case": "blob",
+      "deg": 16,
+      "gauss": {
+        "sampleMs": 1.1473750000004657,
+        "chebMs": 0.31850000000122236,
+        "totalMs": 1.4690840000002936,
+        "gridMaxErr": 3.625914490879012e-8,
+        "probeRelL2": 2.902332891050314e-8
+      },
+      "lobatto": {
+        "sampleMs": 0.9325840000001335,
+        "chebMs": 1.7742920000000595,
+        "totalMs": 2.7109999999993306,
+        "gridMaxErr": 4.005195830547592e-8,
+        "probeRelL2": 2.903600225148292e-8
+      },
+      "progressive": {
+        "totalMs": 2.963208000001032,
+        "samplesEvaluated": 4913,
+        "fullSamples": 4913,
+        "sampleSavingsPct": 0
+      },
+      "ratio": {
+        "probeRelL2": 1.0004366260184085
+      }
+    },
+    {
+      "case": "blob",
+      "deg": 24,
+      "gauss": {
+        "sampleMs": 3.692457999999533,
+        "chebMs": 1.4021250000005239,
+        "totalMs": 5.098500000000058,
+        "gridMaxErr": 4.046900492493677e-8,
+        "probeRelL2": 2.904106651360448e-8
+      },
+      "lobatto": {
+        "sampleMs": 3.218833999999333,
+        "chebMs": 9.307166000000507,
+        "totalMs": 12.535541000001103,
+        "gridMaxErr": 3.91269412425288e-8,
+        "probeRelL2": 2.9041067399541673e-8
+      },
+      "progressive": {
+        "totalMs": 15.107874999999694,
+        "samplesEvaluated": 20538,
+        "fullSamples": 15625,
+        "sampleSavingsPct": -31.4
+      },
+      "ratio": {
+        "probeRelL2": 0.9999999960723618
+      }
+    },
+    {
+      "case": "blob",
+      "deg": 32,
+      "gauss": {
+        "sampleMs": 8.001207999999679,
+        "chebMs": 4.381667000001471,
+        "totalMs": 12.388249999999971,
+        "gridMaxErr": 4.306689593835955e-8,
+        "probeRelL2": 2.904106813491014e-8
+      },
+      "lobatto": {
+        "sampleMs": 7.851458999999522,
+        "chebMs": 26.7165419999983,
+        "totalMs": 34.59887499999968,
+        "gridMaxErr": 4.3397800908451245e-8,
+        "probeRelL2": 2.904106840362112e-8
+      },
+      "progressive": {
+        "totalMs": 35.45325000000048,
+        "samplesEvaluated": 35937,
+        "fullSamples": 35937,
+        "sampleSavingsPct": 0
+      },
+      "ratio": {
+        "probeRelL2": 0.9999999748187982
+      }
+    },
+    {
+      "case": "blob",
+      "deg": 48,
+      "gauss": {
+        "sampleMs": 30.021833999999217,
+        "chebMs": 19.508624999998574,
+        "totalMs": 49.53529200000048,
+        "gridMaxErr": 4.2882957740353334e-8,
+        "probeRelL2": 2.9041062450391527e-8
+      },
+      "lobatto": {
+        "sampleMs": 19.496374999998807,
+        "chebMs": 134.3328330000004,
+        "totalMs": 153.83595799999966,
+        "gridMaxErr": 4.206492532077277e-8,
+        "probeRelL2": 2.9041067052414412e-8
+      },
+      "progressive": {
+        "totalMs": 188.87312500000007,
+        "samplesEvaluated": 153586,
+        "fullSamples": 117649,
+        "sampleSavingsPct": -30.5
+      },
+      "ratio": {
+        "probeRelL2": 1.0000001240320586
+      }
+    },
+    {
+      "case": "blob",
+      "deg": 64,
+      "gauss": {
+        "sampleMs": 59.3065000000006,
+        "chebMs": 59.332000000000335,
+        "totalMs": 118.64424999999937,
+        "gridMaxErr": 4.385434038134406e-8,
+        "probeRelL2": 2.904106619351466e-8
+      },
+      "lobatto": {
+        "sampleMs": 44.66204199999993,
+        "chebMs": 451.1411670000016,
+        "totalMs": 495.8121250000004,
+        "gridMaxErr": 4.3397800908451245e-8,
+        "probeRelL2": 2.904106534073566e-8
+      },
+      "progressive": {
+        "totalMs": 527.9127919999992,
+        "samplesEvaluated": 274625,
+        "fullSamples": 274625,
+        "sampleSavingsPct": 0
+      },
+      "ratio": {
+        "probeRelL2": 0.9999999362014148
+      }
+    },
+    {
+      "case": "two-blobs",
+      "deg": 8,
+      "gauss": {
+        "sampleMs": 0.46358300000065356,
+        "chebMs": 0.03391700000065612,
+        "totalMs": 0.5,
+        "gridMaxErr": 2.885581007472382e-8,
+        "probeRelL2": 0.0073768707297125645
+      },
+      "lobatto": {
+        "sampleMs": 0.14224999999714782,
+        "chebMs": 0.15391699999963748,
+        "totalMs": 0.32700000000113505,
+        "gridMaxErr": 5.77865315598558e-8,
+        "probeRelL2": 0.007403144085995504
+      },
+      "progressive": {
+        "totalMs": 0.33104199999797856,
+        "samplesEvaluated": 729,
+        "fullSamples": 729,
+        "sampleSavingsPct": 0
+      },
+      "ratio": {
+        "probeRelL2": 1.0035615855617628
+      }
+    },
+    {
+      "case": "two-blobs",
+      "deg": 12,
+      "gauss": {
+        "sampleMs": 0.8256249999976717,
+        "chebMs": 0.12208400000235997,
+        "totalMs": 0.9520840000004682,
+        "gridMaxErr": 3.03934345469159e-8,
+        "probeRelL2": 0.00017117664702550125
+      },
+      "lobatto": {
+        "sampleMs": 0.6062920000003942,
+        "chebMs": 0.6292079999984708,
+        "totalMs": 1.2767919999969308,
+        "gridMaxErr": 6.142275799092545e-8,
+        "probeRelL2": 0.00021397304730822334
+      },
+      "progressive": {
+        "totalMs": 1.4172080000025744,
+        "samplesEvaluated": 2926,
+        "fullSamples": 2197,
+        "sampleSavingsPct": -33.2
+      },
+      "ratio": {
+        "probeRelL2": 1.2500130772809006
+      }
+    },
+    {
+      "case": "two-blobs",
+      "deg": 16,
+      "gauss": {
+        "sampleMs": 1.4156660000007832,
+        "chebMs": 0.3209580000002461,
+        "totalMs": 1.7393340000016906,
+        "gridMaxErr": 3.3987019754100345e-8,
+        "probeRelL2": 0.0000022412631381343284
+      },
+      "lobatto": {
+        "sampleMs": 0.943834000001516,
+        "chebMs": 1.815958999999566,
+        "totalMs": 2.7880000000004657,
+        "gridMaxErr": 6.142275799092545e-8,
+        "probeRelL2": 0.000002044975457456273
+      },
+      "progressive": {
+        "totalMs": 3.1623749999998836,
+        "samplesEvaluated": 4913,
+        "fullSamples": 4913,
+        "sampleSavingsPct": 0
+      },
+      "ratio": {
+        "probeRelL2": 0.9124209566245444
+      }
+    },
+    {
+      "case": "two-blobs",
+      "deg": 24,
+      "gauss": {
+        "sampleMs": 3.801917000000685,
+        "chebMs": 1.436916000002384,
+        "totalMs": 5.24316700000054,
+        "gridMaxErr": 3.825464878204343e-8,
+        "probeRelL2": 1.3588300588314711e-8
+      },
+      "lobatto": {
+        "sampleMs": 3.267582999997103,
+        "chebMs": 9.367000000002008,
+        "totalMs": 12.68554199999926,
+        "gridMaxErr": 6.142275799092545e-8,
+        "probeRelL2": 1.3584081164508524e-8
+      },
+      "progressive": {
+        "totalMs": 14.916000000001077,
+        "samplesEvaluated": 20538,
+        "fullSamples": 15625,
+        "sampleSavingsPct": -31.4
+      },
+      "ratio": {
+        "probeRelL2": 0.9996894075555538
+      }
+    },
+    {
+      "case": "two-blobs",
+      "deg": 32,
+      "gauss": {
+        "sampleMs": 8.551542000001064,
+        "chebMs": 4.177459000002273,
+        "totalMs": 12.734791000002588,
+        "gridMaxErr": 3.7028580424092183e-8,
+        "probeRelL2": 1.3571204876512541e-8
+      },
+      "lobatto": {
+        "sampleMs": 7.426167000001442,
+        "chebMs": 31.130624999997963,
+        "totalMs": 38.598957999998674,
+        "gridMaxErr": 6.142275799092545e-8,
+        "probeRelL2": 1.3571204333313856e-8
+      },
+      "progressive": {
+        "totalMs": 35.192291999999725,
+        "samplesEvaluated": 35937,
+        "fullSamples": 35937,
+        "sampleSavingsPct": 0
+      },
+      "ratio": {
+        "probeRelL2": 0.9999998862887572
+      }
+    },
+    {
+      "case": "two-blobs",
+      "deg": 48,
+      "gauss": {
+        "sampleMs": 28.866290999998455,
+        "chebMs": 19.897625000001426,
+        "totalMs": 48.770040999999765,
+        "gridMaxErr": 3.8716423955698076e-8,
+        "probeRelL2": 1.3571200793986196e-8
+      },
+      "lobatto": {
+        "sampleMs": 22.93629200000214,
+        "chebMs": 137.78166599999895,
+        "totalMs": 160.76408400000219,
+        "gridMaxErr": 6.142275799092545e-8,
+        "probeRelL2": 1.357120455073548e-8
+      },
+      "progressive": {
+        "totalMs": 201.37433299999975,
+        "samplesEvaluated": 153586,
+        "fullSamples": 117649,
+        "sampleSavingsPct": -30.5
+      },
+      "ratio": {
+        "probeRelL2": 1.000000203132289
+      }
+    },
+    {
+      "case": "two-blobs",
+      "deg": 64,
+      "gauss": {
+        "sampleMs": 67.33995900000082,
+        "chebMs": 65.28954199999862,
+        "totalMs": 132.63783300000068,
+        "gridMaxErr": 5.5851179681098984e-8,
+        "probeRelL2": 1.3571206488841612e-8
+      },
+      "lobatto": {
+        "sampleMs": 56.5936249999977,
+        "chebMs": 653.7757920000004,
+        "totalMs": 710.414417,
+        "gridMaxErr": 6.142275799092545e-8,
+        "probeRelL2": 1.3571204052119547e-8
+      },
+      "progressive": {
+        "totalMs": 545.0403330000008,
+        "samplesEvaluated": 274625,
+        "fullSamples": 274625,
+        "sampleSavingsPct": 0
+      },
+      "ratio": {
+        "probeRelL2": 0.9999997467637225
+      }
+    },
+    {
+      "case": "sincos",
+      "deg": 8,
+      "gauss": {
+        "sampleMs": 0.16191699999762932,
+        "chebMs": 0.03516699999818229,
+        "totalMs": 0.19966700000077253,
+        "gridMaxErr": 3.8598124696420655e-8,
+        "probeRelL2": 2.3486396110746196e-8
+      },
+      "lobatto": {
+        "sampleMs": 0.13945799999783048,
+        "chebMs": 0.12837500000023283,
+        "totalMs": 0.27966599999854225,
+        "gridMaxErr": 3.9163311815748614e-8,
+        "probeRelL2": 3.0384992092425464e-8
+      },
+      "progressive": {
+        "totalMs": 0.27816600000005565,
+        "samplesEvaluated": 729,
+        "fullSamples": 729,
+        "sampleSavingsPct": 0
+      },
+      "ratio": {
+        "probeRelL2": 1.2937272562134623
+      }
+    },
+    {
+      "case": "sincos",
+      "deg": 12,
+      "gauss": {
+        "sampleMs": 0.6289170000018203,
+        "chebMs": 0.1197920000013255,
+        "totalMs": 0.7516670000004524,
+        "gridMaxErr": 4.113358897939179e-8,
+        "probeRelL2": 2.00979123870146e-8
+      },
+      "lobatto": {
+        "sampleMs": 0.4288750000014261,
+        "chebMs": 0.7435000000004948,
+        "totalMs": 1.1878749999996217,
+        "gridMaxErr": 3.097821332787021e-8,
+        "probeRelL2": 2.0097918136719928e-8
+      },
+      "progressive": {
+        "totalMs": 1.515625,
+        "samplesEvaluated": 2926,
+        "fullSamples": 2197,
+        "sampleSavingsPct": -33.2
+      },
+      "ratio": {
+        "probeRelL2": 1.0000002363282814
+      }
+    },
+    {
+      "case": "sincos",
+      "deg": 16,
+      "gauss": {
+        "sampleMs": 0.87354200000118,
+        "chebMs": 0.3440000000009604,
+        "totalMs": 1.2203340000014578,
+        "gridMaxErr": 4.0111019283806115e-8,
+        "probeRelL2": 2.0097910094110208e-8
+      },
+      "lobatto": {
+        "sampleMs": 0.7404999999998836,
+        "chebMs": 1.9035839999996824,
+        "totalMs": 2.650166999999783,
+        "gridMaxErr": 3.948534277320448e-8,
+        "probeRelL2": 2.00979098730837e-8
+      },
+      "progressive": {
+        "totalMs": 2.7570830000004207,
+        "samplesEvaluated": 4913,
+        "fullSamples": 4913,
+        "sampleSavingsPct": 0
+      },
+      "ratio": {
+        "probeRelL2": 0.9999999392460986
+      }
+    },
+    {
+      "case": "sincos",
+      "deg": 24,
+      "gauss": {
+        "sampleMs": 2.633624999998574,
+        "chebMs": 1.4639169999973092,
+        "totalMs": 4.100624999999127,
+        "gridMaxErr": 4.6086590654859094e-8,
+        "probeRelL2": 2.0097907577071936e-8
+      },
+      "lobatto": {
+        "sampleMs": 2.2730420000007143,
+        "chebMs": 9.34454199999891,
+        "totalMs": 11.625832999998238,
+        "gridMaxErr": 4.2242889630728087e-8,
+        "probeRelL2": 2.0097909993611214e-8
+      },
+      "progressive": {
+        "totalMs": 14.547582999999577,
+        "samplesEvaluated": 20538,
+        "fullSamples": 15625,
+        "sampleSavingsPct": -31.4
+      },
+      "ratio": {
+        "probeRelL2": 1.0000000704819247
+      }
+    },
+    {
+      "case": "sincos",
+      "deg": 32,
+      "gauss": {
+        "sampleMs": 6.066083999998227,
+        "chebMs": 4.4976669999996375,
+        "totalMs": 10.568250000000262,
+        "gridMaxErr": 4.6057089808648755e-8,
+        "probeRelL2": 2.0097910228747322e-8
+      },
+      "lobatto": {
+        "sampleMs": 5.290291000001162,
+        "chebMs": 29.676791999998386,
+        "totalMs": 34.999541999997746,
+        "gridMaxErr": 4.313380375098319e-8,
+        "probeRelL2": 2.0097910401434136e-8
+      },
+      "progressive": {
+        "totalMs": 34.687291999998706,
+        "samplesEvaluated": 35937,
+        "fullSamples": 35937,
+        "sampleSavingsPct": 0
+      },
+      "ratio": {
+        "probeRelL2": 0.9999999588358622
+      }
+    },
+    {
+      "case": "sincos",
+      "deg": 48,
+      "gauss": {
+        "sampleMs": 21.10883300000205,
+        "chebMs": 20.516499999997905,
+        "totalMs": 41.63058400000227,
+        "gridMaxErr": 4.499592520801343e-8,
+        "probeRelL2": 2.009790149913008e-8
+      },
+      "lobatto": {
+        "sampleMs": 13.783834000001661,
+        "chebMs": 137.08887499999764,
+        "totalMs": 150.8834999999999,
+        "gridMaxErr": 4.431826239326142e-8,
+        "probeRelL2": 2.0097910348511716e-8
+      },
+      "progressive": {
+        "totalMs": 183.5402090000025,
+        "samplesEvaluated": 153586,
+        "fullSamples": 117649,
+        "sampleSavingsPct": -30.5
+      },
+      "ratio": {
+        "probeRelL2": 1.0000003905572552
+      }
+    },
+    {
+      "case": "sincos",
+      "deg": 64,
+      "gauss": {
+        "sampleMs": 43.78375000000233,
+        "chebMs": 64.88562499999898,
+        "totalMs": 108.67437500000233,
+        "gridMaxErr": 4.700842148874784e-8,
+        "probeRelL2": 2.0097911048446066e-8
+      },
+      "lobatto": {
+        "sampleMs": 35.39704200000051,
+        "chebMs": 462.31758400000035,
+        "totalMs": 497.7268330000006,
+        "gridMaxErr": 4.5067172105284214e-8,
+        "probeRelL2": 2.0097908391200737e-8
+      },
+      "progressive": {
+        "totalMs": 547.689666000002,
+        "samplesEvaluated": 274625,
+        "fullSamples": 274625,
+        "sampleSavingsPct": 0
+      },
+      "ratio": {
+        "probeRelL2": 0.9999998180285932
+      }
+    },
+    {
+      "case": "shell",
+      "deg": 8,
+      "gauss": {
+        "sampleMs": 0.20274999999674037,
+        "chebMs": 0.030375000002095476,
+        "totalMs": 0.23541600000316976,
+        "gridMaxErr": 3.8086973686013437e-8,
+        "probeRelL2": 0.01578994747642257
+      },
+      "lobatto": {
+        "sampleMs": 0.11091599999781465,
+        "chebMs": 0.12816700000257697,
+        "totalMs": 0.24229200000263518,
+        "gridMaxErr": 5.892384158379116e-8,
+        "probeRelL2": 0.017576421555756817
+      },
+      "progressive": {
+        "totalMs": 0.272292000001471,
+        "samplesEvaluated": 729,
+        "fullSamples": 729,
+        "sampleSavingsPct": 0
+      },
+      "ratio": {
+        "probeRelL2": 1.1131399633849755
+      }
+    },
+    {
+      "case": "shell",
+      "deg": 12,
+      "gauss": {
+        "sampleMs": 0.537624999997206,
+        "chebMs": 0.11487499999930151,
+        "totalMs": 0.6550419999985024,
+        "gridMaxErr": 3.284783800516777e-8,
+        "probeRelL2": 0.0010606615331911274
+      },
+      "lobatto": {
+        "sampleMs": 0.3595830000049318,
+        "chebMs": 0.6022499999962747,
+        "totalMs": 0.9658329999947455,
+        "gridMaxErr": 5.7334620290694165e-8,
+        "probeRelL2": 0.0012839588011007166
+      },
+      "progressive": {
+        "totalMs": 1.4529169999950682,
+        "samplesEvaluated": 2926,
+        "fullSamples": 2197,
+        "sampleSavingsPct": -33.2
+      },
+      "ratio": {
+        "probeRelL2": 1.2105264129232272
+      }
+    },
+    {
+      "case": "shell",
+      "deg": 16,
+      "gauss": {
+        "sampleMs": 1.1158749999958673,
+        "chebMs": 0.3186249999998836,
+        "totalMs": 1.4376250000059372,
+        "gridMaxErr": 4.1195128863691366e-8,
+        "probeRelL2": 0.00007180991802315306
+      },
+      "lobatto": {
+        "sampleMs": 0.917542000002868,
+        "chebMs": 1.847750000000815,
+        "totalMs": 2.770209000002069,
+        "gridMaxErr": 4.014139376451453e-8,
+        "probeRelL2": 0.00006685715764382204
+      },
+      "progressive": {
+        "totalMs": 2.7318749999976717,
+        "samplesEvaluated": 4913,
+        "fullSamples": 4913,
+        "sampleSavingsPct": 0
+      },
+      "ratio": {
+        "probeRelL2": 0.9310295775763847
+      }
+    },
+    {
+      "case": "shell",
+      "deg": 24,
+      "gauss": {
+        "sampleMs": 3.619749999998021,
+        "chebMs": 1.4916249999951106,
+        "totalMs": 5.116624999995111,
+        "gridMaxErr": 4.9412111957636284e-8,
+        "probeRelL2": 4.2738853756540276e-7
+      },
+      "lobatto": {
+        "sampleMs": 2.64824999999837,
+        "chebMs": 8.850374999994528,
+        "totalMs": 11.508791999993264,
+        "gridMaxErr": 4.970956657412984e-8,
+        "probeRelL2": 5.232914051765061e-7
+      },
+      "progressive": {
+        "totalMs": 14.296583999996074,
+        "samplesEvaluated": 20538,
+        "fullSamples": 15625,
+        "sampleSavingsPct": -31.4
+      },
+      "ratio": {
+        "probeRelL2": 1.2243926964747731
+      }
+    },
+    {
+      "case": "shell",
+      "deg": 32,
+      "gauss": {
+        "sampleMs": 7.413958999997703,
+        "chebMs": 4.410833999994793,
+        "totalMs": 11.829458000000159,
+        "gridMaxErr": 4.941363473953686e-8,
+        "probeRelL2": 5.4700062423336876e-8
+      },
+      "lobatto": {
+        "sampleMs": 5.938249999999243,
+        "chebMs": 27.47391699999571,
+        "totalMs": 33.42299999999523,
+        "gridMaxErr": 5.1747650275935086e-8,
+        "probeRelL2": 7.159146519656118e-8
+      },
+      "progressive": {
+        "totalMs": 34.055709000000206,
+        "samplesEvaluated": 35937,
+        "fullSamples": 35937,
+        "sampleSavingsPct": 0
+      },
+      "ratio": {
+        "probeRelL2": 1.3088004056320321
+      }
+    },
+    {
+      "case": "shell",
+      "deg": 48,
+      "gauss": {
+        "sampleMs": 25.747167000001355,
+        "chebMs": 19.5836249999993,
+        "totalMs": 45.33516600000439,
+        "gridMaxErr": 3.974783135962667e-8,
+        "probeRelL2": 3.0265412341632024e-8
+      },
+      "lobatto": {
+        "sampleMs": 17.923917000000074,
+        "chebMs": 134.52579100000003,
+        "totalMs": 152.45874999999796,
+        "gridMaxErr": 3.797143022232774e-8,
+        "probeRelL2": 2.9598962957259482e-8
+      },
+      "progressive": {
+        "totalMs": 186.2722500000018,
+        "samplesEvaluated": 153586,
+        "fullSamples": 117649,
+        "sampleSavingsPct": -30.5
+      },
+      "ratio": {
+        "probeRelL2": 0.9779798023291559
+      }
+    },
+    {
+      "case": "shell",
+      "deg": 64,
+      "gauss": {
+        "sampleMs": 62.25824999999895,
+        "chebMs": 64.50258299999405,
+        "totalMs": 126.76616700000159,
+        "gridMaxErr": 4.1813127252265936e-8,
+        "probeRelL2": 1.6931478904821927e-8
+      },
+      "lobatto": {
+        "sampleMs": 46.08245899999747,
+        "chebMs": 489.67095800000243,
+        "totalMs": 535.7653750000027,
+        "gridMaxErr": 4.0415851443320605e-8,
+        "probeRelL2": 1.748801109244608e-8
+      },
+      "progressive": {
+        "totalMs": 556.4648330000055,
+        "samplesEvaluated": 274625,
+        "fullSamples": 274625,
+        "sampleSavingsPct": 0
+      },
+      "ratio": {
+        "probeRelL2": 1.0328696127422186
+      }
+    },
+    {
+      "case": "soft-ellipsoid",
+      "deg": 8,
+      "gauss": {
+        "sampleMs": 0.22075000000040745,
+        "chebMs": 0.0305000000007567,
+        "totalMs": 0.25366599999688333,
+        "gridMaxErr": 3.524402714116803e-8,
+        "probeRelL2": 0.0003016842879245174
+      },
+      "lobatto": {
+        "sampleMs": 0.12083400000119582,
+        "chebMs": 0.1322920000020531,
+        "totalMs": 0.2563330000048154,
+        "gridMaxErr": 3.301183248982653e-8,
+        "probeRelL2": 0.0002982050183813644
+      },
+      "progressive": {
+        "totalMs": 0.29424999999901047,
+        "samplesEvaluated": 729,
+        "fullSamples": 729,
+        "sampleSavingsPct": 0
+      },
+      "ratio": {
+        "probeRelL2": 0.9884671834649474
+      }
+    },
+    {
+      "case": "soft-ellipsoid",
+      "deg": 12,
+      "gauss": {
+        "sampleMs": 0.6677500000005239,
+        "chebMs": 0.18195799999375595,
+        "totalMs": 0.8524999999935972,
+        "gridMaxErr": 3.5283955313047954e-8,
+        "probeRelL2": 0.0000017022527075270055
+      },
+      "lobatto": {
+        "sampleMs": 0.8584579999951529,
+        "chebMs": 1.173917000000074,
+        "totalMs": 2.03966699999728,
+        "gridMaxErr": 3.661974068425167e-8,
+        "probeRelL2": 0.000002186821450368271
+      },
+      "progressive": {
+        "totalMs": 1.80529199999728,
+        "samplesEvaluated": 2926,
+        "fullSamples": 2197,
+        "sampleSavingsPct": -33.2
+      },
+      "ratio": {
+        "probeRelL2": 1.2846632226895223
+      }
+    },
+    {
+      "case": "soft-ellipsoid",
+      "deg": 16,
+      "gauss": {
+        "sampleMs": 1.402458000004117,
+        "chebMs": 0.5256250000020373,
+        "totalMs": 1.9345420000026934,
+        "gridMaxErr": 3.334147569145074e-8,
+        "probeRelL2": 1.3801077840761526e-8
+      },
+      "lobatto": {
+        "sampleMs": 1.2707079999963753,
+        "chebMs": 2.046249999999418,
+        "totalMs": 3.328125,
+        "gridMaxErr": 3.758881184090512e-8,
+        "probeRelL2": 1.3052845737780497e-8
+      },
+      "progressive": {
+        "totalMs": 3.0825000000040745,
+        "samplesEvaluated": 4913,
+        "fullSamples": 4913,
+        "sampleSavingsPct": 0
+      },
+      "ratio": {
+        "probeRelL2": 0.945784448330871
+      }
+    },
+    {
+      "case": "soft-ellipsoid",
+      "deg": 24,
+      "gauss": {
+        "sampleMs": 3.6907500000015716,
+        "chebMs": 1.5140840000021853,
+        "totalMs": 5.208291000002646,
+        "gridMaxErr": 3.724939845461961e-8,
+        "probeRelL2": 1.1857846946571715e-8
+      },
+      "lobatto": {
+        "sampleMs": 2.782583000000159,
+        "chebMs": 9.532624999999825,
+        "totalMs": 12.323833000002196,
+        "gridMaxErr": 3.758881184090512e-8,
+        "probeRelL2": 1.1857847344831593e-8
+      },
+      "progressive": {
+        "totalMs": 15.204416000000492,
+        "samplesEvaluated": 20538,
+        "fullSamples": 15625,
+        "sampleSavingsPct": -31.4
+      },
+      "ratio": {
+        "probeRelL2": 0.9999999492538507
+      }
+    },
+    {
+      "case": "soft-ellipsoid",
+      "deg": 32,
+      "gauss": {
+        "sampleMs": 8.958582999999635,
+        "chebMs": 4.879249999998137,
+        "totalMs": 13.844666000004509,
+        "gridMaxErr": 3.860042074865788e-8,
+        "probeRelL2": 1.1857848363086669e-8
+      },
+      "lobatto": {
+        "sampleMs": 7.424707999998645,
+        "chebMs": 29.926666999999725,
+        "totalMs": 37.36645800000406,
+        "gridMaxErr": 3.833833972510803e-8,
+        "probeRelL2": 1.1857848785731177e-8
+      },
+      "progressive": {
+        "totalMs": 38.315041000001656,
+        "samplesEvaluated": 35937,
+        "fullSamples": 35937,
+        "sampleSavingsPct": 0
+      },
+      "ratio": {
+        "probeRelL2": 0.9999999513102693
+      }
+    },
+    {
+      "case": "soft-ellipsoid",
+      "deg": 48,
+      "gauss": {
+        "sampleMs": 26.172459000001254,
+        "chebMs": 20.55462499999703,
+        "totalMs": 46.73225000000093,
+        "gridMaxErr": 3.870265241623372e-8,
+        "probeRelL2": 1.1857843295054046e-8
+      },
+      "lobatto": {
+        "sampleMs": 19.2768750000032,
+        "chebMs": 136.40499999999884,
+        "totalMs": 155.6924579999977,
+        "gridMaxErr": 3.760700939547945e-8,
+        "probeRelL2": 1.185784684400092e-8
+      },
+      "progressive": {
+        "totalMs": 188.8473329999979,
+        "samplesEvaluated": 153586,
+        "fullSamples": 117649,
+        "sampleSavingsPct": -30.5
+      },
+      "ratio": {
+        "probeRelL2": 1.0000002149587066
+      }
+    },
+    {
+      "case": "soft-ellipsoid",
+      "deg": 64,
+      "gauss": {
+        "sampleMs": 62.612833999999566,
+        "chebMs": 64.84341600000334,
+        "totalMs": 127.4619160000002,
+        "gridMaxErr": 3.848319085619778e-8,
+        "probeRelL2": 1.185784675374938e-8
+      },
+      "lobatto": {
+        "sampleMs": 45.37125000000378,
+        "chebMs": 462.8054160000029,
+        "totalMs": 508.1888340000005,
+        "gridMaxErr": 3.860188579896118e-8,
+        "probeRelL2": 1.185784587241648e-8
+      },
+      "progressive": {
+        "totalMs": 561.7519580000007,
+        "samplesEvaluated": 274625,
+        "fullSamples": 274625,
+        "sampleSavingsPct": 0
+      },
+      "ratio": {
+        "probeRelL2": 0.9999998413428017
+      }
+    }
+  ]
+}

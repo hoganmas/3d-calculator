@@ -16,7 +16,9 @@
     "test:isosurface": "tsx tests/run.mjs isosurface",
     "test:integration": "tsx tests/integration/run.mjs",
     "test:coverage": "c8 tsx tests/run.mjs",
-    "test:coverage:flow": "c8 tsx tests/run.mjs flow"
+    "test:coverage:flow": "c8 tsx tests/run.mjs flow",
+    "bench:lobatto": "tsx scripts/bench-lobatto-accuracy.mjs",
+    "bench:lobatto:quick": "tsx scripts/bench-lobatto-accuracy.mjs --quick"
   },
   "dependencies": {
     "@cortex-js/compute-engine": "^0.119.0",

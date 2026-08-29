@@ -349,3 +349,222 @@ export function fitChebyshevLobattoProgressive(
 export function lobattoWorld(j: number, deg: number, half: number): number {
   return fromUnit(lobattoNodes(deg)[j]!, half);
 }
+
+/** Chebyshev T_0..T_deg at normalized coord u ∈ [-1,1]. */
+export function chebValues(u: number, deg: number): Float64Array {
+  const n = deg + 1;
+  const T = new Float64Array(n);
+  T[0] = 1;
+  if (n > 1) T[1] = u;
+  for (let i = 2; i < n; i++) T[i] = 2 * u * T[i - 1]! - T[i - 2]!;
+  return T;
+}
+
+/** Per-mode weight: DCT-I coeffs → standard Chebyshev series coeffs. */
+export function lobattoSeriesWeight(i: number, deg: number): number {
+  return i === 0 || i === deg ? 0.5 : 1;
+}
+
+/** Evaluate Lobatto DCT-I coefficient tensor (endpoint-halving convention). */
+export function evalLobattoChebTensor3D(
+  cheb: ArrayLike<number>,
+  deg: number,
+  half: number,
+  x: number,
+  y: number,
+  z: number,
+): number {
+  const n = deg + 1;
+  const Tx = chebValues(x / half, deg);
+  const Ty = chebValues(y / half, deg);
+  const Tz = chebValues(z / half, deg);
+  let s = 0;
+  for (let i = 0; i < n; i++) {
+    const wi = lobattoSeriesWeight(i, deg);
+    for (let j = 0; j < n; j++) {
+      const wj = lobattoSeriesWeight(j, deg);
+      for (let k = 0; k < n; k++) {
+        const wk = lobattoSeriesWeight(k, deg);
+        s +=
+          (cheb[i + j * n + k * n * n] ?? 0) *
+          wi *
+          wj *
+          wk *
+          Tx[i]! *
+          Ty[j]! *
+          Tz[k]!;
+      }
+    }
+  }
+  return s;
+}
+
+/** Relative L2 error of Lobatto fit vs truth on uniform interior probe grid. */
+export function probeRelL2Lobatto(
+  cheb: ArrayLike<number>,
+  deg: number,
+  half: number,
+  fn: (x: number, y: number, z: number) => number,
+  probes = 12,
+): number {
+  let num = 0;
+  let den = 0;
+  for (let ix = 0; ix < probes; ix++) {
+    for (let iy = 0; iy < probes; iy++) {
+      for (let iz = 0; iz < probes; iz++) {
+        const x = -half + (2 * half * (ix + 0.5)) / probes;
+        const y = -half + (2 * half * (iy + 0.5)) / probes;
+        const z = -half + (2 * half * (iz + 0.5)) / probes;
+        const truth = fn(x, y, z);
+        const approx = evalLobattoChebTensor3D(cheb, deg, half, x, y, z);
+        const d = approx - truth;
+        num += d * d;
+        den += truth * truth;
+      }
+    }
+  }
+  return Math.sqrt(num) / (Math.sqrt(den) + 1e-15);
+}
+
+/** Evaluate tensor Cheb series at world (x,y,z). For Gauss-root DCT coefficients. */
+export function evalChebTensor3D(
+  cheb: ArrayLike<number>,
+  deg: number,
+  half: number,
+  x: number,
+  y: number,
+  z: number,
+): number {
+  const n = deg + 1;
+  const Tx = chebValues(x / half, deg);
+  const Ty = chebValues(y / half, deg);
+  const Tz = chebValues(z / half, deg);
+  let s = 0;
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      for (let k = 0; k < n; k++) {
+        s += (cheb[i + j * n + k * n * n] ?? 0) * Tx[i]! * Ty[j]! * Tz[k]!;
+      }
+    }
+  }
+  return s;
+}
+
+/** Relative L2 error of Cheb fit vs truth on uniform interior probe grid. */
+export function probeRelL2Cheb(
+  cheb: ArrayLike<number>,
+  deg: number,
+  half: number,
+  fn: (x: number, y: number, z: number) => number,
+  probes = 12,
+): number {
+  let num = 0;
+  let den = 0;
+  for (let ix = 0; ix < probes; ix++) {
+    for (let iy = 0; iy < probes; iy++) {
+      for (let iz = 0; iz < probes; iz++) {
+        const x = -half + (2 * half * (ix + 0.5)) / probes;
+        const y = -half + (2 * half * (iy + 0.5)) / probes;
+        const z = -half + (2 * half * (iz + 0.5)) / probes;
+        const truth = fn(x, y, z);
+        const approx = evalChebTensor3D(cheb, deg, half, x, y, z);
+        const d = approx - truth;
+        num += d * d;
+        den += truth * truth;
+      }
+    }
+  }
+  return Math.sqrt(num) / (Math.sqrt(den) + 1e-15);
+}
+
+/** Convert Lobatto DCT-I tensor → standard Chebyshev series coefficients. */
+export function lobattoChebToSeries(cheb: ArrayLike<number>, deg: number): Float32Array {
+  const n = deg + 1;
+  const out = new Float32Array(n * n * n);
+  for (let i = 0; i < n; i++) {
+    const wi = lobattoSeriesWeight(i, deg);
+    for (let j = 0; j < n; j++) {
+      const wj = lobattoSeriesWeight(j, deg);
+      for (let k = 0; k < n; k++) {
+        const idx = i + j * n + k * n * n;
+        out[idx] = (cheb[idx] ?? 0) * wi * wj * lobattoSeriesWeight(k, deg);
+      }
+    }
+  }
+  return out;
+}
+
+export interface LobattoScalarFitResult {
+  dens: Float32Array;
+  cheb: Float32Array;
+  fitRelL2: number;
+  M: number;
+  deg: number;
+  timing?: ChebFitTiming;
+}
+
+/** Plain scalar field via Lobatto fit → Lobatto-grid IDCT. */
+export function fitScalarFieldLobatto(
+  fn: (x: number, y: number, z: number) => number,
+  half: number,
+  deg: number,
+  opts: { skipL2?: boolean } = {},
+): LobattoScalarFitResult {
+  const fit = fitChebyshevLobatto3D(fn, half, deg, { skipL2: opts.skipL2 ?? true });
+  const idct = idctLobatto3D(fit.cheb, fit.deg, fit.deg + 1);
+  return {
+    dens: idct.dens,
+    cheb: fit.cheb,
+    fitRelL2: fit.fitRelL2,
+    M: idct.M,
+    deg: fit.deg,
+    timing: fit.timing,
+  };
+}
+
+/** Advance cached Lobatto state toward targetDeg (nested when doubling). */
+export function ensureLobattoDegree(
+  cache: LobattoFitState | null,
+  fn: (x: number, y: number, z: number) => number,
+  half: number,
+  targetDeg: number,
+): LobattoFitState {
+  const target = Math.max(0, Math.min(MAX_DEG, targetDeg | 0));
+  let state = cache;
+  if (!state || Math.abs(state.half - half) > 1e-12 || state.deg > target) {
+    state = fitChebyshevLobatto3D(fn, half, Math.min(4, target), { skipL2: true }).lobatto;
+  }
+  while (state.deg < target) {
+    const next = Math.min(target, state.deg * 2);
+    if (next <= state.deg) {
+      state = fitChebyshevLobatto3D(fn, half, target, { skipL2: true }).lobatto;
+      break;
+    }
+    state = refineLobatto3D(state, fn, next);
+  }
+  if (state.deg !== target) {
+    state = fitChebyshevLobatto3D(fn, half, target, { skipL2: true }).lobatto;
+  }
+  return state;
+}
+
+/** Ladder degrees for progressive preview: 4 → 8 → … → target. */
+export function lobattoLadderDegrees(targetDeg: number): number[] {
+  const target = Math.max(1, Math.min(MAX_DEG, targetDeg | 0));
+  const steps: number[] = [];
+  let d = Math.min(4, target);
+  steps.push(d);
+  while (d < target) {
+    const next = Math.min(target, d * 2);
+    if (next !== d) steps.push(next);
+    d = next;
+  }
+  return steps;
+}
+
+/** Gauss-root world coordinate (matches shipping fit / idct grid). */
+export function gaussWorld(i: number, deg: number, half: number): number {
+  const M = deg + 1;
+  const u = Math.cos((Math.PI * (2 * i + 1)) / (2 * M));
+  return u * half;
+}
