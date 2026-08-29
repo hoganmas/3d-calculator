@@ -15,6 +15,7 @@
     isAnimPopoverOpen,
     closeAnimPopover,
   } from "./popovers.ts";
+  import { readParamPlayChrome } from "./paramChrome.ts";
 
   interface Props {
     item: ExprItem;
@@ -141,7 +142,12 @@
     }
   }
 
-  const p = $derived(getParam(paramName));
+  const p = $derived.by(() => {
+    void paramTick;
+    return getParam(paramName);
+  });
+
+  const playChrome = $derived.by(() => readParamPlayChrome(paramName, paramTick));
 </script>
 
 {#if p}
@@ -176,12 +182,12 @@
       <button
         type="button"
         class="expr-param-play"
-        class:on={p.animating}
-        disabled={p.driven}
-        title={p.driven ? "Driven by equation" : p.animating ? "Pause animation" : "Animate between min and max"}
+        class:on={playChrome.animating}
+        disabled={playChrome.disabled}
+        title={playChrome.title}
         onclick={onPlayClick}
       >
-        {p.animating ? "⏸" : "▶"}
+        {playChrome.icon}
       </button>
       <button
         bind:this={optsBtn}

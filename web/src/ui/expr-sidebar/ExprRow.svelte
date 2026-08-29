@@ -72,8 +72,14 @@ import {
   let mfEl: MathfieldElement | undefined = $state();
 
   const warn = $derived(getExprWarning(item.id));
-  const paramName = $derived(neededParamForItem(item));
-  const paramErr = $derived(paramName ? getParam(paramName)?.error ?? null : null);
+  const paramName = $derived.by(() => {
+    void paramTick;
+    return neededParamForItem(item, paramTick);
+  });
+  const paramErr = $derived.by(() => {
+    void paramTick;
+    return paramName ? getParam(paramName)?.error ?? null : null;
+  });
   const rowError = $derived(warn ?? paramErr);
   const isParamDef = $derived(isParameterRow(item.latex || ""));
   const grad = $derived(resolveExprGradient(item));

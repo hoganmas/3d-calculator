@@ -108,6 +108,7 @@
     const focusSnap = pendingFocus ?? captureFocus();
     items = listExpressions();
     selectedId = getSelectedId();
+    paramTick++;
     restoreFocus(focusSnap, epoch);
     endSuppressAutoCommit();
   }
@@ -199,10 +200,16 @@
       selected={item.id === selectedId}
       {paramTick}
       suppressAutoCommit={isSuppressingAutoCommit}
-      onExprChange={() => onExprChange()}
+      onExprChange={() => {
+        paramTick++;
+        onExprChange();
+      }}
       onStructuralChange={handleStructuralChange}
       {onColorChange}
-      onParamChange={() => (onParamChange ?? onExprChange)()}
+      onParamChange={() => {
+        paramTick++;
+        (onParamChange ?? onExprChange)();
+      }}
       onSelect={handleSelect}
       onFocusNav={handleFocusNav}
       onSplit={(focus) => {

@@ -204,7 +204,8 @@ export function isDeclarationRow(latex: string): boolean {
 }
 
 /** Params needed under a row: owning `a=…` declaration only. */
-export function neededParamForItem(item: ExprItem): string | null {
+export function neededParamForItem(item: ExprItem, tick = 0): string | null {
+  void tick;
   const classified = String(item.latex || "").trim() ? classifyKind(item.latex) : null;
   if (classified?.kind === "parameter" && classified.paramName) {
     const p = getParam(classified.paramName);
