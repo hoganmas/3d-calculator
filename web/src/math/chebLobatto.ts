@@ -13,6 +13,7 @@
  */
 
 import { MAX_DEG } from "./limits.js";
+import { idctChebGrad3D } from "./idct.js";
 import type { ChebFitResult, ChebFitTiming } from "../types/models.js";
 
 /** Lobatto nodes u_j = cos(π j / deg), j = 0..deg. Length deg+1. */
@@ -546,6 +547,66 @@ export function ensureLobattoDegree(
     state = fitChebyshevLobatto3D(fn, half, target, { skipL2: true }).lobatto;
   }
   return state;
+}
+
+/** Next rung on the degree ladder strictly after currentDeg, or null if at target. */
+export function nextLadderDeg(currentDeg: number, targetDeg: number): number | null {
+  for (const d of lobattoLadderDegrees(targetDeg)) {
+    if (d > currentDeg) return d;
+  }
+  return null;
+}
+
+/** First ladder step (coarse start degree). */
+export function startLadderDeg(targetDeg: number): number {
+  return lobattoLadderDegrees(targetDeg)[0] ?? Math.max(1, targetDeg | 0);
+}
+
+export interface ScalarKeyframeBakeResult {
+  frame: {
+    dens: Float32Array;
+    cheb: Float32Array;
+    fitRel: number;
+    gx?: Float32Array;
+    gy?: Float32Array;
+    gz?: Float32Array;
+  };
+  lobatto: LobattoFitState;
+  deg: number;
+  timing?: ChebFitTiming;
+}
+
+/** Bake one scalar keyframe slot at target degree using Lobatto (+ optional iso grad). */
+export function bakeScalarKeyframeFrame(
+  fn: (x: number, y: number, z: number) => number,
+  half: number,
+  deg: number,
+  role: "cloud" | "isosurface",
+  lobattoCache: LobattoFitState | null,
+  stages?: { sampleMs: number; chebMs: number; idctMs: number; gradMs: number } | null,
+): ScalarKeyframeBakeResult {
+  const tFit = performance.now();
+  const lob = ensureLobattoDegree(lobattoCache, fn, half, deg);
+  if (stages) stages.sampleMs += performance.now() - tFit;
+
+  let tStage = performance.now();
+  const idct = idctLobatto3D(lob.cheb, lob.deg, lob.deg + 1);
+  if (stages) stages.idctMs += performance.now() - tStage;
+  const frame: ScalarKeyframeBakeResult["frame"] = {
+    dens: idct.dens,
+    cheb: lob.cheb,
+    fitRel: NaN,
+  };
+  if (role === "isosurface") {
+    tStage = performance.now();
+    const series = lobattoChebToSeries(lob.cheb, lob.deg);
+    const grad = idctChebGrad3D(series, lob.deg, lob.deg + 1);
+    if (stages) stages.gradMs += performance.now() - tStage;
+    frame.gx = grad.gx;
+    frame.gy = grad.gy;
+    frame.gz = grad.gz;
+  }
+  return { frame, lobatto: lob, deg: lob.deg };
 }
 
 /** Ladder degrees for progressive preview: 4 → 8 → … → target. */

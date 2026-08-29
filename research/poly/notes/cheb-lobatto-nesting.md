@@ -53,6 +53,18 @@ Degrees 8–64, half=1, six expressions, 12³ probe grid.
 
 Ladder: 4 → 8 → 16 → … → target. Toggle via `USE_LOBATTO_PROGRESSIVE`.
 
+## Animation keyframes (done)
+
+Progressive degree ladder is integrated into [`keyframes.ts`](../3dgs-approx-lobatto/web/src/model/keyframes.ts):
+
+- Sync-bakes current blend pair `(i0,i1)` at **deg min(4, target)** only
+- Async pump uses **degree-first** scheduling: outer loop = ladder rungs (4→8→16→…), inner loop = K slots (blend pair first, one slot per frame)
+- Pump runs **after each render frame** via `tickKeyframePump()` (one work unit per frame); anim ticks pass `deferSyncBake` to skip sync blend bakes
+- All slots reach deg 4 before any slot advances to deg 8, etc.
+- **Cloud / isosurface**: Lobatto via `bakeScalarKeyframeFrame` + per-k `lobattoByK` cache
+- **Flow**: `fitVectorField` at each ladder step (no nested reuse)
+- `readyCount` / `allKeyframesComplete()` count slots at **targetDeg** only
+
 ## Remaining open questions
 
 1. **March grid** — Lobatto volume uses endpoint-inclusive grid; shaders sample in Cheb-index space (may need validation).

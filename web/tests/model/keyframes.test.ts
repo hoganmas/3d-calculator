@@ -7,6 +7,7 @@ import {
   clearKeyframeCaches,
   DEFAULT_KEYFRAME_K,
   ensureLayerKeyframes,
+  getKeyframeProgress,
   getKeyframeMetrics,
   hasActiveKeyframeCaches,
   keyframeAnimParam,
@@ -16,6 +17,7 @@ import {
   sampleFlowLayerKeyframes,
   sampleLayerKeyframes,
   setKeyframeProgressHandler,
+  tickKeyframePump,
 } from "../../src/model/keyframes.ts";
 import { syncParamsFromDefinitions, updateParam } from "../../src/model/params.ts";
 import { assert, assertNear } from "../helpers/assert.ts";
@@ -70,10 +72,26 @@ function flowKeyframeOpts(layerId: string, paramName: string) {
 async function waitForComplete(timeoutMs = 8000) {
   const t0 = Date.now();
   while (!allKeyframesComplete()) {
+    tickKeyframePump(8);
     if (Date.now() - t0 > timeoutMs) {
       throw new Error("keyframe async fill timed out");
     }
-    await new Promise((r) => setTimeout(r, 15));
+    await new Promise((r) => setTimeout(r, 0));
+  }
+}
+
+async function waitForProgress(
+  layerId: string,
+  predicate: (p: NonNullable<ReturnType<typeof getKeyframeProgress>>) => boolean,
+  timeoutMs = 8000,
+) {
+  const t0 = Date.now();
+  while (true) {
+    tickKeyframePump(8);
+    const p = getKeyframeProgress(layerId);
+    if (p && predicate(p)) return p;
+    if (Date.now() - t0 > timeoutMs) throw new Error("waitForProgress timed out");
+    await new Promise((r) => setTimeout(r, 0));
   }
 }
 
@@ -112,6 +130,107 @@ export async function run() {
         assert(hasActiveKeyframeCaches(), "cache active");
         assert(!result.complete, "async fill remains");
         assertNear(result.M, 5, 0.1, "grid M for deg=4");
+      },
+    },
+    {
+      name: "progressive: sync pair starts coarse at high target deg",
+      fn: () => {
+        clearKeyframeCaches();
+        setupAnimParam("t", 0.25);
+        const opts = { ...keyframeOpts("layer-prog-coarse", "t"), deg: 16, K: 3 };
+        const result = ensureLayerKeyframes(opts);
+        assert(result.baked, "sync baked");
+        assertNear(result.M, 5, 0.1, "M=5 for coarse deg 4");
+        assert(result.readyCount === 0, "not at target yet");
+        const prog = getKeyframeProgress("layer-prog-coarse");
+        assert(!!prog, "progress");
+        assert(prog!.frameDeg[result.blend.i0] === 4, "i0 coarse");
+        assert(prog!.frameDeg[result.blend.i1] === 4, "i1 coarse");
+        assert(prog!.frameDeg[result.blend.i0] === prog!.frameDeg[result.blend.i1], "blend lockstep");
+      },
+    },
+    {
+      name: "progressive: async reaches target degree",
+      fn: async () => {
+        clearKeyframeCaches();
+        setupAnimParam("t", 0.5);
+        const opts = { ...keyframeOpts("layer-prog-full", "t"), deg: 16, K: 3 };
+        ensureLayerKeyframes(opts);
+        await waitForComplete(20000);
+        const prog = getKeyframeProgress("layer-prog-full");
+        assert(!!prog, "progress");
+        assert(prog!.readyCount === 3, "all K at target");
+        for (let k = 0; k < 3; k++) {
+          assert(prog!.frameDeg[k] === 16, `frame ${k} at target deg`);
+        }
+      },
+    },
+    {
+      name: "progressive: degree-first fills all slots before next rung",
+      fn: async () => {
+        clearKeyframeCaches();
+        setupAnimParam("t", 0.5);
+        const opts = { ...keyframeOpts("layer-prog-phase", "t"), deg: 16, K: 3 };
+        let sawAllCoarse = false;
+        setKeyframeProgressHandler(() => {
+          const p = getKeyframeProgress("layer-prog-phase");
+          if (p?.frameDeg.every((d) => d === 4)) sawAllCoarse = true;
+        });
+        const result = ensureLayerKeyframes(opts);
+        const afterSync = getKeyframeProgress("layer-prog-phase")!;
+        const third = [0, 1, 2].find((k) => k !== result.blend.i0 && k !== result.blend.i1)!;
+        assert(afterSync.frameDeg[third] === 0, "third slot still empty after sync");
+        assert(afterSync.frameDeg[result.blend.i0] === 4, "blend coarse after sync");
+        await waitForComplete(20000);
+        assert(sawAllCoarse, "all slots reached deg 4 before advancing");
+        setKeyframeProgressHandler(null);
+      },
+    },
+    {
+      name: "progressive: blend pair stays lockstep during async fill",
+      fn: async () => {
+        clearKeyframeCaches();
+        setupAnimParam("t", 0.5);
+        const opts = { ...keyframeOpts("layer-prog-lock", "t"), deg: 16, K: 3 };
+        ensureLayerKeyframes(opts);
+        await waitForProgress("layer-prog-lock", (p) => {
+          const blend = peekKeyframeBlend("layer-prog-lock");
+          if (!blend) return false;
+          return p.frameDeg[blend.i0]! >= 8 && p.frameDeg[blend.i1]! >= 8;
+        });
+        const prog = getKeyframeProgress("layer-prog-lock")!;
+        const { i0, i1 } = peekKeyframeBlend("layer-prog-lock")!;
+        assert(prog.frameDeg[i0] === prog.frameDeg[i1], "lockstep during refine");
+      },
+    },
+    {
+      name: "progressive: cache resets when target deg changes",
+      fn: () => {
+        clearKeyframeCaches();
+        setupAnimParam("t", 0.5);
+        const opts = { ...keyframeOpts("layer-prog-deg", "t"), deg: 8, K: 3 };
+        ensureLayerKeyframes(opts);
+        const second = ensureLayerKeyframes({ ...opts, deg: 16 });
+        assert(second.baked, "rebuilt on deg change");
+        const prog = getKeyframeProgress("layer-prog-deg");
+        assert(!!prog, "progress");
+        assert(prog!.targetDeg === 16, "new target");
+        assert(prog!.frameDeg[second.blend.i0] === 4, "restarted coarse");
+      },
+    },
+    {
+      name: "progressive: flow completes at target degree",
+      fn: async () => {
+        clearKeyframeCaches();
+        setupAnimParam("t", 0.5);
+        const opts = { ...flowKeyframeOpts("layer-flow-prog", "t"), deg: 16, K: 3 };
+        const first = ensureLayerKeyframes(opts);
+        assertNear(first.M, 5, 0.1, "coarse flow grid");
+        await waitForComplete(30000);
+        const prog = getKeyframeProgress("layer-flow-prog");
+        assert(!!prog, "progress");
+        assert(prog!.readyCount === 3, "flow K complete");
+        assert(prog!.frameDeg.every((d) => d === 16), "all flow frames at target");
       },
     },
     {

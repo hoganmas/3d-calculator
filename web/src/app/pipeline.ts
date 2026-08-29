@@ -299,6 +299,7 @@ export function uploadFit(
             baseParams,
             half,
             deg,
+            deferSyncBake: fromAnim && prevHasKf,
           });
           if (sample.baked) keyframeBaked = true;
           M = sample.M || M;
@@ -328,6 +329,7 @@ export function uploadFit(
             baseParams,
             half,
             deg,
+            deferSyncBake: fromAnim && prevHasKf,
           });
           if (sample.baked) keyframeBaked = true;
           M = sample.M || M;
@@ -366,6 +368,7 @@ export function uploadFit(
             baseParams,
             half,
             deg,
+            deferSyncBake: fromAnim && prevHasKf,
           });
           if (sample.baked) keyframeBaked = true;
           M = sample.M || M;

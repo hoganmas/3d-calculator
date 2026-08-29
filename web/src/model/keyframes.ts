@@ -2,9 +2,13 @@
  * Dens/iso/flow keyframe cache for animated free parameters.
  */
 
-import { fitChebyshev3D } from "../math/fit.js";
 import { fitVectorField } from "../math/fitVector.js";
-import { idctCheb3D, idctChebGrad3D } from "../math/idct.js";
+import {
+  bakeScalarKeyframeFrame,
+  lobattoLadderDegrees,
+  startLadderDeg,
+  type LobattoFitState,
+} from "../math/chebLobatto.js";
 import { getParam } from "./params.js";
 import type { CompiledExpr, CompiledVectorExpr, KeyframeFrame } from "../types/models.js";
 
@@ -41,16 +45,23 @@ interface LayerKeyframeCache {
   max: number;
   K: number;
   deg: number;
+  targetDeg: number;
   half: number;
   role: KeyframeRole;
   isoLevel: number;
   latex: string;
   frames: (KeyframeFrame | null)[];
+  frameDeg: number[];
+  lobattoByK: Map<number, LobattoFitState>;
   scratch: KeyframeFrame;
   gen: number;
   readyCount: number;
   bakeOpts: BakeFrameOpts;
 }
+
+type KeyframeWork =
+  | { kind: "coarse"; k: number }
+  | { kind: "refine"; k: number; nextDeg: number };
 
 interface KeyframeProgressInfo {
   layerId: string;
@@ -73,6 +84,8 @@ interface EnsureKeyframesOpts {
   half: number;
   deg: number;
   K?: number;
+  /** Skip sync blend bake; async pump fills after render (anim ticks). */
+  deferSyncBake?: boolean;
 }
 
 interface BakeDetail extends BakeStages {
@@ -90,7 +103,8 @@ interface BakeDetail extends BakeStages {
 
 const caches = new Map<string, LayerKeyframeCache>();
 
-const asyncJobs = new Map<string, { gen: number; timer: number; cancelled: boolean }>();
+const asyncJobs = new Map<string, { gen: number; cancelled: boolean }>();
+const pendingPumpLayers = new Set<string>();
 
 let onKeyframeProgress: ((info: KeyframeProgressInfo) => void) | null = null;
 
@@ -128,12 +142,13 @@ function cancelAsyncJob(layerId: string) {
   const job = asyncJobs.get(layerId);
   if (!job) return;
   job.cancelled = true;
-  if (job.timer) clearTimeout(job.timer);
   asyncJobs.delete(layerId);
+  pendingPumpLayers.delete(layerId);
 }
 
 export function clearKeyframeCaches() {
   for (const id of [...asyncJobs.keys()]) cancelAsyncJob(id);
+  pendingPumpLayers.clear();
   caches.clear();
   lastBakeMs = 0;
   lastLerpMs = 0;
@@ -153,6 +168,18 @@ export function allKeyframesComplete() {
     if (cache.readyCount < cache.K) return false;
   }
   return true;
+}
+
+/** Test / debug: per-slot degree progress for a cached layer. */
+export function getKeyframeProgress(layerId: string) {
+  const cache = caches.get(layerId);
+  if (!cache) return null;
+  return {
+    frameDeg: cache.frameDeg.slice(),
+    targetDeg: cache.targetDeg,
+    readyCount: cache.readyCount,
+    K: cache.K,
+  };
 }
 
 /**
@@ -286,67 +313,131 @@ function cacheMatches(
   );
 }
 
-/**
- * @param {object} opts
- * @param {number} k
- * @param {{ sampleMs: number, chebMs: number, idctMs: number, gradMs: number }} stages
- * @returns {KeyframeFrame}
- */
-function bakeFrameAt(opts: BakeFrameOpts, k: number, stages: BakeStages | null): KeyframeFrame {
+function paramValueForK(opts: BakeFrameOpts, k: number): number {
   const st = getParam(opts.paramName);
   const min = st?.min ?? opts.min ?? 0;
   const max = st?.max ?? opts.max ?? 1;
   const K = opts.K ?? DEFAULT_KEYFRAME_K;
-  const a = min + ((max - min) * k) / Math.max(1, K - 1);
-  const params = { ...opts.baseParams, [opts.paramName]: a };
+  return min + ((max - min) * k) / Math.max(1, K - 1);
+}
 
+function bakeFlowFrameAtDeg(
+  opts: BakeFrameOpts,
+  k: number,
+  deg: number,
+): KeyframeFrame {
+  if (!opts.vectorCompiled) throw new Error("flow keyframes require vectorCompiled");
+  const params = { ...opts.baseParams, [opts.paramName]: paramValueForK(opts, k) };
+  const vectorFn = opts.vectorCompiled.bind(params);
+  const fit = fitVectorField(opts.vectorCompiled, vectorFn, opts.half, deg, {
+    skipL2: true,
+    params,
+  });
+  return {
+    fx: fit.fx,
+    fy: fit.fy,
+    fz: fit.fz,
+    cheb: fit.cheb,
+    fitRel: fit.fitRel,
+  };
+}
+
+function bakeFrameAtDeg(
+  cache: LayerKeyframeCache,
+  k: number,
+  deg: number,
+  stages: BakeStages | null,
+): KeyframeFrame {
+  const opts = cache.bakeOpts;
   if (opts.role === "flow") {
-    if (!opts.vectorCompiled) throw new Error("flow keyframes require vectorCompiled");
-    const vectorFn = opts.vectorCompiled.bind(params);
-    const fit = fitVectorField(opts.vectorCompiled, vectorFn, opts.half, opts.deg, {
-      skipL2: true,
-      params,
-    });
-    return {
-      fx: fit.fx,
-      fy: fit.fy,
-      fz: fit.fz,
-      cheb: fit.cheb,
-      fitRel: fit.fitRel,
-    };
+    return bakeFlowFrameAtDeg(opts, k, deg);
   }
-
   if (!opts.compiled) throw new Error("scalar keyframes require compiled");
+  const params = { ...opts.baseParams, [opts.paramName]: paramValueForK(opts, k) };
   const fn = opts.compiled.bind(params);
-  const fit = fitChebyshev3D(fn, opts.half, opts.deg, { skipL2: true, skipMono: true });
-  if (fit.timing && stages) {
-    stages.sampleMs += fit.timing.sampleMs;
-    stages.chebMs += fit.timing.chebMs;
-  }
-  let tStage = performance.now();
-  const idct = idctCheb3D(fit.cheb, fit.deg, fit.deg + 1);
-  if (stages) stages.idctMs += performance.now() - tStage;
-  const frame: KeyframeFrame = { dens: idct.dens, cheb: fit.cheb, fitRel: fit.fitRelL2 };
-  if (opts.role === "isosurface") {
-    tStage = performance.now();
-    const grad = idctChebGrad3D(fit.cheb, fit.deg, fit.deg + 1);
-    if (stages) stages.gradMs += performance.now() - tStage;
-    frame.gx = grad.gx;
-    frame.gy = grad.gy;
-    frame.gz = grad.gz;
+  const role = opts.role === "isosurface" ? "isosurface" : "cloud";
+  const baked = bakeScalarKeyframeFrame(
+    fn,
+    opts.half,
+    deg,
+    role,
+    cache.lobattoByK.get(k) ?? null,
+    stages,
+  );
+  cache.lobattoByK.set(k, baked.lobatto);
+  const frame: KeyframeFrame = {
+    dens: baked.frame.dens,
+    cheb: baked.frame.cheb,
+    fitRel: baked.frame.fitRel,
+  };
+  if (role === "isosurface") {
+    frame.gx = baked.frame.gx;
+    frame.gy = baked.frame.gy;
+    frame.gz = baked.frame.gz;
   }
   return frame;
 }
 
-/**
- * @param {LayerKeyframeCache} cache
- * @param {number} k
- * @param {KeyframeFrame} frame
- */
-function storeFrame(cache: LayerKeyframeCache, k: number, frame: KeyframeFrame) {
-  if (cache.frames[k]) return;
+function updateFrame(cache: LayerKeyframeCache, k: number, frame: KeyframeFrame, deg: number) {
+  const prevDeg = cache.frameDeg[k] ?? 0;
   cache.frames[k] = frame;
-  cache.readyCount++;
+  cache.frameDeg[k] = deg;
+  if (prevDeg === cache.targetDeg && deg !== cache.targetDeg) cache.readyCount--;
+  if (prevDeg !== cache.targetDeg && deg === cache.targetDeg) cache.readyCount++;
+}
+
+function pickNextKeyframeWork(cache: LayerKeyframeCache): KeyframeWork[] {
+  const st = getParam(cache.paramName);
+  const value = st?.value ?? cache.min;
+  const { i0, i1 } = segmentForValue(cache, value);
+  const target = cache.targetDeg;
+  const ladder = lobattoLadderDegrees(target);
+  const start = ladder[0] ?? startLadderDeg(target);
+  const order = bakeOrder(cache.K, i0, i1);
+  const degAt = (k: number) => cache.frameDeg[k] ?? 0;
+
+  const workForSlot = (k: number, phaseDeg: number): KeyframeWork | null => {
+    const d = degAt(k);
+    if (d === 0) {
+      if (phaseDeg !== start) return null;
+      return { kind: "coarse", k };
+    }
+    if (d < phaseDeg) return { kind: "refine", k, nextDeg: phaseDeg };
+    return null;
+  };
+
+  // Outer loop: degree ladder. Inner loop: K slots (blend pair first via bakeOrder).
+  for (const phaseDeg of ladder) {
+    const blendWorks: KeyframeWork[] = [];
+    for (const k of [i0, i1]) {
+      const w = workForSlot(k, phaseDeg);
+      if (w) blendWorks.push(w);
+    }
+    if (blendWorks.length) return [blendWorks[0]!];
+
+    for (const k of order) {
+      if (k === i0 || k === i1) continue;
+      const w = workForSlot(k, phaseDeg);
+      if (w) return [w];
+    }
+  }
+
+  return [];
+}
+
+function executeKeyframeWork(
+  cache: LayerKeyframeCache,
+  work: KeyframeWork,
+  stages: BakeStages | null,
+): { frame: KeyframeFrame; k: number; deg: number } {
+  const deg = work.kind === "coarse" ? startLadderDeg(cache.targetDeg) : work.nextDeg;
+  const frame = bakeFrameAtDeg(cache, work.k, deg, stages);
+  updateFrame(cache, work.k, frame, deg);
+  return { frame, k: work.k, deg };
+}
+
+function keyframesFullyReady(cache: LayerKeyframeCache): boolean {
+  return cache.readyCount >= cache.K;
 }
 
 /**
@@ -383,6 +474,83 @@ function materializeKeyframeFrames(frames: (KeyframeFrame | null)[]): KeyframeFr
   return out;
 }
 
+function runOneKeyframeWork(): boolean {
+  for (const layerId of pendingPumpLayers) {
+    const cache = caches.get(layerId);
+    const job = asyncJobs.get(layerId);
+    if (!cache || !job || job.cancelled || job.gen !== cache.gen) {
+      pendingPumpLayers.delete(layerId);
+      asyncJobs.delete(layerId);
+      continue;
+    }
+
+    const works = pickNextKeyframeWork(cache);
+    if (!works.length) {
+      pendingPumpLayers.delete(layerId);
+      asyncJobs.delete(layerId);
+      onKeyframeProgress?.({
+        layerId,
+        index: -1,
+        frame: cache.frames.find(Boolean) ?? cache.frames[0]!,
+        readyCount: cache.readyCount,
+        K: cache.K,
+        done: keyframesFullyReady(cache),
+      });
+      continue;
+    }
+
+    const work = works[0]!;
+    const t0 = performance.now();
+    const stages: BakeStages = { sampleMs: 0, chebMs: 0, idctMs: 0, gradMs: 0 };
+    const { frame, k, deg } = executeKeyframeWork(cache, work, stages);
+    onKeyframeProgress?.({
+      layerId,
+      index: k,
+      frame,
+      readyCount: cache.readyCount,
+      K: cache.K,
+      done: keyframesFullyReady(cache),
+    });
+    const bakeMs = performance.now() - t0;
+    bakeMsAcc += bakeMs;
+    lastBakeMs = bakeMsAcc;
+    lastBakeDetails.push({
+      ...stages,
+      frames: 1,
+      deg,
+      M: Math.round(Math.cbrt(frameVolumeN(frame))),
+      role: cache.role,
+      layerId,
+      paramName: cache.paramName,
+      bakeMs,
+      async: true,
+      index: k,
+    });
+
+    if (keyframesFullyReady(cache)) {
+      pendingPumpLayers.delete(layerId);
+      asyncJobs.delete(layerId);
+      onKeyframeProgress?.({
+        layerId,
+        index: -1,
+        frame,
+        readyCount: cache.readyCount,
+        K: cache.K,
+        done: true,
+      });
+    }
+    return true;
+  }
+  return false;
+}
+
+/** Run async keyframe work after render; default one unit per frame. */
+export function tickKeyframePump(maxWorks = 1): number {
+  let done = 0;
+  while (done < maxWorks && runOneKeyframeWork()) done++;
+  return done;
+}
+
 /**
  * @param {string} layerId
  * @param {LayerKeyframeCache} cache
@@ -390,70 +558,8 @@ function materializeKeyframeFrames(frames: (KeyframeFrame | null)[]): KeyframeFr
 function scheduleAsyncFill(layerId: string, cache: LayerKeyframeCache) {
   cancelAsyncJob(layerId);
   const gen = cache.gen;
-  const job = { gen, timer: 0, cancelled: false };
-  asyncJobs.set(layerId, job);
-
-  const pump = () => {
-    if (job.cancelled || job.gen !== cache.gen) return;
-    const live = caches.get(layerId);
-    if (!live || live.gen !== gen) return;
-
-    const st = getParam(live.paramName);
-    const value = st?.value ?? live.min;
-    const { i0, i1 } = segmentForValue(live, value);
-    const order = bakeOrder(live.K, i0, i1);
-    const next = order.find((k) => !live.frames[k]);
-    if (next == null) {
-      asyncJobs.delete(layerId);
-      onKeyframeProgress?.({
-        layerId,
-        index: -1,
-        frame: live.frames[0]!,
-        readyCount: live.readyCount,
-        K: live.K,
-        done: true,
-      });
-      return;
-    }
-
-    const t0 = performance.now();
-    const stages: BakeStages = { sampleMs: 0, chebMs: 0, idctMs: 0, gradMs: 0 };
-    const frame = bakeFrameAt({ ...live.bakeOpts, K: live.K, min: live.min, max: live.max }, next, stages);
-    if (job.cancelled || caches.get(layerId)?.gen !== gen) return;
-    storeFrame(live, next, frame);
-    const bakeMs = performance.now() - t0;
-    bakeMsAcc += bakeMs;
-    lastBakeMs = bakeMsAcc;
-    lastBakeDetails.push({
-      ...stages,
-      frames: 1,
-      deg: live.deg,
-      M: Math.round(Math.cbrt(frameVolumeN(frame))),
-      role: live.role,
-      layerId,
-      paramName: live.paramName,
-      bakeMs,
-      async: true,
-      index: next,
-    });
-    onKeyframeProgress?.({
-      layerId,
-      index: next,
-      frame,
-      readyCount: live.readyCount,
-      K: live.K,
-      done: live.readyCount >= live.K,
-    });
-
-    if (live.readyCount >= live.K) {
-      asyncJobs.delete(layerId);
-      return;
-    }
-    // Yield so RAF / input stay responsive; one keyframe per tick.
-    job.timer = window.setTimeout(pump, 0);
-  };
-
-  job.timer = window.setTimeout(pump, 0);
+  asyncJobs.set(layerId, { gen, cancelled: false });
+  pendingPumpLayers.add(layerId);
 }
 
 /**
@@ -512,7 +618,10 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
     cacheGen++;
     cache = {
       ...meta,
+      targetDeg: opts.deg,
       frames: new Array(K).fill(null),
+      frameDeg: new Array(K).fill(0),
+      lobattoByK: new Map(),
       scratch: { dens: new Float32Array(0) },
       gen: cacheGen,
       readyCount: 0,
@@ -547,13 +656,16 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
   const blend = segmentForValue(cache, value);
   const t0 = performance.now();
   const stages: BakeStages = { sampleMs: 0, chebMs: 0, idctMs: 0, gradMs: 0 };
+  const startDeg = startLadderDeg(cache.targetDeg);
   let syncCount = 0;
-  for (const k of [blend.i0, blend.i1]) {
-    if (cache.frames[k]) continue;
-    const frame = bakeFrameAt({ ...cache.bakeOpts, K, min, max }, k, stages);
-    storeFrame(cache, k, frame);
-    syncCount++;
-    baked = true;
+  if (!opts.deferSyncBake) {
+    for (const k of [blend.i0, blend.i1]) {
+      if (cache.frameDeg[k]! > 0) continue;
+      const frame = bakeFrameAtDeg(cache, k, startDeg, stages);
+      updateFrame(cache, k, frame, startDeg);
+      syncCount++;
+      baked = true;
+    }
   }
 
   // Allocate scratch once we know volume size.
@@ -573,7 +685,7 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
     lastBakeDetails.push({
       ...stages,
       frames: syncCount,
-      deg: opts.deg,
+      deg: startDeg,
       M: gridMFromFrame(proto ?? { dens: new Float32Array(0) }),
       role: opts.role,
       layerId: opts.layerId,
@@ -584,7 +696,7 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
     });
   }
 
-  if (cache.readyCount < cache.K) {
+  if (!keyframesFullyReady(cache)) {
     scheduleAsyncFill(key, cache);
   }
 
@@ -600,7 +712,7 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
     M: gridMFromFrame(a),
     baked,
     readyCount: cache.readyCount,
-    complete: cache.readyCount >= cache.K,
+    complete: keyframesFullyReady(cache),
   };
 }
 

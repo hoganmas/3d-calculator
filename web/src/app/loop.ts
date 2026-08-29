@@ -31,6 +31,7 @@ import {
   prepareClipGpuForDegree,
 } from "./webglFallback.js";
 import { uploadFit, tickGpuKeyframeBlends } from "./pipeline.js";
+import { tickKeyframePump } from "../model/keyframes.js";
 import { hudText, refreshMetricsDump } from "./hud.js";
 import { syncClipPresentation } from "./presentation.js";
 import { isSplashContentReady, markSplashFrameReady } from "./splash.js";
@@ -129,6 +130,10 @@ function frame(rafNow: number) {
 
   const dt = performance.now() - t0;
   state.cpuMsSmooth = state.cpuMsSmooth * 0.85 + dt * 0.15;
+
+  // Keyframe progressive fill runs after draw so animation stays smooth.
+  tickKeyframePump();
+
   requestAnimationFrame(frame);
 }
 
