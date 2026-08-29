@@ -8,9 +8,9 @@ import {
   initCompile,
   layerRgbFromItem,
   pruneUnusedAutoParams,
-  shouldDeferAutoParamRows,
   collectParamReferences,
 } from "../../src/app/compile.ts";
+import { createParamRows } from "../../src/app/pendingParams.ts";
 import {
   clearExpressions,
   getExprWarning,
@@ -20,7 +20,7 @@ import {
 } from "../../src/model/expressions.ts";
 import { getParam, getParamValues } from "../../src/model/params.ts";
 import { state } from "../../src/app/state.ts";
-import { clearMockFocusedMathField, setMockFocusedMathField } from "../helpers/setup-dom.ts";
+import { clearMockFocusedMathField } from "../helpers/setup-dom.ts";
 import { assert, assertNear } from "../helpers/assert.ts";
 import { runSuite } from "../helpers/runner.ts";
 
@@ -119,37 +119,14 @@ export async function run() {
       },
     },
     {
-      name: "compileAllExprs: auto-creates missing param rows",
+      name: "compileAllExprs: does not auto-create missing param rows",
       fn: () => {
         resetScene();
         setExpressions([{ id: "e1", latex: "b x", enabled: true }]);
         compileAllExprs({ rebuildUi: false });
         const rows = listExpressions().filter((e) => String(e.latex || "").trim());
-        assert(rows.some((r) => r.latex.startsWith("b=")), "auto param row for b");
-      },
-    },
-    {
-      name: "compileAllExprs: defers auto-param rows while math field focused",
-      fn: () => {
-        resetScene();
-        setMockFocusedMathField();
-        setExpressions([{ id: "e1", latex: "c x", enabled: true }]);
-        compileAllExprs({ rebuildUi: false });
-        const before = listExpressions().filter((e) => e.latex.startsWith("c="));
-        assert(before.length === 0, "no auto row while typing");
-        clearMockFocusedMathField();
-        compileAllExprs({ rebuildUi: false });
-        const after = listExpressions().filter((e) => e.latex.startsWith("c="));
-        assert(after.length >= 1, "auto row after blur");
-      },
-    },
-    {
-      name: "shouldDeferAutoParamRows: false on param-def row",
-      fn: () => {
-        resetScene();
-        setMockFocusedMathField({ paramDefRow: true });
-        assert(!shouldDeferAutoParamRows(), "param-def row does not defer");
-        clearMockFocusedMathField();
+        assert(!rows.some((r) => r.latex.startsWith("b=")), "no implicit param row");
+        assert(createParamRows(["b"]), "explicit create works");
       },
     },
     {
@@ -189,7 +166,7 @@ export async function run() {
       fn: () => {
         resetScene();
         setExpressions([{ id: "e1", latex: "b x", enabled: true }]);
-        compileAllExprs({ rebuildUi: false });
+        createParamRows(["b"]);
         const autoBefore = listExpressions().filter((e) => e.autoParam);
         assert(autoBefore.length >= 1, "auto row created");
         updateExprSilent("e1", { latex: "x^2" });

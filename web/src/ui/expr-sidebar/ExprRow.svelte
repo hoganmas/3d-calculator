@@ -33,6 +33,12 @@ import {
   } from "./helpers.ts";
   import { openGradientEditor } from "./popovers.ts";
   import ParamRail from "./ParamRail.svelte";
+  import {
+  collectPendingParamsForExpr,
+  createParamRows,
+  formatPendingParamLabel,
+  pendingParamErrorMessage,
+} from "../../app/pendingParams.js";
 
   interface Props {
     item: ExprItem;
@@ -80,7 +86,13 @@ import {
     void paramTick;
     return paramName ? getParam(paramName)?.error ?? null : null;
   });
-  const rowError = $derived(warn ?? paramErr);
+  const pendingParams = $derived.by(() => {
+    void paramTick;
+    return collectPendingParamsForExpr(item);
+  });
+  const pendingParamLabel = $derived(formatPendingParamLabel(pendingParams));
+  const pendingErr = $derived(pendingParamErrorMessage(pendingParams));
+  const rowError = $derived(warn ?? paramErr ?? pendingErr);
   const isParamDef = $derived(isParameterRow(item.latex || ""));
   const grad = $derived(resolveExprGradient(item));
   const gradCss = $derived(cssGradientFromColors(grad.colors));
@@ -134,8 +146,36 @@ import {
     onExprChange();
   }
 
+  function syncFieldLatex() {
+    if (!mfEl) return;
+    updateExpr(item.id, { latex: readFieldLatex(mfEl) });
+  }
+
+  function createPendingParams() {
+    if (!pendingParams.length) return false;
+    syncFieldLatex();
+    if (!createParamRows(pendingParams)) return false;
+    onStructuralChange();
+    onExprChange();
+    return true;
+  }
+
+  function onPendingParamsClick(ev: MouseEvent) {
+    ev.stopPropagation();
+    createPendingParams();
+  }
+
   function onMfKeydownCapture(ev: KeyboardEvent) {
     if (!mfEl) return;
+    if (ev.key === "Tab" && !ev.shiftKey) {
+      if (isSuggestionUiActive(mfEl)) return;
+      if (pendingParams.length > 0) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        createPendingParams();
+        return;
+      }
+    }
     if (ev.key === "ArrowUp" || ev.key === "ArrowDown") {
       if (isSuggestionUiActive(mfEl)) return;
       const list = listExpressions();
@@ -189,7 +229,7 @@ import {
 
   function onRowClick(ev: MouseEvent) {
     const t = ev.target;
-    if (t instanceof Element && t.closest(".expr-drag, .expr-color, .expr-vis, .expr-del, .expr-param-block")) {
+    if (t instanceof Element && t.closest(".expr-drag, .expr-color, .expr-vis, .expr-del, .expr-param-block, .expr-pending-params")) {
       return;
     }
     if (t === mfEl || (mfEl && mfEl.contains(t as Node))) return;
@@ -230,6 +270,7 @@ import {
   class:is-hidden={!item.enabled}
   class:is-param-def={isParamDef}
   class:has-error={!!rowError}
+  class:has-pending-params={pendingParams.length > 0}
   data-id={item.id}
   data-param={paramName ?? undefined}
   style:--expr-grad={gradCss}
@@ -273,6 +314,21 @@ import {
         onkeydowncapture={onMfKeydownCapture}
       ></math-field>
     </div>
+    {#if pendingParams.length}
+      <button
+        type="button"
+        class="expr-pending-params"
+        title={pendingErr ?? undefined}
+        aria-label={`Create parameter rows for ${pendingParamLabel}. Press Tab.`}
+        onclick={onPendingParamsClick}
+      >
+        <span class="expr-pending-params-copy">
+          Create {pendingParams.length === 1 ? "parameter" : "parameters"}
+          <strong class="expr-pending-params-names">{pendingParamLabel}</strong>
+        </span>
+        <kbd class="expr-pending-params-tab">Tab</kbd>
+      </button>
+    {/if}
     {#if paramName}
       <ParamRail
         {item}

@@ -74,7 +74,7 @@ if (typeof globalThis.window === "undefined") {
   globalThis.window = globalThis as unknown as Window & typeof globalThis;
 }
 
-/** Mock a focused MathLive field for shouldDeferAutoParamRows tests. */
+/** Mock a focused MathLive field for DOM-focused compile tests. */
 export function setMockFocusedMathField(opts: { paramDefRow?: boolean } = {}) {
   const row = {
     classList: {

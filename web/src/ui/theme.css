@@ -99,6 +99,9 @@ html[data-panel-init] {
 
   --err: #ff8a7a;
   --err-border: #e07070;
+  --pending-glow: rgba(238, 228, 212, 0.3);
+  --pending-glow-soft: rgba(225, 215, 198, 0.14);
+  --pending-glow-ring: rgba(245, 238, 226, 0.38);
   --ok: #6ecf8a;
   --warn: #f5a524;
 
@@ -159,6 +162,9 @@ html[data-panel-init] {
 
   --err: #c44a3a;
   --err-border: #d06050;
+  --pending-glow: rgba(148, 112, 210, 0.36);
+  --pending-glow-soft: rgba(128, 92, 190, 0.18);
+  --pending-glow-ring: rgba(132, 96, 196, 0.44);
   --ok: #3a9a58;
   --warn: #c48020;
 

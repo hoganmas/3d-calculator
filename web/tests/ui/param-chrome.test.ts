@@ -3,6 +3,7 @@ import { readParamPlayChrome } from "../../src/ui/expr-sidebar/paramChrome.ts";
 import { neededParamForItem } from "../../src/ui/expr-sidebar/helpers.ts";
 import { clearExpressions, setExpressions, listExpressions } from "../../src/model/expressions.ts";
 import { compileAllExprs } from "../../src/app/compile.ts";
+import { createParamRows } from "../../src/app/pendingParams.ts";
 import {
   getParam,
   setParamValue,
@@ -181,14 +182,15 @@ export async function run() {
       },
     },
     {
-      name: "auto param row gets rail after deferred compile",
+      name: "created param row gets rail",
       fn: () => {
         resetParams();
         setExpressions([{ id: "e1", latex: "b x", enabled: true }]);
+        createParamRows(["b"]);
         compileAllExprs({ rebuildUi: false });
         const auto = listExpressions().find((e) => String(e.latex || "").startsWith("b="));
-        assert(!!auto, "auto row created");
-        assert(rail({ id: auto!.id, latex: auto!.latex }, 1) === "b", "auto row shows rail");
+        assert(!!auto, "param row created");
+        assert(rail({ id: auto!.id, latex: auto!.latex }, 1) === "b", "row shows rail");
       },
     },
   ]);
