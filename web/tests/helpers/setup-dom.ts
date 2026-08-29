@@ -38,7 +38,7 @@ function makeElement(id: string, tag = "div"): HTMLElement {
       },
     },
   };
-  if (id === "deg") node.value = "20";
+  if (id === "deg") node.value = "32";
   if (id === "scale") node.value = "2.5";
   if (id === "steps") node.value = "16";
   if (id === "boxSize") node.value = "5";

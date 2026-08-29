@@ -14,6 +14,8 @@ import {
   hasActiveKeyframeCaches,
   hasLayerKeyframeCache,
   keyframeAnimParam,
+  keyframeAnimParams,
+  keyframeFixedParamsFingerprint,
   keyframesSplashReady,
   logKeyframeBake,
   noteKeyframeLayer,
@@ -24,7 +26,7 @@ import {
   syncKeyframeCachesWithExpressions,
   tickKeyframePump,
 } from "../../src/model/keyframes.ts";
-import { syncParamsFromDefinitions, updateParam } from "../../src/model/params.ts";
+import { syncParamsFromDefinitions, updateParam, recompileParam, getParamValues } from "../../src/model/params.ts";
 import { assert, assertNear } from "../helpers/assert.ts";
 import { runSuite } from "../helpers/runner.ts";
 
@@ -112,14 +114,167 @@ export async function run() {
       },
     },
     {
-      name: "keyframeAnimParam: rejects multiple dirty or driven",
+      name: "keyframeAnimParams: multiple dirty anim params",
       fn: () => {
         setupAnimParam("t");
+        syncParamsFromDefinitions([
+          {
+            name: "t",
+            latex: "t=0.5",
+            exprId: "e1",
+            min: 0,
+            max: 1,
+            speed: 0.5,
+            animating: true,
+            animMode: "pingpong",
+          },
+          {
+            name: "a",
+            latex: "a=0.5",
+            exprId: "e2",
+            min: 0,
+            max: 1,
+            speed: 0.4,
+            animating: true,
+            animMode: "pingpong",
+          },
+        ]);
+        updateParam("a", { animating: true });
+        const hit = keyframeAnimParams(["t", "a"], new Set(["t", "a"]));
+        if (!hit || hit.length !== 2 || hit[0] !== "a" || hit[1] !== "t") {
+          throw new Error(`expected [a,t] got ${JSON.stringify(hit)}`);
+        }
+      },
+    },
+    {
+      name: "multi-param cloud uses keyframe path",
+      fn: async () => {
+        clearKeyframeCaches();
+        syncParamsFromDefinitions([
+          {
+            name: "t",
+            latex: "t=0.5",
+            exprId: "e1",
+            min: 0,
+            max: 1,
+            speed: 0.5,
+            animating: true,
+            animMode: "pingpong",
+          },
+          {
+            name: "a",
+            latex: "a=0.5",
+            exprId: "e2",
+            min: 0,
+            max: 1,
+            speed: 0.4,
+            animating: true,
+            animMode: "pingpong",
+          },
+        ]);
+        const compiled = compileExpr(String.raw`\sin(x+t)\cos(y+a)`);
+        const sample = sampleLayerKeyframes({
+          layerId: "layer-multi",
+          latex: String.raw`\sin(x+t)\cos(y+a)`,
+          role: "cloud",
+          isoLevel: 0,
+          paramNames: ["a", "t"],
+          compiled,
+          baseParams: {},
+          half: 0.75,
+          deg: 4,
+          K: 3,
+        });
+        assert(sample.dens.length > 0, "dens sampled");
+        assert(sample.M > 0, "grid M");
+        const prog = getKeyframeProgress("layer-multi");
+        assert(prog != null, "cache exists");
+        assert(prog!.totalFrames === 9, "3^2 grid");
+      },
+    },
+    {
+      name: "fixed param change rebuilds cache while another param animates",
+      fn: async () => {
+        clearKeyframeCaches();
+        syncParamsFromDefinitions([
+          {
+            name: "t",
+            latex: "t=0.5",
+            exprId: "e1",
+            min: 0,
+            max: 1,
+            value: 0.5,
+            speed: 0.5,
+            animating: true,
+            animMode: "pingpong",
+          },
+          {
+            name: "a",
+            latex: "a=0.2",
+            exprId: "e2",
+            min: 0,
+            max: 1,
+            value: 0.2,
+            animating: false,
+            animMode: "pingpong",
+          },
+        ]);
+        const latex = String.raw`\sin(x+t)\cos(y+a)`;
+        const compiled = compileExpr(latex);
+        const baseOpts = {
+          layerId: "layer-fixed-param",
+          latex,
+          role: "cloud" as const,
+          isoLevel: 0,
+          paramNames: ["t"],
+          compiled,
+          half: 0.75,
+          deg: 4,
+          K: 3,
+        };
+        const first = sampleLayerKeyframes({ ...baseOpts, baseParams: getParamValues() });
+        assert(first.baked, "initial bake");
+        const fp0 = keyframeFixedParamsFingerprint(compiled.freeParams, ["t"], getParamValues());
+
+        updateParam("a", { value: 0.85 });
+        const fp1 = keyframeFixedParamsFingerprint(compiled.freeParams, ["t"], getParamValues());
+        assert(fp0 !== fp1, "fp changes when fixed param moves");
+        const second = sampleLayerKeyframes({ ...baseOpts, baseParams: getParamValues() });
+        assert(second.baked, "rebake after fixed param moved");
+        const prog = getKeyframeProgress("layer-fixed-param");
+        assert(prog != null, "cache still present");
+        assert(prog!.readyCount < prog!.totalFrames!, "grid refilling after invalidation");
+      },
+    },
+    {
+      name: "keyframeAnimParam: rejects multiple dirty or driven",
+      fn: () => {
+        syncParamsFromDefinitions([
+          {
+            name: "t",
+            latex: "t=0.5",
+            exprId: "e1",
+            min: 0,
+            max: 1,
+            animating: true,
+            animMode: "pingpong",
+          },
+          {
+            name: "a",
+            latex: "a=0.5",
+            exprId: "e2",
+            min: 0,
+            max: 1,
+            animating: true,
+            animMode: "pingpong",
+          },
+        ]);
         assert(keyframeAnimParam(["t", "a"], new Set(["t", "a"])) === null, "multi dirty");
         syncParamsFromDefinitions([
           { name: "a", latex: "a=2b", exprId: "e2", min: -10, max: 10 },
           { name: "b", latex: "b=1", exprId: "e3", min: -10, max: 10 },
         ]);
+        recompileParam("a");
         assert(keyframeAnimParam(["a"], new Set(["a"])) === null, "driven param");
       },
     },

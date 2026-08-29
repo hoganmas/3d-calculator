@@ -12,6 +12,13 @@ import {
   type LobattoFinalizePhase,
   type LobattoFitState,
 } from "../math/chebLobatto.js";
+import {
+  bakeOrderND,
+  hypercellBlend,
+  paramValuesAtIndex,
+  totalFrameCount,
+  type HypercellCorner,
+} from "../math/keyframeGrid.js";
 import { getParam } from "./params.js";
 import { gridMFromDens, tearLog, tearLogOnce } from "../app/tearDebug.js";
 import type { CompiledExpr, CompiledVectorExpr, KeyframeFrame } from "../types/models.js";
@@ -34,22 +41,23 @@ interface BakeFrameOpts {
   latex: string;
   role: KeyframeRole;
   isoLevel: number;
-  paramName: string;
+  paramNames: string[];
+  mins: number[];
+  maxs: number[];
   compiled?: { bind: CompiledExpr["bind"] };
   vectorCompiled?: CompiledVectorExpr;
   baseParams: Record<string, number>;
   half: number;
   deg: number;
   K?: number;
-  min?: number;
-  max?: number;
 }
 
 interface LayerKeyframeCache {
-  paramName: string;
-  min: number;
-  max: number;
+  paramNames: string[];
+  mins: number[];
+  maxs: number[];
   K: number;
+  totalFrames: number;
   deg: number;
   targetDeg: number;
   half: number;
@@ -67,6 +75,8 @@ interface LayerKeyframeCache {
   scratch: KeyframeFrame;
   gen: number;
   readyCount: number;
+  /** Fingerprint of free params held fixed during grid bake (not on keyframe axes). */
+  fixedParamsFp: string;
   bakeOpts: BakeFrameOpts;
 }
 
@@ -90,7 +100,9 @@ interface EnsureKeyframesOpts {
   latex: string;
   role: KeyframeRole;
   isoLevel?: number;
-  paramName: string;
+  /** @deprecated use paramNames */
+  paramName?: string;
+  paramNames?: string[];
   compiled?: { bind: CompiledExpr["bind"] };
   vectorCompiled?: CompiledVectorExpr;
   baseParams: Record<string, number>;
@@ -107,7 +119,7 @@ interface BakeDetail extends BakeStages {
   M: number;
   role: string;
   layerId: string;
-  paramName: string;
+  paramNames: string[];
   bakeMs: number;
   async: boolean;
   index?: number;
@@ -146,8 +158,8 @@ export function syncIsoKeyframesToSceneBake(
   if (!cache || cache.role !== "isosurface") return sceneBake.M;
   const layer = sceneBake.isosurfaceLayers.find((x) => x.id === layerId);
   if (!layer) return sceneBake.M;
-  const st = getParam(cache.paramName);
-  const value = st?.value ?? cache.min;
+  const st = getParam(cache.paramNames[0]!);
+  const value = st?.value ?? cache.mins[0]!;
   const blend = displayBlendForValue(cache, value);
   layer.blend = { i0: blend.i0, i1: blend.i1, t: blend.t };
   const blendM = isoBlendSceneM(cache, blend.i0, blend.i1, blend.t);
@@ -166,8 +178,8 @@ export function syncIsoKeyframesToSceneBake(
 export function getIsoBlendSceneM(layerId: string): number {
   const cache = caches.get(layerId);
   if (!cache || cache.role !== "isosurface") return 0;
-  const st = getParam(cache.paramName);
-  const value = st?.value ?? cache.min;
+  const st = getParam(cache.paramNames[0]!);
+  const value = st?.value ?? cache.mins[0]!;
   const blend = displayBlendForValue(cache, value);
   return isoBlendSceneM(cache, blend.i0, blend.i1, blend.t);
 }
@@ -176,10 +188,10 @@ export function getIsoBlendSceneM(layerId: string): number {
 export function refreshIsoBlendDisplay(layerId: string): number[] {
   const cache = caches.get(layerId);
   if (!cache || cache.role !== "isosurface") return [];
-  const st = getParam(cache.paramName);
+  const st = getParam(cache.paramNames[0]!);
   if (!st) return [];
   const { i0, i1 } = segmentForValue(cache, st.value);
-  return reconcileStaging(cache, i0, i1);
+  return reconcileStaging(cache, [i0, i1]);
 }
 
 export function setKeyframeProgressHandler(cb: typeof onKeyframeProgress) {
@@ -295,17 +307,22 @@ export function allKeyframesComplete() {
   if (!hasActiveKeyframeCaches()) return true;
   for (const [id, cache] of caches) {
     if (isParkedKeyframeLayer(id)) continue;
-    if (cache.readyCount < cache.K) return false;
+    if (cache.readyCount < cache.totalFrames) return false;
   }
   return true;
 }
 
-/** Coarse blend pair ready for every active (enabled) cached layer (splash / first frame). */
+/** Coarse hypercell ready for every active (enabled) cached layer (splash / first frame). */
 export function keyframesSplashReady(): boolean {
   if (!hasActiveKeyframeCaches()) return true;
   for (const [id, cache] of caches) {
     if (isParkedKeyframeLayer(id)) continue;
-    if (peekKeyframeBlend(cache.bakeOpts.layerId) == null) return false;
+    if (cacheNDims(cache) === 1) {
+      if (peekKeyframeBlend(cache.bakeOpts.layerId) == null) return false;
+      continue;
+    }
+    const corners = hypercellCornerIndices(cache);
+    if (!corners.every((k) => !!cache.frames[k] && (cache.frameDeg[k] ?? 0) > 0)) return false;
   }
   return true;
 }
@@ -322,6 +339,8 @@ export function getKeyframeProgress(layerId: string) {
     targetDeg: cache.targetDeg,
     readyCount: cache.readyCount,
     K: cache.K,
+    totalFrames: cache.totalFrames,
+    paramNames: cache.paramNames,
   };
 }
 
@@ -354,12 +373,13 @@ export function diagnoseKeyframeCaches(): KeyframeStallDiag[] {
   const out: KeyframeStallDiag[] = [];
   for (const [layerId, cache] of caches) {
     const parked = isParkedKeyframeLayer(layerId);
-    const st = getParam(cache.paramName);
-    const value = st?.value ?? cache.min;
+    const st = getParam(cache.paramNames[0]!);
+    const value = st?.value ?? cache.mins[0]!;
+    const corners = hypercellCornerIndices(cache);
     const { i0, i1 } = segmentForValue(cache, value);
     const works = parked ? [] : peekPickNextWork(cache);
     const slots: KeyframeStallSlotDiag[] = [];
-    for (let k = 0; k < cache.K; k++) {
+    for (let k = 0; k < cache.totalFrames; k++) {
       const fin = cache.lobattoFinalizeByK.get(k);
       slots.push({
         k,
@@ -440,9 +460,9 @@ export function getKeyframeLoadSummary(): KeyframeLoadSummary {
   for (const [id, cache] of caches) {
     if (isParkedKeyframeLayer(id)) continue;
     layerCount++;
-    slotsTotal += cache.K;
+    slotsTotal += cache.totalFrames;
     slotsAtTarget += cache.readyCount;
-    for (let k = 0; k < cache.K; k++) sum += slotLoadFraction(cache, k);
+    for (let k = 0; k < cache.totalFrames; k++) sum += slotLoadFraction(cache, k);
   }
   const fraction = slotsTotal > 0 ? sum / slotsTotal : 1;
   const complete = allKeyframesComplete();
@@ -462,24 +482,96 @@ export function getKeyframeLoadSummary(): KeyframeLoadSummary {
 }
 
 /**
+ * All dirty animating free-params eligible for keyframe caching.
+ */
+export function keyframeAnimParams(freeParams: string[], dirty: Set<string>): string[] | null {
+  if (!dirty?.size || !freeParams?.length) return null;
+  const hit: string[] = [];
+  for (const p of freeParams) {
+    if (!dirty.has(p)) continue;
+    const st = getParam(p);
+    if (!st || st.driven || !st.animating) continue;
+    hit.push(p);
+  }
+  hit.sort();
+  return hit.length ? hit : null;
+}
+
+/**
  * Eligible when dirty free-params collapse to exactly one animated slider
  * (not driven by another equation).
- * @param {string[]} freeParams
- * @param {Set<string>} dirty
- * @returns {string | null} param name or null
  */
 export function keyframeAnimParam(freeParams: string[], dirty: Set<string>) {
-  if (!dirty?.size || !freeParams?.length) return null;
-  /** @type {string[]} */
-  const hit = [];
-  for (const p of freeParams) {
-    if (dirty.has(p)) hit.push(p);
+  const hit = keyframeAnimParams(freeParams, dirty);
+  return hit?.length === 1 ? hit[0]! : null;
+}
+
+function normalizeParamNames(opts: Pick<EnsureKeyframesOpts, "paramName" | "paramNames">): string[] {
+  if (opts.paramNames?.length) return [...opts.paramNames].sort();
+  if (opts.paramName) return [opts.paramName];
+  throw new Error("paramNames required for keyframes");
+}
+
+function resolveKeyframeAxes(opts: EnsureKeyframesOpts): {
+  paramNames: string[];
+  mins: number[];
+  maxs: number[];
+  K: number;
+  totalFrames: number;
+} {
+  const paramNames = normalizeParamNames(opts);
+  const nDims = paramNames.length;
+  const K = Math.max(2, opts.K ?? DEFAULT_KEYFRAME_K);
+  const mins: number[] = [];
+  const maxs: number[] = [];
+  for (const name of paramNames) {
+    const st = getParam(name);
+    if (!st) throw new Error(`Unknown param “${name}” for keyframes`);
+    mins.push(st.min);
+    maxs.push(st.max);
   }
-  if (hit.length !== 1) return null;
-  const name = hit[0];
-  const st = getParam(name);
-  if (!st || st.driven || !st.animating) return null;
-  return name;
+  return { paramNames, mins, maxs, K, totalFrames: totalFrameCount(K, nDims) };
+}
+
+function keyframeFreeParams(opts: EnsureKeyframesOpts): string[] {
+  if (opts.role === "flow") return opts.vectorCompiled?.freeParams ?? [];
+  return opts.compiled?.freeParams ?? [];
+}
+
+/** Values of expression free params that are not keyframe axes (must match across cached frames). */
+export function keyframeFixedParamsFingerprint(
+  freeParams: readonly string[],
+  paramNames: readonly string[],
+  baseParams: Record<string, number>,
+): string {
+  const axis = new Set(paramNames);
+  const parts: string[] = [];
+  for (const p of [...freeParams].sort()) {
+    if (axis.has(p)) continue;
+    const v = baseParams[p];
+    parts.push(`${p}=${Number.isFinite(v) ? String(v) : "nan"}`);
+  }
+  return parts.join("\0");
+}
+
+function cacheNDims(cache: LayerKeyframeCache): number {
+  return cache.paramNames.length;
+}
+
+function currentParamValues(cache: LayerKeyframeCache): number[] {
+  return cache.paramNames.map((name, d) => getParam(name)?.value ?? cache.mins[d]!);
+}
+
+function hypercellForCache(cache: LayerKeyframeCache) {
+  return hypercellBlend(cache.mins, cache.maxs, cache.K, currentParamValues(cache));
+}
+
+function hypercellCornerIndices(cache: LayerKeyframeCache): number[] {
+  return hypercellForCache(cache).corners.map((c) => c.index);
+}
+
+function hypercellCornerSet(cache: LayerKeyframeCache): Set<number> {
+  return new Set(hypercellCornerIndices(cache));
 }
 
 /**
@@ -488,6 +580,80 @@ export function keyframeAnimParam(freeParams: string[], dirty: Set<string>) {
  * @param {number} t
  * @param {Float32Array} out
  */
+function canMultilinearLerp(
+  cache: LayerKeyframeCache,
+  corners: HypercellCorner[],
+  field: keyof KeyframeFrame,
+): boolean {
+  if (!corners.length) return false;
+  const degs = corners.map((c) => cache.frameDeg[c.index] ?? 0);
+  if (!degs.every((d) => d === degs[0] && d > 0)) return false;
+  const first = cache.frames[corners[0]!.index]?.[field] as Float32Array | undefined;
+  if (!first?.length) return false;
+  for (const c of corners) {
+    const arr = cache.frames[c.index]?.[field] as Float32Array | undefined;
+    if (!arr || arr.length !== first.length) return false;
+  }
+  return corners.some((c) => c.weight > 0 && c.weight < 1);
+}
+
+function multilinearBlendField(
+  cache: LayerKeyframeCache,
+  corners: HypercellCorner[],
+  field: keyof KeyframeFrame,
+  out: Float32Array,
+): void {
+  out.fill(0);
+  for (const { index, weight } of corners) {
+    const src = cache.frames[index]?.[field] as Float32Array | undefined;
+    if (!src) continue;
+    for (let i = 0; i < out.length; i++) out[i] += weight * src[i]!;
+  }
+}
+
+function heaviestCorner(corners: HypercellCorner[]): HypercellCorner {
+  return corners.reduce((a, b) => (b.weight > a.weight ? b : a));
+}
+
+function sampleVolumeFromCache(cache: LayerKeyframeCache) {
+  const corners = hypercellForCache(cache).corners;
+  const snapIdx = heaviestCorner(corners).index;
+  const snap = cache.frames[snapIdx];
+  if (!snap) throw new Error("keyframe hypercell missing");
+  ensureScratchVolume(cache, frameVolumeN(snap));
+  const out = cache.scratch;
+
+  if (out.dens) {
+    if (canMultilinearLerp(cache, corners, "dens")) {
+      multilinearBlendField(cache, corners, "dens", out.dens);
+    } else if (snap.dens) {
+      out.dens.fill(0);
+      out.dens.set(snap.dens);
+    }
+  }
+  for (const g of ["gx", "gy", "gz"] as const) {
+    const dst = out[g];
+    if (!dst) continue;
+    if (canMultilinearLerp(cache, corners, g)) {
+      multilinearBlendField(cache, corners, g, dst);
+    } else if (snap[g]) {
+      dst.fill(0);
+      dst.set(snap[g]!);
+    }
+  }
+  for (const f of ["fx", "fy", "fz"] as const) {
+    const dst = out[f];
+    if (!dst) continue;
+    if (canMultilinearLerp(cache, corners, f)) {
+      multilinearBlendField(cache, corners, f, dst);
+    } else if (snap[f]) {
+      dst.fill(0);
+      dst.set(snap[f]!);
+    }
+  }
+  return { out, snapIdx, corners };
+}
+
 function lerpFloat32(a: Float32Array, b: Float32Array, t: number, out: Float32Array) {
   if (a.length !== b.length) {
     const src = t < 0.5 ? a : b;
@@ -543,8 +709,10 @@ function allocScratch(role: KeyframeRole, n: number): KeyframeFrame {
  * @returns {{ i0: number, i1: number, t: number }}
  */
 function segmentForValue(cache: LayerKeyframeCache, value: number) {
-  const span = Math.max(1e-12, cache.max - cache.min);
-  const u = Math.min(1, Math.max(0, (value - cache.min) / span));
+  const min = cache.mins[0] ?? 0;
+  const max = cache.maxs[0] ?? 1;
+  const span = Math.max(1e-12, max - min);
+  const u = Math.min(1, Math.max(0, (value - min) / span));
   const K = cache.K;
   if (K <= 1) return { i0: 0, i1: 0, t: 0 };
   const x = u * (K - 1);
@@ -589,29 +757,44 @@ function cacheMatches(
   cache: LayerKeyframeCache,
   meta: Pick<
     LayerKeyframeCache,
-    "paramName" | "min" | "max" | "K" | "deg" | "half" | "role" | "latex" | "isoLevel"
+    | "paramNames"
+    | "mins"
+    | "maxs"
+    | "K"
+    | "totalFrames"
+    | "deg"
+    | "half"
+    | "role"
+    | "latex"
+    | "isoLevel"
+    | "fixedParamsFp"
   >,
 ) {
-  return (
-    cache.paramName === meta.paramName &&
-    cache.role === meta.role &&
-    cache.K === meta.K &&
-    cache.deg === meta.deg &&
-    Math.abs(cache.half - meta.half) < 1e-12 &&
-    Math.abs(cache.min - meta.min) < 1e-12 &&
-    Math.abs(cache.max - meta.max) < 1e-12 &&
-    Math.abs(cache.isoLevel - meta.isoLevel) < 1e-12 &&
-    cache.latex === meta.latex &&
-    cache.frames.length === meta.K
-  );
+  if (
+    cache.paramNames.length !== meta.paramNames.length ||
+    cache.role !== meta.role ||
+    cache.K !== meta.K ||
+    cache.totalFrames !== meta.totalFrames ||
+    cache.deg !== meta.deg ||
+    Math.abs(cache.half - meta.half) >= 1e-12 ||
+    Math.abs(cache.isoLevel - meta.isoLevel) >= 1e-12 ||
+    cache.latex !== meta.latex ||
+    cache.fixedParamsFp !== meta.fixedParamsFp ||
+    cache.frames.length !== meta.totalFrames
+  ) {
+    return false;
+  }
+  for (let i = 0; i < cache.paramNames.length; i++) {
+    if (cache.paramNames[i] !== meta.paramNames[i]) return false;
+    if (Math.abs(cache.mins[i]! - meta.mins[i]!) >= 1e-12) return false;
+    if (Math.abs(cache.maxs[i]! - meta.maxs[i]!) >= 1e-12) return false;
+  }
+  return true;
 }
 
-function paramValueForK(opts: BakeFrameOpts, k: number): number {
-  const st = getParam(opts.paramName);
-  const min = st?.min ?? opts.min ?? 0;
-  const max = st?.max ?? opts.max ?? 1;
-  const K = opts.K ?? DEFAULT_KEYFRAME_K;
-  return min + ((max - min) * k) / Math.max(1, K - 1);
+function bindParamsForSlot(opts: BakeFrameOpts, k: number): Record<string, number> {
+  const gridParams = paramValuesAtIndex(opts.paramNames, opts.mins, opts.maxs, opts.K ?? DEFAULT_KEYFRAME_K, k);
+  return { ...opts.baseParams, ...gridParams };
 }
 
 function bakeFlowFrameAtDeg(
@@ -620,7 +803,7 @@ function bakeFlowFrameAtDeg(
   deg: number,
 ): KeyframeFrame {
   if (!opts.vectorCompiled) throw new Error("flow keyframes require vectorCompiled");
-  const params = { ...opts.baseParams, [opts.paramName]: paramValueForK(opts, k) };
+  const params = bindParamsForSlot(opts, k);
   const vectorFn = opts.vectorCompiled.bind(params);
   const fit = fitVectorField(opts.vectorCompiled, vectorFn, opts.half, deg, {
     skipL2: true,
@@ -647,7 +830,7 @@ function bakeFrameAtDeg(
     return { frame: bakeFlowFrameAtDeg(opts, k, deg), complete: true };
   }
   if (!opts.compiled) throw new Error("scalar keyframes require compiled");
-  const params = { ...opts.baseParams, [opts.paramName]: paramValueForK(opts, k) };
+  const params = bindParamsForSlot(opts, k);
   const fn = opts.compiled.bind(params);
   const role = opts.role === "isosurface" ? "isosurface" : "cloud";
   const existingJob = cache.lobattoJobByK.get(k) ?? null;
@@ -727,15 +910,16 @@ function isoBlendSceneM(
   return t < 0.5 ? M0 || M1 || 0 : M1 || M0 || 0;
 }
 
-/** Promote when both blend slots share the same staging degree. */
-function tryPromoteStagingPair(cache: LayerKeyframeCache, i0: number, i1: number): number[] {
-  const sd0 = cache.stagingDeg[i0] ?? 0;
-  const sd1 = cache.stagingDeg[i1] ?? 0;
-  if (sd0 <= 0 || sd0 !== sd1 || !cache.stagingFrames[i0] || !cache.stagingFrames[i1]) {
-    return [];
+/** Promote when all hypercell corners share the same staging degree. */
+function tryPromoteStagingHypercell(cache: LayerKeyframeCache, corners: number[]): number[] {
+  if (!corners.length) return [];
+  const sd0 = cache.stagingDeg[corners[0]!] ?? 0;
+  if (sd0 <= 0) return [];
+  for (const slot of corners) {
+    if ((cache.stagingDeg[slot] ?? 0) !== sd0 || !cache.stagingFrames[slot]) return [];
   }
   const promoted: number[] = [];
-  for (const slot of [i0, i1]) {
+  for (const slot of corners) {
     if ((cache.frameDeg[slot] ?? 0) < sd0) {
       applyDisplayFrame(cache, slot, cache.stagingFrames[slot]!, sd0);
       cache.stagingFrames[slot] = null;
@@ -744,10 +928,9 @@ function tryPromoteStagingPair(cache: LayerKeyframeCache, i0: number, i1: number
     }
   }
   if (promoted.length) {
-    tearLog("promote-staging-pair", {
+    tearLog("promote-staging-hypercell", {
       layerId: cache.bakeOpts.layerId,
-      i0,
-      i1,
+      corners,
       deg: sd0,
       promoted,
     });
@@ -761,10 +944,11 @@ function tryPromoteStagingPair(cache: LayerKeyframeCache, i0: number, i1: number
  * - Blend slot whose partner already displays the same degree: solo promote.
  * Without this, schedDeg looks done while readyCount never reaches K (pump stalls).
  */
-function reconcileStaging(cache: LayerKeyframeCache, i0: number, i1: number): number[] {
+function reconcileStaging(cache: LayerKeyframeCache, corners: number[]): number[] {
+  const cornerSet = new Set(corners);
   const promoted: number[] = [];
-  for (let k = 0; k < cache.K; k++) {
-    if (k === i0 || k === i1) continue;
+  for (let k = 0; k < cache.totalFrames; k++) {
+    if (cornerSet.has(k)) continue;
     const sd = cache.stagingDeg[k] ?? 0;
     const fr = cache.stagingFrames[k];
     if (sd > (cache.frameDeg[k] ?? 0) && fr) {
@@ -772,25 +956,25 @@ function reconcileStaging(cache: LayerKeyframeCache, i0: number, i1: number): nu
       promoted.push(k);
     }
   }
-  for (const [k, partner] of [
-    [i0, i1],
-    [i1, i0],
-  ] as const) {
+  for (const k of corners) {
     const sd = cache.stagingDeg[k] ?? 0;
     const fr = cache.stagingFrames[k];
     if (!fr || sd <= (cache.frameDeg[k] ?? 0)) continue;
-    if ((cache.frameDeg[partner] ?? 0) === sd) {
+    const othersReady = corners.every(
+      (c) => c === k || (cache.frameDeg[c] ?? 0) === sd,
+    );
+    if (othersReady) {
       applyDisplayFrame(cache, k, fr, sd);
       tearLog("reconcile-solo-promote", {
         layerId: cache.bakeOpts.layerId,
         k,
-        partner,
+        corners,
         deg: sd,
       });
       promoted.push(k);
     }
   }
-  promoted.push(...tryPromoteStagingPair(cache, i0, i1));
+  promoted.push(...tryPromoteStagingHypercell(cache, corners));
   return promoted;
 }
 
@@ -847,11 +1031,10 @@ function commitFrame(
   frame: KeyframeFrame,
   deg: number,
 ): number[] {
-  const st = getParam(cache.paramName);
-  const value = st?.value ?? cache.min;
-  const { i0, i1 } = segmentForValue(cache, value);
+  const corners = hypercellCornerIndices(cache);
+  const cornerSet = hypercellCornerSet(cache);
 
-  if (k !== i0 && k !== i1) {
+  if (!cornerSet.has(k)) {
     if (deg <= (cache.frameDeg[k] ?? 0)) {
       tearLog("commit-stale-skip", {
         layerId: cache.bakeOpts.layerId,
@@ -866,7 +1049,7 @@ function commitFrame(
       layerId: cache.bakeOpts.layerId,
       k,
       deg,
-      blend: { i0, i1 },
+      corners,
       M: gridMFromDens(frame.dens),
     });
     return [];
@@ -881,14 +1064,15 @@ function commitFrame(
     });
     return [];
   }
-  clearCoarseStaging(cache, i0);
-  clearCoarseStaging(cache, i1);
+  for (const c of corners) clearCoarseStaging(cache, c);
 
   cache.stagingFrames[k] = frame;
   cache.stagingDeg[k] = deg;
-  const partner = k === i0 ? i1 : i0;
-  const maxDisplay = Math.max(cache.frameDeg[i0] ?? 0, cache.frameDeg[i1] ?? 0);
-  if (cache.stagingDeg[partner] === deg && cache.stagingFrames[partner]) {
+  const allStaged = corners.every(
+    (c) => cache.stagingDeg[c] === deg && !!cache.stagingFrames[c],
+  );
+  if (allStaged) {
+    const maxDisplay = Math.max(...corners.map((c) => cache.frameDeg[c] ?? 0));
     if (deg < maxDisplay) {
       cache.stagingFrames[k] = null;
       cache.stagingDeg[k] = 0;
@@ -897,12 +1081,12 @@ function commitFrame(
         k,
         deg,
         maxDisplay,
-        slots: [i0, i1].map((s) => slotSummary(cache, s)),
+        corners: corners.map((s) => slotSummary(cache, s)),
       });
       return [];
     }
     const promoted: number[] = [];
-    for (const slot of [i0, i1]) {
+    for (const slot of corners) {
       applyDisplayFrame(cache, slot, cache.stagingFrames[slot]!, deg);
       cache.stagingFrames[slot] = null;
       cache.stagingDeg[slot] = 0;
@@ -913,17 +1097,18 @@ function commitFrame(
       k,
       deg,
       promoted,
-      slots: [i0, i1].map((s) => slotSummary(cache, s)),
+      corners: corners.map((s) => slotSummary(cache, s)),
     });
     return promoted;
   }
-  if ((cache.frameDeg[partner] ?? 0) === deg && cache.frames[partner] && deg >= (cache.frameDeg[k] ?? 0)) {
+  const partnersReady = corners.filter((c) => c !== k).every((c) => (cache.frameDeg[c] ?? 0) === deg && cache.frames[c]);
+  if (partnersReady && cache.frames[k] && deg >= (cache.frameDeg[k] ?? 0)) {
     applyDisplayFrame(cache, k, frame, deg);
     tearLog("commit-promote-solo", {
       layerId: cache.bakeOpts.layerId,
       k,
       deg,
-      partner,
+      corners,
       M: gridMFromDens(frame.dens),
     });
     return [k];
@@ -932,9 +1117,8 @@ function commitFrame(
     layerId: cache.bakeOpts.layerId,
     k,
     deg,
-    partner,
-    partnerStagingDeg: cache.stagingDeg[partner] ?? 0,
-    slots: [i0, i1].map((s) => slotSummary(cache, s)),
+    corners,
+    slots: corners.map((s) => slotSummary(cache, s)),
   });
   return [];
 }
@@ -1004,11 +1188,17 @@ function displayBlendForValue(cache: LayerKeyframeCache, value: number) {
 }
 
 function bakeOrderForCache(cache: LayerKeyframeCache): number[] {
-  const st = getParam(cache.paramName);
-  const value = st?.value ?? cache.min;
-  const { i0, i1 } = segmentForValue(cache, value);
-  reconcileStaging(cache, i0, i1);
-  return bakeOrder(cache.K, i0, i1);
+  const corners = hypercellCornerIndices(cache);
+  reconcileStaging(cache, corners);
+  if (cacheNDims(cache) === 1) {
+    const { i0, i1 } = segmentForValue(cache, currentParamValues(cache)[0]!);
+    return bakeOrder(cache.K, i0, i1);
+  }
+  return bakeOrderND(cache.K, cacheNDims(cache), corners);
+}
+
+function keyframesFullyReady(cache: LayerKeyframeCache): boolean {
+  return cache.readyCount >= cache.totalFrames;
 }
 
 function schedDegAt(cache: LayerKeyframeCache, k: number): number {
@@ -1127,10 +1317,6 @@ function executeKeyframeWork(
   return { frame, k: work.k, deg, complete: true, promoted };
 }
 
-function keyframesFullyReady(cache: LayerKeyframeCache): boolean {
-  return cache.readyCount >= cache.K;
-}
-
 /** True when an in-memory keyframe cache exists (not parked / disabled). */
 export function hasLayerKeyframeCache(layerId: string): boolean {
   return caches.has(layerId) && !isParkedKeyframeLayer(layerId);
@@ -1156,6 +1342,28 @@ function buildLayerKeyframeResult(
   baked: boolean,
   syncPromoted: number[] = [],
 ): EnsureKeyframesResult {
+  if (cacheNDims(cache) > 1) {
+    const corners = hypercellCornerIndices(cache);
+    const proto = corners.map((k) => cache.frames[k]).find(Boolean);
+    if (!proto) {
+      throw new Error(`keyframe hypercell not ready · ${opts.layerId}`);
+    }
+    const displayBlend = segmentForValue(cache, value);
+    const frames = materializeKeyframeFrames(cache.frames);
+    return {
+      frames,
+      rawFrames: cache.frames.slice(),
+      blend: displayBlend,
+      cheb: proto.cheb,
+      fitRel: proto.fitRel,
+      M: gridMFromFrame(proto),
+      baked,
+      gpuUploadNeeded: false,
+      readyCount: cache.readyCount,
+      complete: keyframesFullyReady(cache),
+    };
+  }
+
   const displayBlend = displayBlendForValue(cache, value);
   const blendM = isoBlendSceneM(cache, displayBlend.i0, displayBlend.i1, displayBlend.t);
   if (blendM <= 0 || !cache.frames[displayBlend.i0] || !cache.frames[displayBlend.i1]) {
@@ -1203,7 +1411,7 @@ function maybeLogBlendPairReady(
   if (d0 !== deg || d1 !== deg) return;
   const atTarget = deg === cache.targetDeg;
   console.log(
-    `[keyframes] blend pair ready · ${layerId} · ${cache.paramName} · ` +
+    `[keyframes] blend pair ready · ${layerId} · ${cache.paramNames.join("+")} · ` +
       `(${i0},${i1}) deg ${deg}${atTarget ? " · target" : ""} · ` +
       `${mode} · slot ${slot} · ${bakeMs.toFixed(1)}ms`,
   );
@@ -1316,7 +1524,7 @@ function runOneKeyframeWork(): boolean {
             index: -1,
             frame,
             readyCount: cache.readyCount,
-            K: cache.K,
+            K: cache.totalFrames,
             done: true,
           });
         }
@@ -1361,13 +1569,13 @@ function runOneKeyframeWork(): boolean {
         M: Math.round(Math.cbrt(frameVolumeN(cache.frames[idx]!))),
         role: cache.role,
         layerId,
-        paramName: cache.paramName,
+        paramNames: cache.paramNames,
         bakeMs: bakeMs / promoted.length,
         async: true,
         index: idx,
       });
     }
-    const blend = segmentForValue(cache, getParam(cache.paramName)?.value ?? cache.min);
+    const blend = segmentForValue(cache, getParam(cache.paramNames[0]!)?.value ?? cache.mins[0]!);
     if (
       promoted.includes(blend.i0) &&
       promoted.includes(blend.i1) &&
@@ -1465,28 +1673,28 @@ function scheduleAsyncFill(layerId: string, cache: LayerKeyframeCache) {
  * }}
  */
 export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
-  const K = Math.max(2, opts.K ?? DEFAULT_KEYFRAME_K);
-  const st = getParam(opts.paramName);
-  if (!st) throw new Error(`Unknown param “${opts.paramName}” for keyframes`);
-  const min = st.min;
-  const max = st.max;
-  const value = st.value;
+  const axes = resolveKeyframeAxes(opts);
+  const { paramNames, mins, maxs, K, totalFrames } = axes;
+  const freeParams = keyframeFreeParams(opts);
+  const fixedParamsFp = keyframeFixedParamsFingerprint(freeParams, paramNames, opts.baseParams);
+  const value = getParam(paramNames[0]!)?.value ?? mins[0]!;
   const key = opts.layerId;
 
   let cache = caches.get(key);
   const meta = {
-    paramName: opts.paramName,
-    min,
-    max,
+    paramNames,
+    mins,
+    maxs,
     K,
+    totalFrames,
     deg: opts.deg,
     half: opts.half,
     role: opts.role,
     latex: opts.latex,
     isoLevel: opts.isoLevel ?? 0,
+    fixedParamsFp,
   };
 
-  // Ensuring means the layer is enabled and needed — leave parked state.
   parkedKeyframeLayers.delete(key);
 
   let baked = false;
@@ -1496,64 +1704,60 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
     cache = {
       ...meta,
       targetDeg: opts.deg,
-      frames: new Array(K).fill(null),
-      frameDeg: new Array(K).fill(0),
-      stagingFrames: new Array(K).fill(null),
-      stagingDeg: new Array(K).fill(0),
+      frames: new Array(totalFrames).fill(null),
+      frameDeg: new Array(totalFrames).fill(0),
+      stagingFrames: new Array(totalFrames).fill(null),
+      stagingDeg: new Array(totalFrames).fill(0),
       lobattoByK: new Map(),
       lobattoJobByK: new Map(),
       lobattoFinalizeByK: new Map(),
       scratch: { dens: new Float32Array(0) },
       gen: cacheGen,
       readyCount: 0,
+      fixedParamsFp,
       bakeOpts: {
         layerId: opts.layerId,
         latex: opts.latex,
         role: opts.role,
         isoLevel: opts.isoLevel ?? 0,
-        paramName: opts.paramName,
+        paramNames,
+        mins,
+        maxs,
         compiled: opts.compiled,
         vectorCompiled: opts.vectorCompiled,
         baseParams: { ...opts.baseParams },
         half: opts.half,
         deg: opts.deg,
         K,
-        min,
-        max,
       },
     };
     caches.set(key, cache);
     baked = true;
   } else {
-    // Keep baseParams fresh for async fills (other sliders may have moved).
     cache.bakeOpts = {
       ...cache.bakeOpts,
       baseParams: { ...opts.baseParams },
       compiled: opts.compiled,
       vectorCompiled: opts.vectorCompiled,
     };
-    // Anim restart / replay: skip sync + async when expression unchanged and K slots ready.
     if (keyframesFullyReady(cache)) {
       return buildLayerKeyframeResult(cache, value, opts, false);
     }
   }
 
+  const cornerIndices = hypercellCornerIndices(cache);
   const blend = segmentForValue(cache, value);
   const t0 = performance.now();
   const stages: BakeStages = { sampleMs: 0, chebMs: 0, idctMs: 0, gradMs: 0 };
   const startDeg = startLadderDeg(cache.targetDeg);
   let syncCount = 0;
-  let lastSyncK = blend.i0;
+  let lastSyncK = cornerIndices[0] ?? 0;
   let syncPromoted: number[] = [];
-  // Never defer when the active blend pair has no display frames — that used to
-  // skip sync bake, materialize at bogus M=2, throw, and stall the pump.
-  const pairHasDisplay =
-    (cache.frameDeg[blend.i0] ?? 0) > 0 &&
-    (cache.frameDeg[blend.i1] ?? 0) > 0 &&
-    !!cache.frames[blend.i0] &&
-    !!cache.frames[blend.i1];
-  if (!opts.deferSyncBake || !pairHasDisplay) {
-    for (const k of [blend.i0, blend.i1]) {
+  const hypercellHasDisplay = cornerIndices.every(
+    (k) => (cache.frameDeg[k] ?? 0) > 0 && !!cache.frames[k],
+  );
+  if (!opts.deferSyncBake || !hypercellHasDisplay) {
+    for (const k of cornerIndices) {
       if (cache.frameDeg[k]! > 0 && cache.frames[k]) continue;
       const { frame, complete } = bakeFrameAtDeg(cache, k, startDeg, stages, null);
       if (!complete || !frame) throw new Error("sync keyframe bake incomplete");
@@ -1564,8 +1768,8 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
     }
   }
 
-  // Allocate scratch once we know volume size.
-  const proto = cache.frames[blend.i0] || cache.frames[blend.i1];
+  const proto =
+    cornerIndices.map((k) => cache.frames[k]).find(Boolean) ?? cache.frames[blend.i0] ?? cache.frames[blend.i1];
   if (proto) {
     const n = frameVolumeN(proto);
     const scratchN = frameVolumeN(cache.scratch);
@@ -1585,15 +1789,12 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
       M: gridMFromFrame(proto ?? { dens: new Float32Array(0) }),
       role: opts.role,
       layerId: opts.layerId,
-      paramName: opts.paramName,
+      paramNames,
       bakeMs,
       async: false,
       syncPair: [blend.i0, blend.i1],
     });
-    if (
-      syncPromoted.includes(blend.i0) &&
-      syncPromoted.includes(blend.i1)
-    ) {
+    if (syncPromoted.length === cornerIndices.length && cornerIndices.length >= 2) {
       maybeLogBlendPairReady(
         cache,
         opts.layerId,
@@ -1607,7 +1808,6 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
     }
   }
 
-  const displayBlend = displayBlendForValue(cache, value);
   if (!keyframesFullyReady(cache)) {
     scheduleAsyncFill(key, cache);
   }
@@ -1624,36 +1824,15 @@ export function sampleLayerKeyframes(opts: EnsureKeyframesOpts) {
   const ensured = ensureLayerKeyframes(opts);
   const cache = caches.get(opts.layerId);
   if (!cache) throw new Error("keyframe cache missing after ensure");
-  const st = getParam(cache.paramName);
   const tLerp = performance.now();
-  const { i0, i1, t } = displayBlendForValue(cache, st?.value ?? cache.min);
-  const a = cache.frames[i0];
-  const b = cache.frames[i1];
-  if (!a || !b) throw new Error("sync keyframe pair missing");
-  if (!a.dens || !b.dens) throw new Error("scalar keyframe pair missing dens");
-  const d0 = cache.frameDeg[i0] ?? 0;
-  const d1 = cache.frameDeg[i1] ?? 0;
-  const canLerp =
-    d0 === d1 &&
-    d0 > 0 &&
-    a.dens.length === b.dens.length &&
-    t > 0 &&
-    t < 1;
-  const src = t < 0.5 ? a.dens : b.dens;
-  ensureScratchVolume(cache, src.length);
-  const out = cache.scratch;
-  if (canLerp) {
-    lerpFloat32(a.dens, b.dens, t, out.dens!);
-  } else {
-    out.dens!.fill(0);
-    out.dens!.set(src);
-  }
+  const { out } = sampleVolumeFromCache(cache);
+  if (!out.dens) throw new Error("scalar keyframe missing dens");
   lerpMsAcc += performance.now() - tLerp;
   lastLerpMs = lerpMsAcc;
 
-  const M = gridMFromFrame({ dens: out.dens! });
+  const M = gridMFromFrame({ dens: out.dens });
   return {
-    dens: out.dens!,
+    dens: out.dens,
     cheb: ensured.cheb,
     fitRel: ensured.fitRel,
     M,
@@ -1664,6 +1843,34 @@ export function sampleLayerKeyframes(opts: EnsureKeyframesOpts) {
   };
 }
 
+/** CPU multilinear sample for isosurface layers with 2+ animated params. */
+export function sampleIsoLayerKeyframes(opts: EnsureKeyframesOpts) {
+  if (opts.role !== "isosurface") throw new Error("sampleIsoLayerKeyframes requires role isosurface");
+  const ensured = ensureLayerKeyframes(opts);
+  const cache = caches.get(opts.layerId);
+  if (!cache) throw new Error("keyframe cache missing after ensure");
+  const tLerp = performance.now();
+  const { out } = sampleVolumeFromCache(cache);
+  if (!out.dens || !out.gx || !out.gy || !out.gz) {
+    throw new Error("isosurface keyframe missing dens/grad");
+  }
+  lerpMsAcc += performance.now() - tLerp;
+  lastLerpMs = lerpMsAcc;
+  const M = gridMFromFrame({ dens: out.dens });
+  return {
+    dens: out.dens.slice(),
+    gx: out.gx.slice(),
+    gy: out.gy.slice(),
+    gz: out.gz.slice(),
+    cheb: ensured.cheb,
+    fitRel: ensured.fitRel,
+    M,
+    baked: ensured.baked,
+    readyCount: ensured.readyCount,
+    complete: ensured.complete,
+  };
+}
+
 /** CPU-lerp fx/fy/fz velocity grids at the current param value. */
 export function sampleFlowLayerKeyframes(opts: EnsureKeyframesOpts) {
   if (opts.role !== "flow") throw new Error("sampleFlowLayerKeyframes requires role flow");
@@ -1671,47 +1878,16 @@ export function sampleFlowLayerKeyframes(opts: EnsureKeyframesOpts) {
   const cache = caches.get(opts.layerId);
   if (!cache) throw new Error("keyframe cache missing after ensure");
   const tLerp = performance.now();
-  const { i0, i1, t } = displayBlendForValue(cache, getParam(cache.paramName)?.value ?? cache.min);
-  const a = cache.frames[i0];
-  const b = cache.frames[i1];
-  if (!a || !b) throw new Error("sync keyframe pair missing");
-  if (!a.fx || !a.fy || !a.fz || !b.fx || !b.fy || !b.fz) {
-    throw new Error("flow keyframe pair missing velocity grids");
-  }
-  const d0 = cache.frameDeg[i0] ?? 0;
-  const d1 = cache.frameDeg[i1] ?? 0;
-  const canLerp =
-    d0 === d1 &&
-    d0 > 0 &&
-    a.fx.length === b.fx.length &&
-    t > 0 &&
-    t < 1;
-  const pickA = t < 0.5;
-  ensureScratchVolume(cache, (pickA ? a.fx : b.fx).length);
-  const out = cache.scratch;
-  if (canLerp) {
-    lerpFloat32(a.fx, b.fx, t, out.fx!);
-    lerpFloat32(a.fy, b.fy, t, out.fy!);
-    lerpFloat32(a.fz, b.fz, t, out.fz!);
-  } else {
-    const sx = pickA ? a.fx : b.fx;
-    const sy = pickA ? a.fy : b.fy;
-    const sz = pickA ? a.fz : b.fz;
-    out.fx!.fill(0);
-    out.fy!.fill(0);
-    out.fz!.fill(0);
-    out.fx!.set(sx);
-    out.fy!.set(sy);
-    out.fz!.set(sz);
-  }
+  const { out } = sampleVolumeFromCache(cache);
+  if (!out.fx || !out.fy || !out.fz) throw new Error("flow keyframe missing velocity grids");
   lerpMsAcc += performance.now() - tLerp;
   lastLerpMs = lerpMsAcc;
 
-  const M = gridMFromFrame({ fx: out.fx! });
+  const M = gridMFromFrame({ fx: out.fx });
   return {
-    fx: out.fx!.slice(),
-    fy: out.fy!.slice(),
-    fz: out.fz!.slice(),
+    fx: out.fx.slice(),
+    fy: out.fy.slice(),
+    fz: out.fz.slice(),
     cheb: ensured.cheb,
     fitRel: ensured.fitRel,
     M,
@@ -1766,8 +1942,8 @@ export function noteKeyframeLayer() {
  */
 export function peekKeyframeBlend(layerId: string) {
   const cache = caches.get(layerId);
-  if (!cache) return null;
-  const st = getParam(cache.paramName);
+  if (!cache || cacheNDims(cache) !== 1) return null;
+  const st = getParam(cache.paramNames[0]!);
   if (!st) return null;
   const blend = displayBlendForValue(cache, st.value);
   if (!cache.frames[blend.i0] || !cache.frames[blend.i1]) {

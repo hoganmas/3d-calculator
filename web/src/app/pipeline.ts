@@ -21,10 +21,12 @@ import {
   logKeyframeBake,
   setKeyframeProgressHandler,
   keyframeAnimParam,
+  keyframeAnimParams,
   noteKeyframeLayer,
   ensureLayerKeyframes,
   sampleLayerKeyframes,
   sampleFlowLayerKeyframes,
+  sampleIsoLayerKeyframes,
   peekKeyframeBlend,
   syncIsoKeyframesToSceneBake,
   getKeyframeLayerRole,
@@ -370,47 +372,81 @@ export function uploadFit(
         continue;
       }
 
-      // Keyframe path: one dirty animated slider → GPU blend (iso) / CPU lerp (dens).
-      const kfParam =
+      // Keyframe path: animated slider(s) → GPU blend (iso 1D) / CPU multilinear (cloud, iso N-D).
+      const kfParams =
         fromAnim && depends && dirty && L.compiled
-          ? keyframeAnimParam(L.compiled.freeParams, dirty)
+          ? keyframeAnimParams(L.compiled.freeParams, dirty)
           : null;
-      if (kfParam && L.compiled && L.fn) {
+      if (kfParams?.length && L.compiled && L.fn) {
         noteKeyframeLayer();
         keyframedCount++;
         const memKf = hasLayerKeyframeCache(L.item.id);
         const deferKf = fromAnim && (prevHasKf || memKf);
         if (L.role === "isosurface") {
-          const sample = ensureLayerKeyframes({
-            layerId: L.item.id,
-            latex: L.item.latex,
-            role: "isosurface",
-            isoLevel: L.compiled?.isoLevel ?? 0,
-            paramName: kfParam,
-            compiled: L.compiled,
-            baseParams,
-            half,
-            deg,
-            deferSyncBake: deferKf,
-          });
-          if (sample.baked) keyframeBaked = true;
-          // Pause replaces scene with dens-only; replay must re-upload GPU keyframe slots.
-          if (sample.gpuUploadNeeded || (memKf && !prevHasKf)) isoGpuUploadNeeded = true;
-          M = sample.M || M;
-          isosurfaceLayers.push({
-            id: L.item.id,
-            keyframes: sample.frames,
-            blend: sample.blend,
-            color,
-            color2,
-            colors,
-            isoLevel: L.compiled?.isoLevel ?? 0,
-            cheb: sample.cheb,
-            fitRel: sample.fitRel,
-          });
-          if (!cheb && sample.cheb) {
-            cheb = sample.cheb;
-            fitRel = sample.fitRel ?? fitRel;
+          if (kfParams.length === 1) {
+            const sample = ensureLayerKeyframes({
+              layerId: L.item.id,
+              latex: L.item.latex,
+              role: "isosurface",
+              isoLevel: L.compiled?.isoLevel ?? 0,
+              paramNames: kfParams,
+              compiled: L.compiled,
+              baseParams,
+              half,
+              deg,
+              deferSyncBake: deferKf,
+            });
+            if (sample.baked) keyframeBaked = true;
+            if (sample.gpuUploadNeeded || (memKf && !prevHasKf)) isoGpuUploadNeeded = true;
+            M = sample.M || M;
+            isosurfaceLayers.push({
+              id: L.item.id,
+              keyframes: sample.frames,
+              blend: sample.blend,
+              color,
+              color2,
+              colors,
+              isoLevel: L.compiled?.isoLevel ?? 0,
+              cheb: sample.cheb,
+              fitRel: sample.fitRel,
+            });
+            if (!cheb && sample.cheb) {
+              cheb = sample.cheb;
+              fitRel = sample.fitRel ?? fitRel;
+            }
+          } else {
+            const sample = sampleIsoLayerKeyframes({
+              layerId: L.item.id,
+              latex: L.item.latex,
+              role: "isosurface",
+              isoLevel: L.compiled?.isoLevel ?? 0,
+              paramNames: kfParams,
+              compiled: L.compiled,
+              baseParams,
+              half,
+              deg,
+              deferSyncBake: deferKf,
+            });
+            if (sample.baked) keyframeBaked = true;
+            M = sample.M || M;
+            isosurfaceLayers.push({
+              id: L.item.id,
+              dens: sample.dens.slice(),
+              gx: sample.gx.slice(),
+              gy: sample.gy.slice(),
+              gz: sample.gz.slice(),
+              color,
+              color2,
+              colors,
+              isoLevel: L.compiled?.isoLevel ?? 0,
+              cheb: sample.cheb,
+              fitRel: sample.fitRel,
+            });
+            densKeyframedCpu = true;
+            if (!cheb && sample.cheb) {
+              cheb = sample.cheb;
+              fitRel = sample.fitRel ?? fitRel;
+            }
           }
         } else {
           const sample = sampleLayerKeyframes({
@@ -418,7 +454,7 @@ export function uploadFit(
             latex: L.item.latex,
             role: "cloud",
             isoLevel: L.compiled?.isoLevel ?? 0,
-            paramName: kfParam,
+            paramNames: kfParams,
             compiled: L.compiled,
             baseParams,
             half,
@@ -447,11 +483,11 @@ export function uploadFit(
       }
 
       if (L.role === "flow") {
-        const kfParam =
+        const kfParamsFlow =
           fromAnim && depends && dirty && L.vectorCompiled
-            ? keyframeAnimParam(L.vectorCompiled.freeParams, dirty)
+            ? keyframeAnimParams(L.vectorCompiled.freeParams, dirty)
             : null;
-        if (kfParam && L.vectorCompiled && L.vectorFn) {
+        if (kfParamsFlow?.length && L.vectorCompiled && L.vectorFn) {
           noteKeyframeLayer();
           keyframedCount++;
           const memKf = hasLayerKeyframeCache(L.item.id);
@@ -460,7 +496,7 @@ export function uploadFit(
             layerId: L.item.id,
             latex: L.item.latex,
             role: "flow",
-            paramName: kfParam,
+            paramNames: kfParamsFlow,
             vectorCompiled: L.vectorCompiled,
             baseParams,
             half,
