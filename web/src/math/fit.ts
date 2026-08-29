@@ -10,6 +10,8 @@ import {
   normalizeCalcLatex,
   normalizeLatexAliases,
   parseDivergenceMatch,
+  parseTupleCrossMatch,
+  parseTupleDotMatch,
   peelDefiniteIntegrals,
   scalarFromUnaryOpJson,
   tripleFromUnaryOpJson,
@@ -1132,7 +1134,9 @@ function compileDefiniteIntegralExpr(
 function compileConstantScalarExpr(
   value: number,
   classified: ClassifiedExpr,
+  scale = 1,
 ): CompiledExpr {
+  const scaled = value * scale;
   return {
     freeParams: [],
     usesSpace: false,
@@ -1141,7 +1145,95 @@ function compileConstantScalarExpr(
     isoLevel: classified.isoLevel,
     classifyLabel: "constant (not graphed)",
     bind() {
-      return () => value;
+      return () => scaled;
+    },
+  };
+}
+
+function scaleCompiledExpr(compiled: CompiledExpr, scale: number): CompiledExpr {
+  if (scale === 1) return compiled;
+  const innerBind = compiled.bind.bind(compiled);
+  const innerBindScalar = compiled.bindScalar?.bind(compiled);
+  return {
+    ...compiled,
+    bind(params: Record<string, number> = {}) {
+      const fn = innerBind(params);
+      return (x: number, y: number, z: number) => scale * fn(x, y, z);
+    },
+    bindScalar: innerBindScalar
+      ? (params: Record<string, number> = {}) => {
+          const fn = innerBindScalar(params);
+          return (x: number, y: number, z: number) => scale * fn(x, y, z);
+        }
+      : undefined,
+  };
+}
+
+function bindDotProductFromTuples(
+  left: [string, string, string],
+  right: [string, string, string],
+) {
+  const leftCompiled = left.map((latex) => compileLatex(latex));
+  const rightCompiled = right.map((latex) => compileLatex(latex));
+  for (let i = 0; i < 3; i++) {
+    if (!leftCompiled[i]?.success || typeof leftCompiled[i]!.run !== "function") {
+      throw new Error(`Could not compile dot left component: ${left[i]}`);
+    }
+    if (!rightCompiled[i]?.success || typeof rightCompiled[i]!.run !== "function") {
+      throw new Error(`Could not compile dot right component: ${right[i]}`);
+    }
+  }
+  return (params: Record<string, number> = {}) =>
+    (x: number, y: number, z: number) => {
+      const { r, theta, phi, rho } = polarFromCartesian(x, y, z);
+      let sum = 0;
+      for (let i = 0; i < 3; i++) {
+        const evalPart = (latex: string, compiled: ReturnType<typeof compileLatex>) => {
+          const fp = collectFreeParams(compiled.freeSymbols, latex).freeParams;
+          const scope: Record<string, number> = { x, y, z, r, theta, phi, rho };
+          for (const name of fp) {
+            const v = params[name];
+            scope[name] = Number.isFinite(v) ? v : 1;
+          }
+          return coerceNumber(compiled.run!(scope));
+        };
+        sum +=
+          evalPart(left[i]!, leftCompiled[i]!) * evalPart(right[i]!, rightCompiled[i]!);
+      }
+      return sum;
+    };
+}
+
+function compileDotProductExpr(
+  left: [string, string, string],
+  right: [string, string, string],
+  classified: ClassifiedExpr,
+): CompiledExpr {
+  const sides = [...left, ...right];
+  const compiled = sides.map((latex) => compileLatex(latex));
+  const freeSet = new Set<string>();
+  let usesSpace = false;
+  for (let i = 0; i < sides.length; i++) {
+    const { freeParams, usesSpace: us } = collectFreeParams(
+      compiled[i]!.freeSymbols,
+      sides[i]!,
+    );
+    for (const p of freeParams) freeSet.add(p);
+    if (us) usesSpace = true;
+  }
+  const freeParams = [...freeSet].sort();
+  if (!usesSpace) throw new Error("Dot product field must depend on x, y, or z");
+  const shade = classified.shade === "none" ? "none" : classified.shade;
+  return {
+    freeParams,
+    usesSpace,
+    kind: classified.kind as FieldKind,
+    shade,
+    isoLevel: classified.isoLevel,
+    classifyLabel: "dot product",
+    operator: "dot_product",
+    bind(params: Record<string, number> = {}) {
+      return bindDotProductFromTuples(left, right)(params);
     },
   };
 }
@@ -1196,7 +1288,9 @@ function isLikelyFlowLatex(raw: string): boolean {
   if (/\\curl|\\operatorname\s*\{\s*curl\s*\}|\\nabla\s*\\times/i.test(s)) return true;
   if (/\\nabla\s*\^|\^2|\\laplacian|\\Delta|\\div|\\nabla\s*\\cdot/i.test(s)) return false;
   if (/\\grad|\\operatorname\s*\{\s*grad\s*\}|\\nabla/i.test(s)) return true;
-  const m = s.match(/^\(([\s\S]+)\)$/);
+  const normalized = normalizeForCe(s);
+  if (parseTupleCrossMatch(normalized)) return true;
+  const m = normalized.match(/^\(([\s\S]+)\)$/);
   if (m) {
     let depth = 0;
     let parts = 0;
@@ -1208,6 +1302,7 @@ function isLikelyFlowLatex(raw: string): boolean {
     }
     if (parts === 2) return true;
   }
+  if (/^[\d.]+\s*\(/.test(normalized)) return true;
   return false;
 }
 
@@ -1224,6 +1319,12 @@ export function compileExpr(
 
   const normalized = normalizeForCe(expandedRaw);
   if (normalized) {
+    const dotMatch = parseTupleDotMatch(normalized);
+    if (dotMatch) {
+      const classified = classifyExpr(expandedRaw);
+      return compileDotProductExpr(dotMatch.left, dotMatch.right, classified);
+    }
+
     const peeledInt = peelDefiniteIntegrals(normalized);
     if (peeledInt) {
       const classified = classifyExpr(expandedRaw);
@@ -1250,16 +1351,19 @@ export function compileExpr(
     const divMatch = looksLikeDivergence(normalized, j);
     if (divMatch) {
       const classified = classifyExpr(expandedRaw);
+      const scale = divMatch.scale ?? 1;
       if (divMatch.mode === "laplacian") {
-        return compileLaplacianExpr(expandedRaw, divMatch.inner, classified);
+        return scaleCompiledExpr(
+          compileLaplacianExpr(expandedRaw, divMatch.inner, classified),
+          scale,
+        );
       }
       if (divMatch.mode === "constant") {
-        return compileConstantScalarExpr(divMatch.value, classified);
+        return compileConstantScalarExpr(divMatch.value, classified, scale);
       }
-      return compileDivergenceExpr(
-        expandedRaw,
-        divMatch.parts,
-        classified,
+      return scaleCompiledExpr(
+        compileDivergenceExpr(expandedRaw, divMatch.parts, classified),
+        scale,
       );
     }
   }
