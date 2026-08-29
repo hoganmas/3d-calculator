@@ -1,4 +1,8 @@
-import { formatExpressionErrors, type ExpressionErrorReport } from "../../src/app/exprErrors.js";
+import { collectExpressionErrors, formatExpressionErrors, type ExpressionErrorReport } from "../../src/app/exprErrors.js";
+import "../helpers/setup-dom.ts";
+import { compileAllExprs } from "../../src/app/compile.ts";
+import { clearExpressions, getExprWarning, setExpressions } from "../../src/model/expressions.ts";
+import { state } from "../../src/app/state.ts";
 import { assert } from "../helpers/assert.ts";
 import { runSuite } from "../helpers/runner.ts";
 
@@ -45,6 +49,31 @@ export async function run() {
           }) === "",
           "empty when no errors",
         );
+      },
+    },
+    {
+      name: "collectExpressionErrors gathers warnings after compile",
+      fn() {
+        state.pendingParamSeed = {};
+        state.exprListApi = null;
+        clearExpressions();
+        setExpressions([
+          { id: "e1", latex: "a=1", enabled: true },
+          { id: "e2", latex: "a=2", enabled: true },
+        ]);
+        compileAllExprs({ rebuildUi: false });
+        const report = collectExpressionErrors(true, null);
+        assert(report.errorCount >= 1, "has errors");
+        assert(report.errors.some((e) => e.kind === "expression"), "expression error");
+        assert(getExprWarning("e2") != null, "warning on duplicate");
+      },
+    },
+    {
+      name: "collectExpressionErrors includes global error",
+      fn() {
+        const report = collectExpressionErrors(false, "Fit failed");
+        assert(report.globalError === "Fit failed", "global");
+        assert(report.errors[0]?.kind === "global", "global kind");
       },
     },
   ]);
