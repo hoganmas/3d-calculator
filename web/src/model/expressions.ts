@@ -3,7 +3,8 @@
  * Parameter rows (`a = …`) share values across all field expressions.
  */
 
-import type { ExprItem, ExprRole, LayerRole } from "../types/models.js";
+import type { ExprItem, ExprRole, LayerRole, ExprKind } from "../types/models.js";
+import { isDeclSymbolKind } from "./symbols.js";
 import { isVectorFieldLatex } from "../math/fitVector.js";
 
 export type { ExprItem, ExprRole, AnimMode } from "../types/models.js";
@@ -465,11 +466,11 @@ export function hexToRgb01(hex: string) {
  */
 export function resolveExprRole(
   role: ExprRole,
-  kind: "parameter" | "constraint" | "definition" | "bare",
+  kind: ExprKind,
   latex?: string,
 ): LayerRole {
   const r = normalizeExprRole(role as string);
-  if (kind === "parameter") return "parameter";
+  if (isDeclSymbolKind(kind)) return "parameter";
   if (r === "cloud" || r === "isosurface" || r === "flow") return r;
   if (r === "auto" && latex && isVectorFieldLatex(latex)) return "flow";
   return kind === "constraint" ? "isosurface" : "cloud";

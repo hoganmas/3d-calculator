@@ -1,5 +1,6 @@
 import { classifyExpr } from "../../math/fit.js";
 import { getParam } from "../../model/params.js";
+import { isDeclSymbolKind } from "../../model/symbols.js";
 import type { ExprItem } from "../../types/models.js";
 
 export const ANIM_OPTS_ICON = `<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 3.2a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Zm0 3.7a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Zm0 3.7a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Z"/></svg>`;
@@ -188,6 +189,12 @@ export function classifyKind(latex: string) {
 export function fmtAnimSpeed(speed: number): string {
   const s = Math.round(speed * 100) / 100;
   return Number.isInteger(s) ? String(s) : s.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+/** True for parameter / alias / funcdef declaration rows (no layer gradient). */
+export function isDeclarationRow(latex: string): boolean {
+  const classified = classifyKind(latex);
+  return isDeclSymbolKind(classified?.kind);
 }
 
 /** Params needed under a row: owning `a=…` declaration only. */

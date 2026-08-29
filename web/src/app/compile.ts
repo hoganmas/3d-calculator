@@ -8,6 +8,7 @@ import {
   recompileAllParams,
   evalParamEquations,
 } from "../model/params.js";
+import { SymbolRegistry, isDeclSymbolKind, type SymbolEntry } from "../model/symbols.js";
 import {
   listExpressions,
   setExpressions,
@@ -22,7 +23,57 @@ import {
 import { closeSettingsDialog, els } from "./dom.js";
 import { isMathFieldFocused } from "../ui/expr-sidebar/helpers.js";
 import { state } from "./state.js";
-import type { CompileAllResult, CompileLayerResult, ExprItem } from "../types/models.js";
+import type { ClassifiedExpr, CompileAllResult, CompileLayerResult, ExprItem } from "../types/models.js";
+
+function symbolEntryFromClassified(item: ExprItem, classified: ClassifiedExpr): SymbolEntry | null {
+  if (classified.kind === "parameter" && classified.paramName) {
+    return {
+      kind: "parameter",
+      name: classified.paramName,
+      rhsLatex: classified.compileLatex,
+      latex: item.latex,
+      exprId: item.id,
+    };
+  }
+  if (classified.kind === "alias" && classified.aliasName) {
+    return {
+      kind: "alias",
+      name: classified.aliasName,
+      rhsLatex: classified.compileLatex,
+      latex: item.latex,
+      exprId: item.id,
+    };
+  }
+  if (classified.kind === "funcdef" && classified.funcName) {
+    return {
+      kind: "funcdef",
+      name: classified.funcName,
+      rhsLatex: classified.compileLatex,
+      latex: item.latex,
+      exprId: item.id,
+      funcArgs: classified.funcArgs ?? [],
+    };
+  }
+  return null;
+}
+
+function buildSymbolRegistry(items: ExprItem[]) {
+  const registry = new SymbolRegistry();
+  const warnings: [string, string][] = [];
+  for (const item of items) {
+    let classified: ClassifiedExpr;
+    try {
+      classified = classifyExpr(item.latex);
+    } catch {
+      continue;
+    }
+    const entry = symbolEntryFromClassified(item, classified);
+    if (!entry) continue;
+    const err = registry.tryAdd(entry);
+    if (err) warnings.push([item.id, err]);
+  }
+  return { registry, warnings };
+}
 
 export function fmtParamNum(v: number) {
   if (!Number.isFinite(v)) return "—";
@@ -54,20 +105,26 @@ export function ensureParamExprRows(names: string[]) {
 
 /** Names referenced by field free-symbols or parameter RHS deps. */
 export function collectParamReferences() {
+  const items = listExpressions().filter((e) => e.enabled && String(e.latex || "").trim());
+  const { registry } = buildSymbolRegistry(items);
   const refs = new Set<string>();
-  for (const item of listExpressions()) {
+  for (const item of items) {
     if (!item.enabled || !String(item.latex || "").trim()) continue;
     try {
       const classified = classifyExpr(item.latex);
-      if (classified.kind === "parameter") {
-        const compiled = compileParamLatex(item.latex, classified.paramName!);
-        for (const p of compiled.freeParams) refs.add(p);
-      } else {
-        const role = resolveExprRole(item.role, classified.kind, item.latex);
-        const compiled =
-          role === "flow" ? compileVectorExpr(item.latex) : compileExpr(item.latex);
-        for (const p of compiled.freeParams) refs.add(p);
+      if (isDeclSymbolKind(classified.kind)) {
+        if (classified.kind === "parameter") {
+          const compiled = compileParamLatex(item.latex, classified.paramName!);
+          for (const p of compiled.freeParams) refs.add(p);
+        }
+        continue;
       }
+      const role = resolveExprRole(item.role, classified.kind, item.latex);
+      const compiled =
+        role === "flow"
+          ? compileVectorExpr(item.latex, registry)
+          : compileExpr(item.latex, registry);
+      for (const p of compiled.freeParams) refs.add(p);
     } catch {
       /* ignore */
     }
@@ -119,11 +176,12 @@ export function compileAllExprs(opts: CompileOpts = {}): CompileAllResult {
   const rebuildUi = opts.rebuildUi !== false;
   const items = listExpressions().filter((e) => e.enabled && String(e.latex || "").trim());
 
+  const { registry, warnings: registryWarnings } = buildSymbolRegistry(items);
   const paramRows: { item: ExprItem; name: string }[] = [];
   const layers: CompileLayerResult[] = [];
   const freeSet = new Set<string>();
   const definedParams = new Set<string>();
-  const warnings: [string, string][] = [];
+  const warnings: [string, string][] = [...registryWarnings];
   replaceExprWarnings([]);
 
   for (const item of items) {
@@ -136,12 +194,13 @@ export function compileAllExprs(opts: CompileOpts = {}): CompileAllResult {
     if (classified.kind === "parameter") {
       const name = classified.paramName;
       if (!name) continue;
-      if (definedParams.has(name)) {
-        warnings.push([item.id, `Variable “${name}” is already declared`]);
-        continue;
-      }
+      const entry = registry.getParam(name);
+      if (!entry || entry.exprId !== item.id) continue;
       definedParams.add(name);
       paramRows.push({ item, name });
+      continue;
+    }
+    if (classified.kind === "alias" || classified.kind === "funcdef") {
       continue;
     }
 
@@ -149,7 +208,7 @@ export function compileAllExprs(opts: CompileOpts = {}): CompileAllResult {
 
     if (role === "flow") {
       try {
-        const vectorCompiled = compileVectorExpr(item.latex);
+        const vectorCompiled = compileVectorExpr(item.latex, registry);
         for (const p of vectorCompiled.freeParams) freeSet.add(p);
         if (!vectorCompiled.usesSpace) continue;
         layers.push({
@@ -167,15 +226,22 @@ export function compileAllExprs(opts: CompileOpts = {}): CompileAllResult {
       continue;
     }
 
-    const compiled = compileExpr(item.latex);
-    for (const p of compiled.freeParams) freeSet.add(p);
-    if (!compiled.usesSpace || compiled.shade === "none") continue;
-    layers.push({
-      item,
-      compiled,
-      role,
-      fn: compiled.bind(getParamValues()),
-    });
+    try {
+      const compiled = compileExpr(item.latex, registry);
+      for (const p of compiled.freeParams) freeSet.add(p);
+      if (!compiled.usesSpace || compiled.shade === "none") continue;
+      layers.push({
+        item,
+        compiled,
+        role,
+        fn: compiled.bind(getParamValues()),
+      });
+    } catch (e) {
+      warnings.push([
+        item.id,
+        e instanceof Error ? e.message : "Invalid expression",
+      ]);
+    }
   }
 
   replaceExprWarnings(warnings);

@@ -26,6 +26,7 @@ import {
     isSuggestionUiActive,
     classifyKind,
     neededParamForItem,
+    isDeclarationRow,
     isMathFieldFocused,
     ICON_EYE,
     ICON_EYE_OFF,
@@ -72,10 +73,10 @@ import {
 
   const warn = $derived(getExprWarning(item.id));
   const paramName = $derived(neededParamForItem(item));
-  const isParamDef = $derived(!!paramName || !!warn);
+  const isDeclDef = $derived(isDeclarationRow(item.latex || "") || !!warn);
   const grad = $derived(resolveExprGradient(item));
   const gradCss = $derived(cssGradientFromColors(grad.colors));
-  const swatchDisabled = $derived(isParamDef);
+  const swatchDisabled = $derived(isDeclDef);
 
   onMount(() => {
     if (!mfEl) return;
@@ -219,7 +220,7 @@ import {
   class="expr-row"
   class:selected
   class:is-hidden={!item.enabled}
-  class:is-param-def={isParamDef}
+  class:is-param-def={isDeclDef}
   class:has-error={!!warn}
   data-id={item.id}
   data-param={paramName ?? undefined}

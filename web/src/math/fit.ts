@@ -14,6 +14,7 @@ import type {
   ScalarFitResult,
   ChebFitTiming,
 } from "../types/models.js";
+import type { SymbolRegistry } from "../model/symbols.js";
 
 type MathJsonArray = unknown[];
 type CeRun = (scope: Record<string, unknown>) => unknown;
@@ -228,12 +229,147 @@ function isUserFunctionCall(json: unknown) {
   return json.length >= 2;
 }
 
+/** Parse `f(x,y)=` left-hand side into name and formal args. */
+function parseFuncDefLhs(src: string, lhs: unknown) {
+  if (isUserFunctionCall(lhs)) {
+    const ja = jsonArr(lhs);
+    const funcName = String(ja[0]);
+    const funcArgs = ja
+      .slice(1)
+      .map((a) => symbolId(a))
+      .filter((a): a is string => !!a);
+    return { funcName, funcArgs };
+  }
+
+  const eq = String(src).search(/=/);
+  if (eq < 0) throw new Error("Invalid function definition");
+  const left = String(src).slice(0, eq).trim();
+  const m = left.match(
+    /^([A-Za-z][A-Za-z0-9]*)\s*(?:\\left\s*)?\(([\s\S]*?)\)(?:\\right\s*)?\s*$/,
+  );
+  if (!m) throw new Error("Invalid function definition");
+  const funcName = m[1]!;
+  const argSrc = m[2]!.trim();
+  const funcArgs = argSrc
+    ? argSrc
+        .split(",")
+        .map((s) => s.trim())
+        .map((s) => symbolId(s) ?? (/^[A-Za-z][A-Za-z0-9_]*$/.test(s) ? s : null))
+        .filter((a): a is string => !!a)
+    : [];
+  return { funcName, funcArgs };
+}
+
+function substituteFuncBody(body: unknown, formals: string[], actuals: unknown[]): unknown {
+  const binding = new Map<string, unknown>();
+  for (let i = 0; i < formals.length; i++) {
+    binding.set(formals[i]!, actuals[i] ?? formals[i]);
+  }
+
+  function walk(node: unknown): unknown {
+    const id = symbolId(node);
+    if (id && binding.has(id)) return binding.get(id);
+
+    if (Array.isArray(node)) {
+      if (isUserFunctionCall(node)) {
+        const ja = node as unknown[];
+        return [ja[0], ...ja.slice(1).map(walk)];
+      }
+      return node.map((n, i) => (i === 0 && typeof n === "string" ? n : walk(n)));
+    }
+    return node;
+  }
+
+  return walk(body);
+}
+
+function isMultiplyFuncCall(json: unknown, registry: SymbolRegistry): { fn: string; args: unknown[] } | null {
+  if (!Array.isArray(json) || json[0] !== "Multiply" || json.length < 3) return null;
+  const fn = symbolId(json[1]);
+  if (!fn || !registry.getFuncdef(fn)) return null;
+  return { fn, args: json.slice(2) };
+}
+
+function expandJson(json: unknown, registry: SymbolRegistry): unknown {
+  const mulCall = isMultiplyFuncCall(json, registry);
+  if (mulCall) {
+    const fd = registry.getFuncdef(mulCall.fn)!;
+    const actuals = mulCall.args.map((a) => expandJson(a, registry));
+    let body: unknown;
+    try {
+      body = ce.parse(normalizeLatexFunctions(fd.rhsLatex)).json;
+    } catch {
+      return json;
+    }
+    return expandJson(substituteFuncBody(body, fd.funcArgs ?? [], actuals), registry);
+  }
+
+  if (isUserFunctionCall(json)) {
+    const ja = jsonArr(json);
+    const fn = String(ja[0]);
+    const fd = registry.getFuncdef(fn);
+    if (fd?.funcArgs?.length) {
+      const actuals = ja.slice(1).map((a) => expandJson(a, registry));
+      let body: unknown;
+      try {
+        body = ce.parse(normalizeLatexFunctions(fd.rhsLatex)).json;
+      } catch {
+        return json;
+      }
+      return expandJson(substituteFuncBody(body, fd.funcArgs, actuals), registry);
+    }
+    return [ja[0], ...ja.slice(1).map((a) => expandJson(a, registry))];
+  }
+
+  const id = symbolId(json);
+  if (id) {
+    const alias = registry.getAlias(id);
+    if (alias) {
+      try {
+        const body = ce.parse(normalizeLatexFunctions(alias.rhsLatex)).json;
+        return expandJson(body, registry);
+      } catch {
+        return json;
+      }
+    }
+    return json;
+  }
+
+  if (Array.isArray(json)) {
+    return json.map((n, i) => (i === 0 && typeof n === "string" ? n : expandJson(n, registry)));
+  }
+  return json;
+}
+
+/** Expand alias names and user function calls using a declaration registry. */
+export function expandDefinitions(raw: string, registry: SymbolRegistry): string {
+  const src = normalizeLatexFunctions(String(raw ?? "").trim());
+  if (!src) return src;
+
+  let latex = src;
+  for (let iter = 0; iter < 32; iter++) {
+    let box;
+    try {
+      box = ce.parse(latex);
+    } catch {
+      return latex;
+    }
+    const j = box?.json ?? (typeof box?.toJSON === "function" ? box.toJSON() : null);
+    const next = expandJson(j, registry);
+    if (JSON.stringify(next) === JSON.stringify(j)) break;
+    const nextBox = ce.box(next as never);
+    latex = nextBox.latex || latex;
+  }
+  return latex;
+}
+
 /**
  * Classify input and rewrite to a numeric field for fitting.
  *
- * - parameter `a = E`      → named slider / eqn (LHS free symbol)
+ * - parameter `a = E`      → named slider (RHS has no spatial deps)
+ * - alias `T = E`          → named spatial expression (not a slider)
+ * - funcdef `f(…) = E`     → reusable function (expanded at call sites)
  * - constraint `A = B`     → field A−B, isosurface at 0
- * - definition `f(…) = E`  → field E, volume (Beer)
  * - bare expression `E`    → field E, volume (Beer)
  *
  * @returns {{
@@ -274,19 +410,22 @@ export function classifyExpr(raw: string): ClassifiedExpr {
       latexLooksLikeFunctionDef(src) || isUserFunctionCall(lhs);
 
     if (asDef) {
+      const { funcName, funcArgs } = parseFuncDefLhs(src, lhs);
       const rhsBox = ce.box(rhs as never);
-      const compileLatex = rhsBox.latex || src.split("=").slice(1).join("=").trim();
-      if (!compileLatex) throw new Error("Empty right-hand side");
+      const rhsLatex = rhsBox.latex || src.split("=").slice(1).join("=").trim();
+      if (!rhsLatex) throw new Error("Empty right-hand side");
       return {
-        kind: "definition",
-        shade: "volume",
+        kind: "funcdef",
+        shade: "none",
         isoLevel: 0,
-        compileLatex,
-        label: "definition → volume",
+        compileLatex: rhsLatex,
+        label: `function ${funcName}`,
+        funcName,
+        funcArgs,
       };
     }
 
-    // Bare free symbol on LHS → named parameter (not a manifold constraint).
+    // Bare free symbol on LHS → parameter or spatial alias.
     const lhsName = symbolId(lhs);
     if (
       lhsName &&
@@ -294,26 +433,40 @@ export function classifyExpr(raw: string): ClassifiedExpr {
       /^[A-Za-z][A-Za-z0-9_]*$/.test(lhsName)
     ) {
       const rhsBox = ce.box(rhs as never);
-      const compileLatex = rhsBox.latex || src.split("=").slice(1).join("=").trim();
-      if (!compileLatex) throw new Error("Empty parameter right-hand side");
+      const rhsLatex = rhsBox.latex || src.split("=").slice(1).join("=").trim();
+      if (!rhsLatex) throw new Error("Empty right-hand side");
+      const rhsResult = compileLatex(rhsLatex);
+      const { usesSpace } = collectFreeParams(rhsResult.freeSymbols, rhsLatex, {
+        skipName: lhsName,
+      });
+      if (usesSpace) {
+        return {
+          kind: "alias",
+          shade: "none",
+          isoLevel: 0,
+          compileLatex: rhsLatex,
+          label: `alias ${lhsName}`,
+          aliasName: lhsName,
+        };
+      }
       return {
         kind: "parameter",
         shade: "none",
         isoLevel: 0,
-        compileLatex,
+        compileLatex: rhsLatex,
         label: `parameter ${lhsName}`,
         paramName: lhsName,
       };
     }
 
     const diff = ce.box(["Subtract", lhs, rhs] as never);
-    const compileLatex = diff.latex;
-    if (!compileLatex) throw new Error("Could not form constraint residual");
+    const constraintLatex = diff.latex;
+    if (!constraintLatex) throw new Error("Could not form constraint residual");
     return {
       kind: "constraint",
       shade: "iso",
       isoLevel: 0,
-      compileLatex,
+      compileLatex: constraintLatex,
       label: "constraint → isosurface",
     };
   }
@@ -655,12 +808,14 @@ function isLikelyFlowLatex(raw: string): boolean {
   return false;
 }
 
-export function compileExpr(raw: string): CompiledExpr {
-  if (isLikelyFlowLatex(raw)) {
+export function compileExpr(raw: string, registry?: SymbolRegistry): CompiledExpr {
+  const expandedRaw = registry ? expandDefinitions(raw, registry) : raw;
+
+  if (isLikelyFlowLatex(expandedRaw)) {
     throw new Error("Vector field — use flow role (tuple, \\grad, or \\curl)");
   }
 
-  const normalized = normalizeCalcLatex(normalizeLatexFunctions(String(raw ?? "").trim()));
+  const normalized = normalizeCalcLatex(normalizeLatexFunctions(String(expandedRaw ?? "").trim()));
   if (normalized) {
     let box;
     try {
@@ -671,17 +826,17 @@ export function compileExpr(raw: string): CompiledExpr {
     const j = box?.json ?? (typeof box?.toJSON === "function" ? box.toJSON() : null);
     const lapInner = looksLikeLaplacian(normalized, j);
     if (lapInner) {
-      const classified = classifyExpr(raw);
-      return compileLaplacianExpr(raw, lapInner, classified);
+      const classified = classifyExpr(expandedRaw);
+      return compileLaplacianExpr(expandedRaw, lapInner, classified);
     }
     const divParts = looksLikeDivergence(normalized, j);
     if (divParts?.length === 3) {
-      const classified = classifyExpr(raw);
-      return compileDivergenceExpr(raw, divParts as [string, string, string], classified);
+      const classified = classifyExpr(expandedRaw);
+      return compileDivergenceExpr(expandedRaw, divParts as [string, string, string], classified);
     }
   }
 
-  const classified = classifyExpr(raw);
+  const classified = classifyExpr(expandedRaw);
   const src = classified.compileLatex;
 
   const result = compileLatex(src);

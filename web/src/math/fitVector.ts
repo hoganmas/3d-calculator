@@ -17,6 +17,8 @@ import type {
   VectorFieldKind,
   VectorFitResult,
 } from "../types/models.js";
+import { expandDefinitions } from "./fit.js";
+import type { SymbolRegistry } from "../model/symbols.js";
 
 const ce = new ComputeEngine();
 
@@ -293,8 +295,9 @@ export function classifyVectorExpr(raw: string): ClassifiedVectorExpr {
   );
 }
 
-export function compileVectorExpr(raw: string): CompiledVectorExpr {
-  const classified = classifyVectorExpr(raw);
+export function compileVectorExpr(raw: string, registry?: SymbolRegistry): CompiledVectorExpr {
+  const expandedRaw = registry ? expandDefinitions(raw, registry) : raw;
+  const classified = classifyVectorExpr(expandedRaw);
 
   if (classified.kind === "gradient") {
     const scalarLatex = classified.compileParts[0]!;
