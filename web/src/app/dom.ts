@@ -49,6 +49,7 @@ export interface DomElements {
   flowTrailWidth: HTMLInputElement | null;
   downloadScene: HTMLButtonElement | null;
   openScene: HTMLButtonElement | null;
+  copyExprLink: HTMLButtonElement | null;
   shareScene: HTMLButtonElement | null;
   sceneFileInput: HTMLInputElement | null;
   autosaveStatus: HTMLElement | null;
@@ -90,6 +91,7 @@ export const els: DomElements = {
   flowTrailWidth: document.getElementById("flowTrailWidth") as HTMLInputElement | null,
   downloadScene: document.getElementById("downloadScene") as HTMLButtonElement | null,
   openScene: document.getElementById("openScene") as HTMLButtonElement | null,
+  copyExprLink: document.getElementById("copyExprLink") as HTMLButtonElement | null,
   shareScene: document.getElementById("shareScene") as HTMLButtonElement | null,
   sceneFileInput: document.getElementById("sceneFileInput") as HTMLInputElement | null,
   autosaveStatus: document.getElementById("autosaveStatus"),
