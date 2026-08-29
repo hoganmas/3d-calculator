@@ -330,7 +330,7 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
           L.vectorFn!,
           half,
           deg,
-          { skipL2: skipHeavy },
+          { skipL2: skipHeavy, params: baseParams },
         );
         fittedCount++;
         M = fit.M;

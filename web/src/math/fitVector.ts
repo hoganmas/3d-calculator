@@ -1482,10 +1482,11 @@ export function fitVectorField(
   vectorFn: (x: number, y: number, z: number) => [number, number, number],
   half: number,
   deg: number,
-  opts: { skipL2?: boolean } = {},
+  opts: { skipL2?: boolean; params?: Record<string, number> } = {},
 ): VectorFitResult {
+  const bindParams = opts.params ?? {};
   if (compiled.kind === "curl" && compiled.bindTuple) {
-    const tupleFn = compiled.bindTuple();
+    const tupleFn = compiled.bindTuple(bindParams);
     const fitX = fitChebyshev3D((x, y, z) => tupleFn(x, y, z)[0]!, half, deg, {
       skipL2: opts.skipL2 ?? true,
       skipMono: true,
@@ -1519,7 +1520,7 @@ export function fitVectorField(
   }
 
   if (compiled.kind === "gradient" && compiled.bindScalar) {
-    const scalarFn = compiled.bindScalar();
+    const scalarFn = compiled.bindScalar(bindParams);
     const fit = fitChebyshev3D(scalarFn, half, deg, {
       skipL2: opts.skipL2 ?? true,
       skipMono: true,
