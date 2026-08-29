@@ -145,5 +145,18 @@ export async function run() {
         assert(Math.abs(v00) > 0, "nonzero embed");
       },
     },
+    {
+      name: "chebDefiniteInt3D along y and z",
+      fn: () => {
+        const fn = compileExpr("y+z").bind({});
+        const deg = 4;
+        const fit = fitChebyshev3D(fn, 1, deg, { skipMono: true });
+        const alongY = chebDefiniteInt3D(fit.cheb, deg, 1, -0.5, 0.5, 1);
+        const alongZ = chebDefiniteInt3D(fit.cheb, deg, 2, -0.5, 0.5, 1);
+        assert(alongY.length === (deg + 1) ** 3, "y integral size");
+        assert(alongZ.length === (deg + 1) ** 3, "z integral size");
+        assert(Math.abs(alongY[0]!) > 0 || Math.abs(alongZ[0]!) > 0, "nonzero coeff");
+      },
+    },
   ]);
 }

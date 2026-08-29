@@ -1,14 +1,18 @@
 import "../helpers/setup-dom.ts";
 import { compileAllExprs } from "../../src/app/compile.ts";
-import { clearExpressions, setExpressions } from "../../src/model/expressions.ts";
+import { clearExpressions, setExpressions, updateExprSilent } from "../../src/model/expressions.ts";
 import {
   anyParamAnimating,
   collectAnimDirtyParams,
   evalParamEquations,
+  applyParamSeed,
+  ensureParamAnimationFromExprs,
   getParam,
   getParamValues,
   normalizeAnimMode,
   phaseForValue,
+  recompileParam,
+  setParamValue,
   setParamValue,
   stopParamAnimation,
   syncParamsFromDefinitions,
@@ -125,6 +129,75 @@ export async function run() {
         toggleParamAnimate("a", 0);
         assert(getParam("a")?.animating !== true, "driven stays off");
         assert(getParam("a")?.driven === true, "marked driven");
+      },
+    },
+    {
+      name: "tickParamAnimation loop mode wraps phase",
+      fn: () => {
+        resetParams();
+        syncParamsFromDefinitions([
+          {
+            name: "a",
+            latex: "a=0",
+            exprId: "e1",
+            min: 0,
+            max: 10,
+            value: 0,
+            animating: true,
+            speed: 1,
+            phase: 0,
+            animMode: "loop",
+          },
+        ]);
+        tickParamAnimation(0.5);
+        assertNear(getParamValues().a ?? NaN, 5, 0.01, "loop midpoint");
+        tickParamAnimation(1.25);
+        assert(getParam("a")?.animating === true, "still animating");
+      },
+    },
+    {
+      name: "ensureParamAnimationFromExprs honors sliderAnimating",
+      fn: () => {
+        resetParams();
+        setExpressions([{ id: "e1", latex: "a=0.5", enabled: true }]);
+        compileAllExprs({ rebuildUi: false });
+        updateExprSilent("e1", { sliderAnimating: true });
+        const changed = ensureParamAnimationFromExprs(0);
+        assert(changed, "started from expr flag");
+        assert(getParam("a")?.animating === true, "param animating");
+      },
+    },
+    {
+      name: "recompileParam records invalid latex error",
+      fn: () => {
+        resetParams();
+        syncParamsFromDefinitions([{ name: "a", latex: "a=((", exprId: "e1" }]);
+        assert(recompileParam("a") === false, "failed compile");
+        assert(!!getParam("a")?.error, "error stored");
+      },
+    },
+    {
+      name: "applyParamSeed updates value and latex",
+      fn: () => {
+        resetParams();
+        syncParamsFromDefinitions([{ name: "a", latex: "a=1", exprId: "e1" }]);
+        applyParamSeed({ a: { value: 3.5 } });
+        assertNear(getParamValues().a ?? NaN, 3.5, 1e-9, "seed value");
+        assert(getParam("a")?.latex.includes("3.5"), "seed latex");
+      },
+    },
+    {
+      name: "setParamValue without rewriting latex keeps driven flag",
+      fn: () => {
+        resetParams();
+        setExpressions([
+          { id: "e1", latex: "b=1", enabled: true },
+          { id: "e2", latex: "a=2b", enabled: true },
+        ]);
+        compileAllExprs({ rebuildUi: false });
+        setParamValue("b", 4, { stopAnim: true, rewriteLatex: false });
+        evalParamEquations();
+        assertNear(getParamValues().a ?? NaN, 8, 1e-9, "driven updated");
       },
     },
   ]);

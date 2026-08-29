@@ -3,7 +3,9 @@ import {
   applyPreset,
   clearAllExprs,
   compileAllExprs,
+  ensureParamExprRows,
   fmtParamNum,
+  initCompile,
   layerRgbFromItem,
   pruneUnusedAutoParams,
   shouldDeferAutoParamRows,
@@ -256,7 +258,29 @@ export async function run() {
         clearAllExprs();
         const rows = listExpressions();
         assert(rows.length >= 1, "blank row");
-        assert(rows.every((r) => !String(r.latex || "").trim()) || rows.some((r) => !String(r.latex || "").trim()), "empty latex");
+        assert(rows.every((r) => !String(r.latex || "").trim() || rows.length === 1), "cleared");
+      },
+    },
+    {
+      name: "initCompile seeds default preset when empty",
+      fn: () => {
+        resetScene();
+        clearAllExprs();
+        initCompile();
+        const rows = listExpressions().filter((e) => String(e.latex || "").trim());
+        assert(rows.length >= 2, "preset loaded");
+      },
+    },
+    {
+      name: "ensureParamExprRows inserts seeded auto-param rows",
+      fn: () => {
+        resetScene();
+        clearExpressions();
+        state.pendingParamSeed = { k: { value: 2, min: 0, max: 5, animate: true } };
+        const added = ensureParamExprRows(["k"]);
+        assert(added, "rows added");
+        const row = listExpressions().find((e) => e.latex.startsWith("k="));
+        assert(!!row?.autoParam, "auto param row");
       },
     },
   ]);

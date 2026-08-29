@@ -60,5 +60,25 @@ export async function run() {
         assert(maxErr < 0.25, `max tuple fit error ${maxErr}`);
       },
     },
+    {
+      name: "grad field fit with L2 metric enabled",
+      fn: () => {
+        const compiled = compileVectorExpr(String.raw`\grad(x^2+y^2+z^2)`);
+        const vectorFn = compiled.bind({});
+        const result = fitVectorField(compiled, vectorFn, 1, 6, { skipL2: false });
+        assert(result.source === "gradient", "gradient source");
+        assert(Number.isFinite(result.fitRel), "fitRel computed");
+      },
+    },
+    {
+      name: "tuple field fit with L2 metric enabled",
+      fn: () => {
+        const compiled = compileVectorExpr(String.raw`(-y,x,0)`);
+        const vectorFn = compiled.bind({});
+        const result = fitVectorField(compiled, vectorFn, 1, 6, { skipL2: false });
+        assert(result.source === "tuple", "tuple source");
+        assert(Number.isFinite(result.fitRel), "fitRel");
+      },
+    },
   ]);
 }

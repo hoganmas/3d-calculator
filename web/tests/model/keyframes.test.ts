@@ -9,6 +9,7 @@ import {
   getKeyframeMetrics,
   hasActiveKeyframeCaches,
   keyframeAnimParam,
+  logKeyframeBake,
   noteKeyframeLayer,
   peekKeyframeBlend,
   sampleLayerKeyframes,
@@ -137,13 +138,16 @@ export async function run() {
         clearKeyframeCaches();
         setupAnimParam("t", 0.5);
         const progress: number[] = [];
+        let done = false;
         setKeyframeProgressHandler((info) => {
           if (info.index >= 0) progress.push(info.index);
+          if (info.done) done = true;
         });
         ensureLayerKeyframes(keyframeOpts("layer-async", "t", "cloud"));
         await waitForComplete();
         assert(allKeyframesComplete(), "all frames ready");
         assert(progress.length >= 1, "progress callbacks");
+        assert(done, "done progress");
         setKeyframeProgressHandler(null);
       },
     },
@@ -185,6 +189,25 @@ export async function run() {
         assert(second.baked, "rebuilt on latex change");
         assert(second.readyCount >= 2, "pair rebaked");
         assert(first.frames !== second.frames, "new frame array");
+      },
+    },
+    {
+      name: "logKeyframeBake prints bake summary",
+      fn: () => {
+        clearKeyframeCaches();
+        setupAnimParam("t", 0.5);
+        const logs: string[] = [];
+        const origLog = console.log;
+        console.log = (msg: string) => logs.push(String(msg));
+        try {
+          logKeyframeBake("test");
+          assert(logs.length === 0, "no-op without bake");
+          ensureLayerKeyframes(keyframeOpts("layer-log", "t"));
+          logKeyframeBake("test");
+          assert(logs.some((l) => l.includes("[keyframes]")), "logged bake");
+        } finally {
+          console.log = origLog;
+        }
       },
     },
   ]);

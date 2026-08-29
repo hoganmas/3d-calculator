@@ -7,8 +7,10 @@ import {
   normalizeCalcLatex,
   normalizeLatexAliases,
   normalizeDegreeLatex,
+  looksLikePartial,
   parseDivergenceMatch,
   scalarFromGradJson,
+  tripleFromOpLatex,
   tripleFromUnaryOpJson,
   unwrapLatexSymbolTokens,
 } from "../../src/math/calcOps.ts";
@@ -128,6 +130,69 @@ export async function run() {
         const { json } = normalizedJson(String.raw`\grad(${inner})`);
         const got = scalarFromGradJson(json);
         assert(got === inner || got?.includes("x"), `got ${got}`);
+      },
+    },
+    {
+      name: "parseDivergenceMatch: plain div operatorname fallback",
+      fn: () => {
+        const latex = String.raw`\operatorname{div}(x,y,z)`;
+        const { src, json } = normalizedJson(latex);
+        const match = parseDivergenceMatch(src, json);
+        assert(match?.mode === "triple" || match?.mode === "constant", `mode ${match?.mode}`);
+      },
+    },
+    {
+      name: "parseDivergenceMatch: (\\div r)^2 constant",
+      fn: () => {
+        const latex = String.raw`(\div r)^2`;
+        const { src, json } = normalizedJson(latex);
+        const match = parseDivergenceMatch(src, json);
+        assert(match?.mode === "constant", `mode ${match?.mode}`);
+        if (match?.mode === "constant") {
+          assert(Math.abs(match.value - 9) < 1e-6, "3^2");
+        }
+      },
+    },
+    {
+      name: "parseDivergenceMatch: negative rational power",
+      fn: () => {
+        const latex = String.raw`(\div r)^{-2}`;
+        const { src, json } = normalizedJson(latex);
+        const match = parseDivergenceMatch(src, json);
+        assert(match?.mode === "constant", `mode ${match?.mode}`);
+        if (match?.mode === "constant") {
+          assert(Math.abs(match.value - 1 / 9) < 1e-5, "3^-2");
+        }
+      },
+    },
+    {
+      name: "looksLikePartial: Derivative JSON fallback",
+      fn: () => {
+        const json = ["PartialDerivative", ["Add", ["Power", "x", 2], ["Power", "y", 2]], "x"];
+        const match = looksLikePartial("", json);
+        assert(match?.axis === 0, `axis ${match?.axis}`);
+        assert(!!match?.inner?.includes("x"), "inner expr");
+      },
+    },
+    {
+      name: "tripleFromOpLatex extracts tuple components",
+      fn: () => {
+        const triple = tripleFromOpLatex(
+          String.raw`\curl(x,y,z)`,
+          /curl/i,
+          "x,y,z",
+        );
+        assert(triple?.length === 3, "triple from latex");
+        assert(tripleFromOpLatex(String.raw`\curl`, /curl/i, "{{{") === null, "parse fail");
+      },
+    },
+    {
+      name: "parseDivergenceMatch: latex regex when json missing",
+      fn: () => {
+        const latex = String.raw`\div(x,y,z)`;
+        const src = normalizeCalcLatex(latex);
+        const match = parseDivergenceMatch(src, null);
+        assert(match?.mode === "triple", "regex fallback");
       },
     },
   ]);
