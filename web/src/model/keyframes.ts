@@ -174,7 +174,7 @@ export function refreshIsoBlendDisplay(layerId: string): number[] {
   const st = getParam(cache.paramName);
   if (!st) return [];
   const { i0, i1 } = segmentForValue(cache, st.value);
-  return tryPromoteStagingPair(cache, i0, i1);
+  return reconcileStaging(cache, i0, i1);
 }
 
 export function setKeyframeProgressHandler(cb: typeof onKeyframeProgress) {
@@ -245,11 +245,79 @@ export function getKeyframeProgress(layerId: string) {
   const cache = caches.get(layerId);
   if (!cache) return null;
   return {
+    /** max(display, staging) — used by scheduler; can look "done" while display lags. */
     frameDeg: cache.frameDeg.map((_, k) => bakedDegAt(cache, k)),
+    displayDeg: cache.frameDeg.slice(),
+    stagingDeg: cache.stagingDeg.slice(),
     targetDeg: cache.targetDeg,
     readyCount: cache.readyCount,
     K: cache.K,
   };
+}
+
+export interface KeyframeStallSlotDiag {
+  k: number;
+  displayDeg: number;
+  stagingDeg: number;
+  schedDeg: number;
+  inFlight: boolean;
+  finalizePhase?: string;
+}
+
+export interface KeyframeStallDiag {
+  layerId: string;
+  role: KeyframeRole;
+  targetDeg: number;
+  readyCount: number;
+  K: number;
+  blend: { i0: number; i1: number; value: number };
+  pending: boolean;
+  worksQueued: number;
+  slots: KeyframeStallSlotDiag[];
+  /** True when pump would stop but display is not fully ready. */
+  stalled: boolean;
+}
+
+/** Debug: dump why a layer may never reach complete. */
+export function diagnoseKeyframeCaches(): KeyframeStallDiag[] {
+  const out: KeyframeStallDiag[] = [];
+  for (const [layerId, cache] of caches) {
+    const st = getParam(cache.paramName);
+    const value = st?.value ?? cache.min;
+    const { i0, i1 } = segmentForValue(cache, value);
+    const works = peekPickNextWork(cache);
+    const slots: KeyframeStallSlotDiag[] = [];
+    for (let k = 0; k < cache.K; k++) {
+      const fin = cache.lobattoFinalizeByK.get(k);
+      slots.push({
+        k,
+        displayDeg: cache.frameDeg[k] ?? 0,
+        stagingDeg: cache.stagingDeg[k] ?? 0,
+        schedDeg: bakedDegAt(cache, k),
+        inFlight: cache.lobattoJobByK.has(k) || cache.lobattoFinalizeByK.has(k),
+        finalizePhase: fin?.phase,
+      });
+    }
+    const ready = keyframesFullyReady(cache);
+    out.push({
+      layerId,
+      role: cache.role,
+      targetDeg: cache.targetDeg,
+      readyCount: cache.readyCount,
+      K: cache.K,
+      blend: { i0, i1, value },
+      pending: pendingPumpLayers.has(layerId),
+      worksQueued: works.length,
+      slots,
+      stalled: !ready && works.length === 0,
+    });
+  }
+  return out;
+}
+
+/** Same as pickNext but does not mutate (reconcile is idempotent / safe). */
+function peekPickNextWork(cache: LayerKeyframeCache): KeyframeWork[] {
+  return pickNextKeyframeWork(cache);
 }
 
 export interface KeyframeLoadSummary {
@@ -611,6 +679,45 @@ function tryPromoteStagingPair(cache: LayerKeyframeCache, i0: number, i1: number
   return promoted;
 }
 
+/**
+ * Flush staging that can never lockstep-promote:
+ * - Off-blend slots: staging → display immediately (no tear risk).
+ * - Blend slot whose partner already displays the same degree: solo promote.
+ * Without this, schedDeg looks done while readyCount never reaches K (pump stalls).
+ */
+function reconcileStaging(cache: LayerKeyframeCache, i0: number, i1: number): number[] {
+  const promoted: number[] = [];
+  for (let k = 0; k < cache.K; k++) {
+    if (k === i0 || k === i1) continue;
+    const sd = cache.stagingDeg[k] ?? 0;
+    const fr = cache.stagingFrames[k];
+    if (sd > (cache.frameDeg[k] ?? 0) && fr) {
+      applyDisplayFrame(cache, k, fr, sd);
+      promoted.push(k);
+    }
+  }
+  for (const [k, partner] of [
+    [i0, i1],
+    [i1, i0],
+  ] as const) {
+    const sd = cache.stagingDeg[k] ?? 0;
+    const fr = cache.stagingFrames[k];
+    if (!fr || sd <= (cache.frameDeg[k] ?? 0)) continue;
+    if ((cache.frameDeg[partner] ?? 0) === sd) {
+      applyDisplayFrame(cache, k, fr, sd);
+      tearLog("reconcile-solo-promote", {
+        layerId: cache.bakeOpts.layerId,
+        k,
+        partner,
+        deg: sd,
+      });
+      promoted.push(k);
+    }
+  }
+  promoted.push(...tryPromoteStagingPair(cache, i0, i1));
+  return promoted;
+}
+
 function bakedDegAt(cache: LayerKeyframeCache, k: number): number {
   return Math.max(cache.frameDeg[k] ?? 0, cache.stagingDeg[k] ?? 0);
 }
@@ -824,6 +931,7 @@ function pickNextKeyframeWork(cache: LayerKeyframeCache): KeyframeWork[] {
   const st = getParam(cache.paramName);
   const value = st?.value ?? cache.min;
   const { i0, i1 } = segmentForValue(cache, value);
+  reconcileStaging(cache, i0, i1);
   const target = cache.targetDeg;
   const ladder = lobattoLadderDegrees(target);
   const start = ladder[0] ?? startLadderDeg(target);
@@ -977,6 +1085,14 @@ function runOneKeyframeWork(): boolean {
 
     const works = pickNextKeyframeWork(cache);
     if (!works.length) {
+      if (!keyframesFullyReady(cache)) {
+        tearLog("keyframe-pump-stall", {
+          layerId,
+          diag: diagnoseKeyframeCaches().find((d) => d.layerId === layerId),
+        });
+        // Stay pending: segment/param changes + reconcile may unlock work.
+        continue;
+      }
       pendingPumpLayers.delete(layerId);
       asyncJobs.delete(layerId);
       onKeyframeProgress?.({
@@ -985,7 +1101,7 @@ function runOneKeyframeWork(): boolean {
         frame: cache.frames.find(Boolean) ?? cache.frames[0]!,
         readyCount: cache.readyCount,
         K: cache.K,
-        done: keyframesFullyReady(cache),
+        done: true,
       });
       continue;
     }

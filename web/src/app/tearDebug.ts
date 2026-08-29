@@ -86,12 +86,26 @@ export function initTearDebug(): void {
   const w = window as Window & {
     __laplacianTearDebug?: boolean | (() => ReturnType<typeof getTearDebugSnapshot>);
     __laplacianTear?: () => ReturnType<typeof getTearDebugSnapshot>;
+    __laplacianKeyframes?: () => Promise<{
+      load: unknown;
+      layers: unknown;
+      tear: ReturnType<typeof getTearDebugSnapshot>;
+    }>;
   };
   w.__laplacianTear = getTearDebugSnapshot;
   w.__laplacianTearDebug = w.__laplacianTearDebug === true ? true : getTearDebugSnapshot;
+  w.__laplacianKeyframes = async () => {
+    const kf = await import("../model/keyframes.js");
+    return {
+      load: kf.getKeyframeLoadSummary(),
+      layers: kf.diagnoseKeyframeCaches(),
+      tear: getTearDebugSnapshot(),
+    };
+  };
   if (isTearDebugEnabled()) {
     console.log(
-      '[tear] debug ON — filter console with "[tear]", copy logs via copy(JSON.stringify(window.__laplacianTear()))',
+      '[tear] debug ON — filter console with "[tear]", copy logs via copy(JSON.stringify(window.__laplacianTear())); ' +
+        "keyframe stall probe: await window.__laplacianKeyframes()",
     );
   }
 }

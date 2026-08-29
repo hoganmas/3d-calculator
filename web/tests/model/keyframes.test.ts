@@ -6,6 +6,7 @@ import {
   beginKeyframePass,
   clearKeyframeCaches,
   DEFAULT_KEYFRAME_K,
+  diagnoseKeyframeCaches,
   ensureLayerKeyframes,
   getKeyframeLoadSummary,
   getKeyframeProgress,
@@ -326,6 +327,64 @@ export async function run() {
           await new Promise((r) => setTimeout(r, 0));
         }
         assert(hi >= 0.99, "reaches full");
+      },
+    },
+    {
+      name: "probe: fill completes while anim param sweeps segments",
+      fn: async () => {
+        clearKeyframeCaches();
+        setupAnimParam("t", 0);
+        ensureLayerKeyframes({ ...keyframeOpts("layer-stall-sweep", "t"), deg: 16, K: 5 });
+        const values = [0, 0.15, 0.35, 0.55, 0.75, 0.95, 0.4, 0.1];
+        let vi = 0;
+        const t0 = Date.now();
+        let stalls = 0;
+        while (!allKeyframesComplete()) {
+          updateParam("t", { value: values[vi % values.length]! });
+          vi++;
+          const n = tickKeyframePump(8);
+          const diag = diagnoseKeyframeCaches()[0];
+          if (diag?.stalled) {
+            stalls++;
+            if (stalls > 3) {
+              throw new Error(
+                `keyframe stall while sweeping t:\n${JSON.stringify(diag, null, 2)}`,
+              );
+            }
+          } else {
+            stalls = 0;
+          }
+          if (n === 0 && !allKeyframesComplete() && Date.now() - t0 > 500) {
+            const d = diagnoseKeyframeCaches();
+            throw new Error(`pump idle before complete:\n${JSON.stringify(d, null, 2)}`);
+          }
+          if (Date.now() - t0 > 25000) {
+            throw new Error(
+              `sweep fill timed out:\n${JSON.stringify(diagnoseKeyframeCaches(), null, 2)}`,
+            );
+          }
+          await new Promise((r) => setTimeout(r, 0));
+        }
+        const done = getKeyframeProgress("layer-stall-sweep");
+        assert(!!done && done.readyCount === 5, "all slots ready after sweep");
+        assert(done!.displayDeg.every((d) => d === 16), "display at target");
+      },
+    },
+    {
+      name: "probe: diagnose reports display vs staging split",
+      fn: async () => {
+        clearKeyframeCaches();
+        setupAnimParam("t", 0.5);
+        ensureLayerKeyframes({ ...keyframeOpts("layer-diag", "t"), deg: 16, K: 3 });
+        tickKeyframePump(4);
+        const diag = diagnoseKeyframeCaches();
+        assert(diag.length === 1, "one layer");
+        assert(diag[0]!.slots.length === 3, "K slots");
+        assert(typeof diag[0]!.blend.i0 === "number", "blend indices");
+        await waitForComplete(20000);
+        const after = diagnoseKeyframeCaches()[0]!;
+        assert(!after.stalled, "not stalled when complete");
+        assert(after.readyCount === 3, "ready");
       },
     },
     {
