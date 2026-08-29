@@ -207,10 +207,34 @@ function cancelAsyncJob(layerId: string) {
   pendingPumpLayers.delete(layerId);
 }
 
+/** Layers kept for re-enable reuse; excluded from load bar / completion / splash. */
+const parkedKeyframeLayers = new Set<string>();
+
+function dropLayerKeyframeCache(layerId: string) {
+  cancelAsyncJob(layerId);
+  caches.delete(layerId);
+  parkedKeyframeLayers.delete(layerId);
+}
+
+function parkLayerKeyframeCache(layerId: string) {
+  cancelAsyncJob(layerId);
+  if (caches.has(layerId)) parkedKeyframeLayers.add(layerId);
+}
+
+function unparkLayerKeyframeCache(layerId: string) {
+  parkedKeyframeLayers.delete(layerId);
+  // Resume bake only via ensureLayerKeyframes (anim / first need), not on visibility alone.
+}
+
+function isParkedKeyframeLayer(layerId: string) {
+  return parkedKeyframeLayers.has(layerId);
+}
+
 export function clearKeyframeCaches() {
   for (const id of [...asyncJobs.keys()]) cancelAsyncJob(id);
   pendingPumpLayers.clear();
   caches.clear();
+  parkedKeyframeLayers.clear();
   lastBakeMs = 0;
   lastLerpMs = 0;
   lastKfLayers = 0;
@@ -219,22 +243,59 @@ export function clearKeyframeCaches() {
   lastBakeDetails = [];
 }
 
+/**
+ * Keep keyframe caches across visibility toggles / structural refits.
+ * - Deleted or latex/deg/half-changed expressions: discard (no bake until enabled + needed).
+ * - Disabled but unchanged: park (pause async; reuse on re-enable).
+ * - Enabled and unchanged: unpark and resume async fill if incomplete.
+ */
+export function syncKeyframeCachesWithExpressions(
+  items: ReadonlyArray<{ id: string; latex: string; enabled: boolean }>,
+  scene: { deg: number; half: number },
+) {
+  const byId = new Map(items.map((i) => [i.id, i]));
+  for (const layerId of [...caches.keys()]) {
+    const item = byId.get(layerId);
+    const cache = caches.get(layerId);
+    if (!cache) continue;
+    if (!item || !String(item.latex ?? "").trim()) {
+      dropLayerKeyframeCache(layerId);
+      continue;
+    }
+    const stale =
+      cache.latex !== item.latex ||
+      cache.deg !== scene.deg ||
+      Math.abs(cache.half - scene.half) >= 1e-12;
+    if (stale) {
+      dropLayerKeyframeCache(layerId);
+      continue;
+    }
+    if (!item.enabled) parkLayerKeyframeCache(layerId);
+    else unparkLayerKeyframeCache(layerId);
+  }
+}
+
 export function hasActiveKeyframeCaches() {
-  return caches.size > 0;
+  for (const id of caches.keys()) {
+    if (!isParkedKeyframeLayer(id)) return true;
+  }
+  return false;
 }
 
 export function allKeyframesComplete() {
-  if (!caches.size) return true;
-  for (const cache of caches.values()) {
+  if (!hasActiveKeyframeCaches()) return true;
+  for (const [id, cache] of caches) {
+    if (isParkedKeyframeLayer(id)) continue;
     if (cache.readyCount < cache.K) return false;
   }
   return true;
 }
 
-/** Coarse blend pair ready for every cached layer (splash / first frame). */
+/** Coarse blend pair ready for every active (enabled) cached layer (splash / first frame). */
 export function keyframesSplashReady(): boolean {
-  if (!caches.size) return true;
-  for (const cache of caches.values()) {
+  if (!hasActiveKeyframeCaches()) return true;
+  for (const [id, cache] of caches) {
+    if (isParkedKeyframeLayer(id)) continue;
     if (peekKeyframeBlend(cache.bakeOpts.layerId) == null) return false;
   }
   return true;
@@ -270,6 +331,7 @@ export interface KeyframeStallDiag {
   targetDeg: number;
   readyCount: number;
   K: number;
+  parked: boolean;
   blend: { i0: number; i1: number; value: number };
   pending: boolean;
   worksQueued: number;
@@ -282,10 +344,11 @@ export interface KeyframeStallDiag {
 export function diagnoseKeyframeCaches(): KeyframeStallDiag[] {
   const out: KeyframeStallDiag[] = [];
   for (const [layerId, cache] of caches) {
+    const parked = isParkedKeyframeLayer(layerId);
     const st = getParam(cache.paramName);
     const value = st?.value ?? cache.min;
     const { i0, i1 } = segmentForValue(cache, value);
-    const works = peekPickNextWork(cache);
+    const works = parked ? [] : peekPickNextWork(cache);
     const slots: KeyframeStallSlotDiag[] = [];
     for (let k = 0; k < cache.K; k++) {
       const fin = cache.lobattoFinalizeByK.get(k);
@@ -305,11 +368,12 @@ export function diagnoseKeyframeCaches(): KeyframeStallDiag[] {
       targetDeg: cache.targetDeg,
       readyCount: cache.readyCount,
       K: cache.K,
+      parked,
       blend: { i0, i1, value },
       pending: pendingPumpLayers.has(layerId),
       worksQueued: works.length,
       slots,
-      stalled: !ready && works.length === 0,
+      stalled: !parked && !ready && works.length === 0,
     });
   }
   return out;
@@ -349,7 +413,7 @@ function slotLoadFraction(cache: LayerKeyframeCache, k: number): number {
 
 /** Aggregate animation keyframe load for UI progress bars. */
 export function getKeyframeLoadSummary(): KeyframeLoadSummary {
-  if (!caches.size) {
+  if (!hasActiveKeyframeCaches()) {
     return {
       fraction: 1,
       complete: true,
@@ -363,7 +427,10 @@ export function getKeyframeLoadSummary(): KeyframeLoadSummary {
   let sum = 0;
   let slotsTotal = 0;
   let slotsAtTarget = 0;
-  for (const cache of caches.values()) {
+  let layerCount = 0;
+  for (const [id, cache] of caches) {
+    if (isParkedKeyframeLayer(id)) continue;
+    layerCount++;
     slotsTotal += cache.K;
     slotsAtTarget += cache.readyCount;
     for (let k = 0; k < cache.K; k++) sum += slotLoadFraction(cache, k);
@@ -380,7 +447,7 @@ export function getKeyframeLoadSummary(): KeyframeLoadSummary {
     active: !complete,
     slotsAtTarget,
     slotsTotal,
-    layerCount: caches.size,
+    layerCount,
     label,
   };
 }
@@ -1075,6 +1142,10 @@ function materializeKeyframeFramesAtM(
 
 function runOneKeyframeWork(): boolean {
   for (const layerId of pendingPumpLayers) {
+    if (isParkedKeyframeLayer(layerId)) {
+      pendingPumpLayers.delete(layerId);
+      continue;
+    }
     const cache = caches.get(layerId);
     const job = asyncJobs.get(layerId);
     if (!cache || !job || job.cancelled || job.gen !== cache.gen) {
@@ -1261,6 +1332,9 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
     latex: opts.latex,
     isoLevel: opts.isoLevel ?? 0,
   };
+
+  // Ensuring means the layer is enabled and needed — leave parked state.
+  parkedKeyframeLayers.delete(key);
 
   let baked = false;
   if (!cache || !cacheMatches(cache, meta)) {

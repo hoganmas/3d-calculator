@@ -20,6 +20,7 @@ import {
   sampleFlowLayerKeyframes,
   sampleLayerKeyframes,
   setKeyframeProgressHandler,
+  syncKeyframeCachesWithExpressions,
   tickKeyframePump,
 } from "../../src/model/keyframes.ts";
 import { syncParamsFromDefinitions, updateParam } from "../../src/model/params.ts";
@@ -426,6 +427,80 @@ export async function run() {
         clearKeyframeCaches();
         assert(!hasActiveKeyframeCaches(), "cleared");
         assert(allKeyframesComplete(), "vacuously complete");
+      },
+    },
+    {
+      name: "sync: park on disable reuses cache on re-enable",
+      fn: async () => {
+        clearKeyframeCaches();
+        setupAnimParam("t", 0.5);
+        const opts = { ...keyframeOpts("layer-park", "t"), deg: 8, K: 3 };
+        ensureLayerKeyframes(opts);
+        await waitForComplete(20000);
+        const before = getKeyframeProgress("layer-park");
+        assert(before?.readyCount === 3, "ready before park");
+
+        syncKeyframeCachesWithExpressions(
+          [{ id: "layer-park", latex: opts.latex, enabled: false }],
+          { deg: opts.deg, half: opts.half },
+        );
+        assert(!hasActiveKeyframeCaches(), "parked not active");
+        assert(allKeyframesComplete(), "parked ignored for complete");
+        assert(getKeyframeLoadSummary().active === false, "load bar idle while parked");
+        assert(diagnoseKeyframeCaches()[0]?.parked === true, "diag parked");
+
+        syncKeyframeCachesWithExpressions(
+          [{ id: "layer-park", latex: opts.latex, enabled: true }],
+          { deg: opts.deg, half: opts.half },
+        );
+        const reused = ensureLayerKeyframes(opts);
+        assert(!reused.baked, "no rebake on re-enable");
+        const after = getKeyframeProgress("layer-park");
+        assert(after?.readyCount === 3, "ready after unpark");
+        assert(after?.displayDeg.every((d) => d === 8), "display preserved");
+      },
+    },
+    {
+      name: "sync: latex change while disabled discards cache",
+      fn: async () => {
+        clearKeyframeCaches();
+        setupAnimParam("t", 0.5);
+        const opts = { ...keyframeOpts("layer-discard", "t"), deg: 8, K: 3 };
+        ensureLayerKeyframes(opts);
+        await waitForComplete(20000);
+
+        syncKeyframeCachesWithExpressions(
+          [{ id: "layer-discard", latex: opts.latex, enabled: false }],
+          { deg: opts.deg, half: opts.half },
+        );
+        syncKeyframeCachesWithExpressions(
+          [{ id: "layer-discard", latex: String.raw`\cos(x+t)`, enabled: false }],
+          { deg: opts.deg, half: opts.half },
+        );
+        assert(diagnoseKeyframeCaches().length === 0, "discarded while disabled");
+
+        const next = ensureLayerKeyframes({
+          ...opts,
+          latex: String.raw`\cos(x+t)`,
+          compiled: compileExpr(String.raw`\cos(x+t)`),
+        });
+        assert(next.baked, "first enable after change bakes");
+      },
+    },
+    {
+      name: "sync: deg change discards without baking disabled layers",
+      fn: async () => {
+        clearKeyframeCaches();
+        setupAnimParam("t", 0.5);
+        const opts = { ...keyframeOpts("layer-deg-drop", "t"), deg: 8, K: 3 };
+        ensureLayerKeyframes(opts);
+        await waitForComplete(20000);
+        syncKeyframeCachesWithExpressions(
+          [{ id: "layer-deg-drop", latex: opts.latex, enabled: false }],
+          { deg: 16, half: opts.half },
+        );
+        assert(diagnoseKeyframeCaches().length === 0, "deg mismatch drops");
+        assert(allKeyframesComplete(), "no active work");
       },
     },
     {

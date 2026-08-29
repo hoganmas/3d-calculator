@@ -15,7 +15,7 @@ import {
 } from "./progressiveFit.js";
 import {
   beginKeyframePass,
-  clearKeyframeCaches,
+  syncKeyframeCachesWithExpressions,
   getKeyframeMetrics,
   logKeyframeBake,
   setKeyframeProgressHandler,
@@ -180,8 +180,12 @@ export function uploadFit(
     setExprCompileOk(true);
 
     // No visible / non-empty expressions → clear volume, draw nothing.
+    // Park keyframe caches (don't wipe) so re-enabling can reuse them.
     if (!layers.length) {
-      clearKeyframeCaches();
+      syncKeyframeCachesWithExpressions(
+        listExpressions().map((e) => ({ id: e.id, latex: e.latex, enabled: e.enabled })),
+        { deg, half },
+      );
       state.lastSceneBake = { cloudLayers: [], isosurfaceLayers: [], flowLayers: [], M: Math.max(2, deg + 1), dens: null };
       state.lastFitTiming = null;
       state.lastNCoeff = 0;
@@ -221,9 +225,13 @@ export function uploadFit(
 
     // Anim ticks: only refit layers that depend on dirty params; reuse the rest.
     // Dirty layers with exactly one animating slider: GPU keyframe blend (iso) / CPU lerp (dens).
+    // Structural refits (visibility, latex, …): park/drop keyframe caches instead of wiping all.
     const dirty = fromAnim ? collectAnimDirtyParams() : null;
+    syncKeyframeCachesWithExpressions(
+      listExpressions().map((e) => ({ id: e.id, latex: e.latex, enabled: e.enabled })),
+      { deg, half },
+    );
     if (fromAnim) beginKeyframePass();
-    else clearKeyframeCaches();
 
     const prevById = new Map<string, CachedLayer>();
     const lastBake = state.lastSceneBake;
