@@ -49,6 +49,40 @@ export function unwrapLatexSymbolTokens(latex: string): string {
   return s;
 }
 
+const VECTOR_CALC_OP_NAMES = ["div", "curl", "grad", "laplacian"] as const;
+
+/** CE / MathLive often emit \\mathrm{div} — normalize to \\operatorname before unwrap. */
+function normalizeVectorCalcOperatorForms(s: string): string {
+  let out = s.replace(
+    /\\(?:mathrm|mathbf|mathit|textrm|bf|it)\s*\{\s*\\nabla\s*\}/gi,
+    "\\nabla",
+  );
+  out = out.replace(/\\nabla\s*\\!\s*\\cdot/gi, "\\nabla\\cdot");
+  for (const op of VECTOR_CALC_OP_NAMES) {
+    out = out.replace(
+      new RegExp(
+        `\\\\(?:mathrm|mathbf|mathit|textrm|bf|it)\\\\s*\\\\{\\\\s*${op}\\\\s*\\\\}`,
+        "gi",
+      ),
+      `\\operatorname{${op}}`,
+    );
+  }
+  return out;
+}
+
+/** After unwrap, bare `div(` must not become `d*i*v(` juxtaposition. */
+function normalizeBareVectorCalcOperators(s: string): string {
+  let out = s;
+  for (const op of ["div", "curl", "laplacian"] as const) {
+    out = out.replace(
+      new RegExp(`(^|[^\\\\A-Za-z])${op}(?=\\s*[({])`, "gi"),
+      `$1\\operatorname{${op}}`,
+    );
+  }
+  out = out.replace(/(^|[^\\A-Za-z])grad(?=\s*[({])/gi, "$1\\operatorname{grad}");
+  return out;
+}
+
 /** Extract the argument of \\operatorname{op}… with balanced parens/braces or a bare symbol. */
 export function extractOperatornameArg(src: string, op: string): string | null {
   const re = new RegExp(`\\\\operatorname\\s*\\{\\s*${op}\\s*\\}`, "i");
@@ -207,6 +241,7 @@ export function normalizeCalcLatex(latex: string): string {
     /\\nabla\\(?:mathrm|mathbf|mathit)\s*\{([A-Za-z][A-Za-z0-9_]*)\}/g,
     "\\operatorname{grad}{$1}",
   );
+  s = normalizeVectorCalcOperatorForms(s);
   s = unwrapLatexSymbolTokens(s);
   s = normalizeLatexAliases(s);
   s = s.replace(/\\laplacian/gi, "\\operatorname{laplacian}");
@@ -219,6 +254,7 @@ export function normalizeCalcLatex(latex: string): string {
   s = s.replace(/\\nabla\s*\\times\s*/gi, "\\operatorname{curl}");
   s = s.replace(/\\div/gi, "\\operatorname{div}");
   s = s.replace(/\\curl/gi, "\\operatorname{curl}");
+  s = normalizeBareVectorCalcOperators(s);
   s = s.replace(/\\operatorname\s*\{\s*grad\s*\}/gi, "\\grad");
   s = s.replace(/\\grad\s*\{/g, "\\operatorname{grad}{");
   s = s.replace(/\\grad\s*\(/g, "\\operatorname{grad}(");
@@ -264,6 +300,154 @@ export function scalarFromUnaryOpJson(json: unknown, op: string): string | null 
   if (head.toLowerCase() === opLower && json[1] != null) {
     return ce.box(json[1] as never).latex;
   }
+  return null;
+}
+
+export function scalarFromGradJson(json: unknown): string | null {
+  if (!Array.isArray(json)) return null;
+  const head = String(json[0]);
+  const inner = scalarFromUnaryOpJson(json, "grad");
+  if (inner) return inner;
+  if ((head === "grad" || head === "Gradient" || head === "nabla") && json[1] != null) {
+    return ce.box(json[1] as never).latex;
+  }
+  return null;
+}
+
+/** True when LaTeX denotes the Cartesian position vector (x,y,z). */
+export function isPositionVectorLatex(latex: string): boolean {
+  const t = String(latex ?? "")
+    .replace(/\\left\s*/g, "")
+    .replace(/\\right\s*/g, "")
+    .trim();
+  return /^(?:\\(?:mathbf|mathrm|mathit|bf)\s*\{\s*r\s*\}|r)$/i.test(t);
+}
+
+export const POSITION_VECTOR_TRIPLE: [string, string, string] = ["x", "y", "z"];
+
+export type DivergenceMatch =
+  | { mode: "triple"; parts: [string, string, string] }
+  | { mode: "laplacian"; inner: string }
+  | { mode: "constant"; value: number };
+
+function extractDivArgumentLatex(src: string): string | null {
+  const m = src.match(
+    /(?:\\(?:operatorname\s*\{\s*div\s*\}|div)|(?<![A-Za-z\\])div)\s*(.*)$/is,
+  );
+  if (!m?.[1]) return null;
+  const tail = m[1].trim();
+  if (!tail) return null;
+  const wrapped = extractUnaryTail(tail);
+  if (wrapped != null) return wrapped;
+  return tail;
+}
+
+function numericExponent(json: unknown): number | null {
+  if (typeof json === "number" && Number.isFinite(json)) return json;
+  if (typeof json === "bigint") return Number(json);
+  if (typeof json === "string") {
+    const n = Number(json);
+    return Number.isFinite(n) ? n : null;
+  }
+  if (Array.isArray(json)) {
+    const head = String(json[0]);
+    if (head === "Negate" && json[1] != null) {
+      const n = numericExponent(json[1]);
+      return n == null ? null : -n;
+    }
+    if (head === "Rational" && json[1] != null && json[2] != null) {
+      const a = numericExponent(json[1]);
+      const b = numericExponent(json[2]);
+      return a != null && b != null && b !== 0 ? a / b : null;
+    }
+  }
+  try {
+    const n = Number(ce.box(json as never).value);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseDivPoweredForm(json: unknown): DivergenceMatch | null {
+  if (!Array.isArray(json) || String(json[0]) !== "Power") return null;
+  const base = json[1];
+  const exp = numericExponent(json[2]);
+  if (exp == null) return null;
+  if (!Array.isArray(base) || String(base[0]) !== "Multiply") return null;
+  if (String(base[1]).toLowerCase() !== "div" || base[2] == null) return null;
+  const innerLatex = ce.box(base[2] as never).latex;
+  if (!isPositionVectorLatex(innerLatex)) return null;
+  return { mode: "constant", value: Math.pow(3, exp) };
+}
+
+function parseDivMultiplyForm(json: unknown): DivergenceMatch | null {
+  if (!Array.isArray(json) || String(json[0]) !== "Multiply") return null;
+  if (String(json[1]).toLowerCase() !== "div" || json[2] == null) return null;
+  const innerLatex = ce.box(json[2] as never).latex;
+  return divergenceMatchFromInner(innerLatex, json[2]);
+}
+
+function divergenceMatchFromInner(innerLatex: string, innerJson: unknown): DivergenceMatch | null {
+  const trimmed = innerLatex.trim();
+  if (!trimmed) return null;
+  if (isPositionVectorLatex(trimmed)) {
+    return { mode: "triple", parts: [...POSITION_VECTOR_TRIPLE] };
+  }
+
+  const gradInner = scalarFromGradJson(innerJson);
+  if (gradInner) return { mode: "laplacian", inner: gradInner.trim() };
+
+  const triple = extractTriple(innerJson);
+  if (triple?.length === 3) {
+    return { mode: "triple", parts: triple as [string, string, string] };
+  }
+
+  // Bare scalar f: treat ∇·f as ∇·(∇f) = ∇²f (common shorthand when f is a scalar potential).
+  return { mode: "laplacian", inner: trimmed };
+}
+
+/** Detect divergence / div LaTeX and map to vector components or an inner Laplacian. */
+export function parseDivergenceMatch(src: string, json: unknown): DivergenceMatch | null {
+  const powered = parseDivPoweredForm(json);
+  if (powered) return powered;
+
+  const juxtaposed = parseDivMultiplyForm(json);
+  if (juxtaposed) return juxtaposed;
+
+  if (Array.isArray(json) && String(json[0]).toLowerCase() === "div") {
+    if (json.length >= 4 && json[1] != null && json[2] != null && json[3] != null) {
+      const parts = [json[1], json[2], json[3]].map((p) => ce.box(p as never).latex.trim());
+      if (parts.every(Boolean)) {
+        return { mode: "triple", parts: parts as [string, string, string] };
+      }
+    }
+    if (json[1] != null) {
+      const innerLatex = ce.box(json[1] as never).latex;
+      const match = divergenceMatchFromInner(innerLatex, json[1]);
+      if (match) return match;
+    }
+  }
+
+  const fromJson = tripleFromUnaryOpJson(json, "div");
+  if (fromJson?.length === 3) {
+    return { mode: "triple", parts: fromJson as [string, string, string] };
+  }
+
+  if (/\\(?:operatorname\s*\{\s*div\s*\}|\\div\b|(?<![A-Za-z\\])div\s*[({])/i.test(src)) {
+    const innerLatex = extractDivArgumentLatex(src);
+    if (innerLatex) {
+      try {
+        const inner = ce.parse(innerLatex);
+        const j = inner?.json ?? (typeof inner?.toJSON === "function" ? inner.toJSON() : null);
+        const match = divergenceMatchFromInner(innerLatex, j);
+        if (match) return match;
+      } catch {
+        return divergenceMatchFromInner(innerLatex, null);
+      }
+    }
+  }
+
   return null;
 }
 

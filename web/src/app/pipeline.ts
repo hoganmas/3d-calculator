@@ -135,6 +135,7 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
         const { vw, vh } = viewportSize();
         clearClipGpuFrame(vw, vh);
       }
+      tryMarkSplashBakeReady(false);
       return;
     }
 
@@ -479,6 +480,7 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
 
     tryMarkSplashBakeReady(layers.length > 0);
   } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
     try {
       compileAllExprs();
       setExprCompileOk(true);
@@ -486,6 +488,16 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
       setExprCompileOk(false);
     }
     setErr(e instanceof Error ? e.message : String(e));
+    if (!state.lastSceneBake) {
+      state.lastSceneBake = {
+        cloudLayers: [],
+        isosurfaceLayers: [],
+        flowLayers: [],
+        M: 2,
+        dens: null,
+      };
+    }
+    tryMarkSplashBakeReady(false);
   }
 }
 

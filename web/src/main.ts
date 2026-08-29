@@ -5,7 +5,7 @@ import { initTheme } from "./ui/theme.js";
 import { mountExprList } from "./ui/expr-sidebar/mount.js";
 import { setExpressionsOnChange } from "./model/expressions.js";
 import { anyParamAnimating, ensureParamAnimationFromExprs } from "./model/params.js";
-import { syncExprCompileState } from "./app/hud.js";
+import { syncExprCompileState, getExpressionErrorReport } from "./app/hud.js";
 import { initDom, els, initPanelResize, initPanelToggle } from "./app/dom.js";
 import { initScene, bindClipUniforms, controls, camera } from "./app/scene.js";
 import { initCompile, applyPreset } from "./app/compile.js";
@@ -23,7 +23,7 @@ import { startRenderLoop } from "./app/loop.js";
 import { state } from "./app/state.js";
 import { initWebMCP } from "./app/webmcp.js";
 import { initWebmcpSetupDialog } from "./app/webmcpSetupDialog.js";
-import { initSplash, markSplashSidebarReady } from "./app/splash.js";
+import { initSplash, markSplashSidebarReady, forceSplashDismiss } from "./app/splash.js";
 import {
   initAutosave,
   restoreAutosave,
@@ -108,15 +108,23 @@ async function bootstrap() {
 
   if (els.hud) els.hud.textContent = "clip-grid · idct volume";
 
-  // Begin rendering immediately; restore + fit run without blocking the loop.
   startRenderLoop();
 
   const restored = await restoreAutosave();
+
   if (!restored) initCompile();
   ensureParamAnimationFromExprs();
   state.exprListApi?.render();
-  uploadFit({ fromAnim: anyParamAnimating() });
   markSplashSidebarReady();
+
+  const errReport = getExpressionErrorReport();
+  if (errReport && (errReport.errorCount > 0 || errReport.globalError)) {
+    forceSplashDismiss("compile-errors");
+  }
+
+  window.setTimeout(() => {
+    uploadFit({ fromAnim: anyParamAnimating() });
+  }, 0);
 }
 
 function initProjectActions() {

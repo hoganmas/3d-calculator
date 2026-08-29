@@ -1232,6 +1232,8 @@
         color: var(--err);
         font-size: 12px;
         min-height: 1.2em;
+        white-space: pre-wrap;
+        line-height: 1.35;
       }
       .march-slider-head {
         display: flex;

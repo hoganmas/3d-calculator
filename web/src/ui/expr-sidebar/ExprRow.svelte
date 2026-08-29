@@ -13,7 +13,7 @@ import {
   commitAutoParams,
 } from "../../model/expressions.js";
   import { updateExprSilent } from "../../model/expressions.js";
-  import { stopParamAnimation } from "../../model/params.js";
+  import { stopParamAnimation, getParam } from "../../model/params.js";
   import {
     configureMathField,
     readFieldLatex,
@@ -73,7 +73,9 @@ import {
 
   const warn = $derived(getExprWarning(item.id));
   const paramName = $derived(neededParamForItem(item));
-  const isParamDef = $derived(isParameterRow(item.latex || "") || !!warn);
+  const paramErr = $derived(paramName ? getParam(paramName)?.error ?? null : null);
+  const rowError = $derived(warn ?? paramErr);
+  const isParamDef = $derived(isParameterRow(item.latex || ""));
   const grad = $derived(resolveExprGradient(item));
   const gradCss = $derived(cssGradientFromColors(grad.colors));
   const swatchDisabled = $derived(isParamDef);
@@ -221,7 +223,7 @@ import {
   class:selected
   class:is-hidden={!item.enabled}
   class:is-param-def={isParamDef}
-  class:has-error={!!warn}
+  class:has-error={!!rowError}
   data-id={item.id}
   data-param={paramName ?? undefined}
   style:--expr-grad={gradCss}
@@ -256,8 +258,8 @@ import {
       <math-field
         bind:this={mfEl}
         class="expr-field"
-        class:invalid={!!warn}
-        title={warn ?? undefined}
+        class:invalid={!!rowError}
+        title={rowError ?? undefined}
         onfocus={onMfFocus}
         onblur={onMfBlur}
         oninput={onMfInput}
