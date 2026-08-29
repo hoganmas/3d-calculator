@@ -326,20 +326,116 @@ export function isPositionVectorLatex(latex: string): boolean {
 export const POSITION_VECTOR_TRIPLE: [string, string, string] = ["x", "y", "z"];
 
 export type DivergenceMatch =
-  | { mode: "triple"; parts: [string, string, string] }
-  | { mode: "laplacian"; inner: string }
-  | { mode: "constant"; value: number };
+  | { mode: "triple"; parts: [string, string, string]; scale?: number }
+  | { mode: "laplacian"; inner: string; scale?: number }
+  | { mode: "constant"; value: number; scale?: number };
+
+export type TupleBinaryMatch = {
+  left: [string, string, string];
+  right: [string, string, string];
+};
 
 function extractDivArgumentLatex(src: string): string | null {
   const m = src.match(
     /(?:\\(?:operatorname\s*\{\s*div\s*\}|div)|(?<![A-Za-z\\])div)\s*(.*)$/is,
   );
   if (!m?.[1]) return null;
-  const tail = m[1].trim();
+  let tail = m[1].trim();
   if (!tail) return null;
   const wrapped = extractUnaryTail(tail);
   if (wrapped != null) return wrapped;
-  return tail;
+  if (tail.endsWith(")") && !tail.includes("(")) {
+    tail = tail.slice(0, -1).trim();
+  }
+  return tail || null;
+}
+
+function applyDivergenceScale(match: DivergenceMatch, scale: number): DivergenceMatch {
+  if (scale === 1) return match;
+  return { ...match, scale };
+}
+
+/** Parse `(Fx,Fy,Fz)` into three LaTeX component strings. */
+export function parseTupleLatexComponents(src: string): [string, string, string] | null {
+  let s = String(src ?? "").trim();
+  if (s.startsWith("(") && s.endsWith(")")) s = s.slice(1, -1).trim();
+  if (!s) return null;
+
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i <= s.length; i++) {
+    const c = s[i];
+    if (c === "(" || c === "{") depth++;
+    else if (c === ")" || c === "}") depth--;
+    else if ((c === "," || i === s.length) && depth === 0) {
+      const chunk = s.slice(start, c === "," ? i : i).trim();
+      if (chunk) parts.push(chunk);
+      start = i + 1;
+    }
+  }
+  if (parts.length !== 3 || parts.some((p) => !p)) return null;
+  return parts as [string, string, string];
+}
+
+function splitTopLevelInfix(src: string, op: "\\times" | "\\cdot"): [string, string] | null {
+  let depth = 0;
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i]!;
+    if (c === "(" || c === "{") depth++;
+    else if (c === ")" || c === "}") depth--;
+    else if (depth === 0 && src.startsWith(op, i)) {
+      const left = src.slice(0, i).trim();
+      const right = src.slice(i + op.length).trim();
+      if (left && right) return [left, right];
+      return null;
+    }
+  }
+  return null;
+}
+
+function parseTupleBinaryOp(src: string, op: "\\times" | "\\cdot"): TupleBinaryMatch | null {
+  const split = splitTopLevelInfix(src, op);
+  if (!split) return null;
+  const left = parseTupleLatexComponents(split[0]);
+  const right = parseTupleLatexComponents(split[1]);
+  if (!left || !right) return null;
+  return { left, right };
+}
+
+/** Cross product of two 3-tuples written `(a,b,c)\\times(d,e,f)`. */
+export function parseTupleCrossMatch(src: string): TupleBinaryMatch | null {
+  return parseTupleBinaryOp(src, "\\times");
+}
+
+/** Dot product of two 3-tuples written `(a,b,c)\\cdot(d,e,f)`. */
+export function parseTupleDotMatch(src: string): TupleBinaryMatch | null {
+  return parseTupleBinaryOp(src, "\\cdot");
+}
+
+/** Numeric scale × 3-tuple from CE `Multiply` MathJSON. */
+export function extractScaledTriple(
+  json: unknown,
+): { scale: number; parts: [string, string, string] } | null {
+  if (!Array.isArray(json)) return null;
+  if (String(json[0]) === "Multiply") {
+    let scale = 1;
+    let parts: string[] | null = null;
+    for (const f of json.slice(1)) {
+      const triple = extractTriple(f);
+      if (triple?.length === 3) {
+        parts = triple;
+        continue;
+      }
+      const n = numericExponent(f);
+      if (n != null) scale *= n;
+    }
+    if (parts) return { scale, parts: parts as [string, string, string] };
+    return null;
+  }
+  const triple = extractTriple(json);
+  if (triple?.length === 3) return { scale: 1, parts: triple as [string, string, string] };
+  return null;
 }
 
 function numericExponent(json: unknown): number | null {
@@ -383,9 +479,35 @@ function parseDivPoweredForm(json: unknown): DivergenceMatch | null {
 
 function parseDivMultiplyForm(json: unknown): DivergenceMatch | null {
   if (!Array.isArray(json) || String(json[0]) !== "Multiply") return null;
-  if (String(json[1]).toLowerCase() !== "div" || json[2] == null) return null;
-  const innerLatex = ce.box(json[2] as never).latex;
-  return divergenceMatchFromInner(innerLatex, json[2]);
+  const factors = json.slice(1);
+  let scale = 1;
+  let innerJson: unknown = null;
+  let pastDiv = false;
+  for (const f of factors) {
+    if (typeof f === "string" && f.toLowerCase() === "div") {
+      pastDiv = true;
+      continue;
+    }
+    if (!pastDiv) {
+      const n = numericExponent(f);
+      if (n != null) {
+        scale *= n;
+        continue;
+      }
+    }
+    if (pastDiv && innerJson == null) {
+      innerJson = f;
+      continue;
+    }
+    if (pastDiv && innerJson != null) {
+      const n = numericExponent(f);
+      if (n != null) scale *= n;
+    }
+  }
+  if (!pastDiv || innerJson == null) return null;
+  const innerLatex = ce.box(innerJson as never).latex;
+  const match = divergenceMatchFromInner(innerLatex, innerJson);
+  return match ? applyDivergenceScale(match, scale) : null;
 }
 
 function divergenceMatchFromInner(innerLatex: string, innerJson: unknown): DivergenceMatch | null {
