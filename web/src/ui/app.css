@@ -987,6 +987,11 @@
         border-color: var(--accent-border);
         background: var(--accent-soft);
       }
+      .icon-btn[aria-pressed="true"] {
+        color: var(--accent);
+        border-color: var(--accent-border);
+        background: var(--accent-soft);
+      }
       .icon-btn svg {
         width: 18px;
         height: 18px;

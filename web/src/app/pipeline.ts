@@ -11,6 +11,7 @@ import {
   noteKeyframeLayer,
   ensureLayerKeyframes,
   sampleLayerKeyframes,
+  sampleFlowLayerKeyframes,
   peekKeyframeBlend,
 } from "../model/keyframes.js";
 import {
@@ -49,7 +50,7 @@ import {
   syncClipCpuVolume,
   prepareClipGpuForDegree,
 } from "./webglFallback.js";
-import { resize, syncClipPresentation } from "./presentation.js";
+import { resize, syncClipPresentation, syncShowGridAxesUi } from "./presentation.js";
 import { clearClipGpuFrame } from "../render/webgpu/march.js";
 import {
   setErr,
@@ -324,6 +325,44 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
       }
 
       if (L.role === "flow") {
+        const kfParam =
+          fromAnim && depends && dirty && L.vectorCompiled
+            ? keyframeAnimParam(L.vectorCompiled.freeParams, dirty)
+            : null;
+        if (kfParam && L.vectorCompiled && L.vectorFn) {
+          noteKeyframeLayer();
+          keyframedCount++;
+          const sample = sampleFlowLayerKeyframes({
+            layerId: L.item.id,
+            latex: L.item.latex,
+            role: "flow",
+            paramName: kfParam,
+            vectorCompiled: L.vectorCompiled,
+            baseParams,
+            half,
+            deg,
+          });
+          if (sample.baked) keyframeBaked = true;
+          M = sample.M || M;
+          flowLayers.push({
+            id: L.item.id,
+            fx: sample.fx,
+            fy: sample.fy,
+            fz: sample.fz,
+            color,
+            color2,
+            colors,
+            cheb: sample.cheb,
+            fitRel: sample.fitRel,
+          });
+          densKeyframedCpu = true;
+          if (!cheb && sample.cheb) {
+            cheb = sample.cheb;
+            fitRel = sample.fitRel ?? fitRel;
+          }
+          continue;
+        }
+
         const skipHeavy = fromAnim || layers.length > 1;
         const fit = fitVectorField(
           L.vectorCompiled!,
@@ -584,6 +623,13 @@ export function wirePipelineDom() {
   });
   els.marchDownscale.addEventListener("input", autosave);
   els.marchDownscale.addEventListener("change", autosave);
+  syncShowGridAxesUi();
+  els.toggleGridAxes?.addEventListener("click", () => {
+    state.showGridAxes = !state.showGridAxes;
+    syncShowGridAxesUi();
+    syncClipPresentation();
+    autosave();
+  });
   els.flowAlpha?.addEventListener("input", () => {
     state.flowAlpha = Math.max(0, Math.min(1, Number(els.flowAlpha!.value) || 0));
     autosave();

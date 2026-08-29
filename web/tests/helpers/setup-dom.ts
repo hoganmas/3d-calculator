@@ -43,6 +43,10 @@ function makeElement(id: string, tag = "div"): HTMLElement {
   if (id === "steps") node.value = "16";
   if (id === "boxSize") node.value = "5";
   if (id === "marchDownscale") node.value = "2";
+  if (id === "toggleGridAxes") {
+    (node as { getAttribute: (name: string) => string | null }).getAttribute = (name: string) =>
+      name === "aria-pressed" ? "true" : null;
+  }
   if (id === "preset") node.value = "sincos";
   return node as unknown as HTMLElement;
 }
