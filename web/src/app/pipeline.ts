@@ -22,6 +22,7 @@ import {
   setKeyframeProgressHandler,
   keyframeAnimParam,
   keyframeAnimParams,
+  resolveKeyframeParamNames,
   noteKeyframeLayer,
   ensureLayerKeyframes,
   sampleLayerKeyframes,
@@ -380,16 +381,17 @@ export function uploadFit(
       if (kfParams?.length && L.compiled && L.fn) {
         noteKeyframeLayer();
         keyframedCount++;
+        const paramNames = resolveKeyframeParamNames(L.item.id, kfParams);
         const memKf = hasLayerKeyframeCache(L.item.id);
         const deferKf = fromAnim && (prevHasKf || memKf);
         if (L.role === "isosurface") {
-          if (kfParams.length === 1) {
+          if (paramNames.length === 1) {
             const sample = ensureLayerKeyframes({
               layerId: L.item.id,
               latex: L.item.latex,
               role: "isosurface",
               isoLevel: L.compiled?.isoLevel ?? 0,
-              paramNames: kfParams,
+              paramNames,
               compiled: L.compiled,
               baseParams,
               half,
@@ -420,7 +422,7 @@ export function uploadFit(
               latex: L.item.latex,
               role: "isosurface",
               isoLevel: L.compiled?.isoLevel ?? 0,
-              paramNames: kfParams,
+              paramNames,
               compiled: L.compiled,
               baseParams,
               half,
@@ -454,7 +456,7 @@ export function uploadFit(
             latex: L.item.latex,
             role: "cloud",
             isoLevel: L.compiled?.isoLevel ?? 0,
-            paramNames: kfParams,
+            paramNames,
             compiled: L.compiled,
             baseParams,
             half,
@@ -490,13 +492,14 @@ export function uploadFit(
         if (kfParamsFlow?.length && L.vectorCompiled && L.vectorFn) {
           noteKeyframeLayer();
           keyframedCount++;
+          const paramNames = resolveKeyframeParamNames(L.item.id, kfParamsFlow);
           const memKf = hasLayerKeyframeCache(L.item.id);
           const deferKf = fromAnim && (prevHasKf || memKf);
           const sample = sampleFlowLayerKeyframes({
             layerId: L.item.id,
             latex: L.item.latex,
             role: "flow",
-            paramNames: kfParamsFlow,
+            paramNames,
             vectorCompiled: L.vectorCompiled,
             baseParams,
             half,

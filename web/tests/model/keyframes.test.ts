@@ -16,6 +16,7 @@ import {
   keyframeAnimParam,
   keyframeAnimParams,
   keyframeFixedParamsFingerprint,
+  resolveKeyframeParamNames,
   keyframesSplashReady,
   logKeyframeBake,
   noteKeyframeLayer,
@@ -26,7 +27,7 @@ import {
   syncKeyframeCachesWithExpressions,
   tickKeyframePump,
 } from "../../src/model/keyframes.ts";
-import { syncParamsFromDefinitions, updateParam, recompileParam, getParamValues } from "../../src/model/params.ts";
+import { syncParamsFromDefinitions, updateParam, recompileParam, getParamValues, collectAnimDirtyParams } from "../../src/model/params.ts";
 import { assert, assertNear } from "../helpers/assert.ts";
 import { runSuite } from "../helpers/runner.ts";
 
@@ -190,6 +191,74 @@ export async function run() {
         const prog = getKeyframeProgress("layer-multi");
         assert(prog != null, "cache exists");
         assert(prog!.totalFrames === 9, "3^2 grid");
+      },
+    },
+    {
+      name: "pausing one of two anim params reuses N-D cache",
+      fn: async () => {
+        clearKeyframeCaches();
+        syncParamsFromDefinitions([
+          {
+            name: "t",
+            latex: "t=0.5",
+            exprId: "e1",
+            min: 0,
+            max: 1,
+            speed: 0.5,
+            animating: true,
+            animMode: "pingpong",
+          },
+          {
+            name: "a",
+            latex: "a=0.5",
+            exprId: "e2",
+            min: 0,
+            max: 1,
+            speed: 0.4,
+            animating: true,
+            animMode: "pingpong",
+          },
+        ]);
+        const latex = String.raw`\sin(x+t)\cos(y+a)`;
+        const compiled = compileExpr(latex);
+        const layerId = "layer-pause-one";
+        const baseOpts = {
+          layerId,
+          latex,
+          role: "cloud" as const,
+          isoLevel: 0,
+          paramNames: ["a", "t"],
+          compiled,
+          baseParams: {},
+          half: 0.75,
+          deg: 4,
+          K: 3,
+        };
+        const first = sampleLayerKeyframes(baseOpts);
+        assert(first.baked, "initial bake");
+        const prog0 = getKeyframeProgress(layerId);
+        assert(prog0?.totalFrames === 9, "2D grid");
+        const ready0 = prog0!.readyCount;
+
+        updateParam("a", { animating: false });
+        const dirty = collectAnimDirtyParams();
+        const kf = keyframeAnimParams(compiled.freeParams, dirty);
+        assert(kf?.length === 1 && kf[0] === "t", "only t animating");
+        const axes = resolveKeyframeParamNames(layerId, kf);
+        assert(axes.length === 2 && axes[0] === "a" && axes[1] === "t", "reuse 2D axes");
+
+        const second = sampleLayerKeyframes({ ...baseOpts, paramNames: axes, deferSyncBake: true });
+        assert(!second.baked, "no rebake on pause");
+        const prog1 = getKeyframeProgress(layerId);
+        assert(prog1?.totalFrames === 9, "grid unchanged");
+        assert(prog1!.readyCount === ready0, "ready count preserved");
+
+        updateParam("a", { animating: true });
+        const kf2 = keyframeAnimParams(compiled.freeParams, collectAnimDirtyParams());
+        assert(kf2?.length === 2, "both animating again");
+        const axes2 = resolveKeyframeParamNames(layerId, kf2!);
+        const third = sampleLayerKeyframes({ ...baseOpts, paramNames: axes2, deferSyncBake: true });
+        assert(!third.baked, "no rebake on resume");
       },
     },
     {

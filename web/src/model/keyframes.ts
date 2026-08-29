@@ -506,6 +506,30 @@ export function keyframeAnimParam(freeParams: string[], dirty: Set<string>) {
   return hit?.length === 1 ? hit[0]! : null;
 }
 
+/**
+ * Keep existing N-D cache axes when a subset of params is still animating.
+ * Paused axes stay in the grid at their current slider value (no rebake).
+ */
+export function resolveKeyframeParamNames(
+  layerId: string,
+  animatingParams: readonly string[],
+): string[] {
+  const requested = [...animatingParams].sort();
+  const cache = caches.get(layerId);
+  if (!cache || isParkedKeyframeLayer(layerId) || cache.paramNames.length <= requested.length) {
+    return requested;
+  }
+  for (const p of requested) {
+    if (!cache.paramNames.includes(p)) return requested;
+  }
+  for (const p of cache.paramNames) {
+    if (requested.includes(p)) continue;
+    const st = getParam(p);
+    if (!st || st.driven || st.animating) return requested;
+  }
+  return [...cache.paramNames];
+}
+
 function normalizeParamNames(opts: Pick<EnsureKeyframesOpts, "paramName" | "paramNames">): string[] {
   if (opts.paramNames?.length) return [...opts.paramNames].sort();
   if (opts.paramName) return [opts.paramName];
@@ -519,7 +543,7 @@ function resolveKeyframeAxes(opts: EnsureKeyframesOpts): {
   K: number;
   totalFrames: number;
 } {
-  const paramNames = normalizeParamNames(opts);
+  const paramNames = resolveKeyframeParamNames(opts.layerId, normalizeParamNames(opts));
   const nDims = paramNames.length;
   const K = Math.max(2, opts.K ?? DEFAULT_KEYFRAME_K);
   const mins: number[] = [];
