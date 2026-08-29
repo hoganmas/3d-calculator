@@ -40,6 +40,7 @@ import {
   collectAnimDirtyParams,
 } from "../model/params.js";
 import {
+  isClipGpuUploadReady,
   isClipBakeGpuReady,
   uploadSceneVolumes,
   uploadSceneColors,
@@ -68,7 +69,8 @@ import {
   bakeChebVolume,
   useGpuClipPath,
   syncClipCpuVolume,
-  prepareClipGpuForDegree,
+  ensureSceneGpuUpload,
+  presentSceneAfterGpuReady,
 } from "./webglFallback.js";
 import { resize, syncClipPresentation, syncShowGridAxesUi } from "./presentation.js";
 import { clearClipGpuFrame } from "../render/webgpu/march.js";
@@ -79,9 +81,8 @@ import {
   refreshMetricsDump,
 } from "./hud.js";
 import { scheduleAutosave } from "./persistence/autosave.js";
-import { tryMarkSplashBakeReady } from "./splash.js";
-import { allKeyframesComplete, hasActiveKeyframeCaches, keyframesSplashReady } from "../model/keyframes.js";
-import { anyParamAnimating } from "../model/params.js";
+import { isSplashContentReady, tryMarkSplashBakeReady } from "./splash.js";
+import { startupBegin, startupEnd, startupMark } from "./startupProfile.js";
 import { gridMFromDens, tearLog, tearLogBlendChange } from "./tearDebug.js";
 import { gpu } from "../render/webgpu/gpuState.js";
 
@@ -183,6 +184,8 @@ export function uploadFit(
 ) {
   const fromAnim = !!opts.fromAnim;
   const progressive = !!opts.progressive;
+  startupBegin("uploadFit");
+  startupMark("uploadFit.begin", { fromAnim, progressive, fitDeg: opts.fitDeg });
   setErr("");
   try {
     const boxSize = Number(els.boxSize.value);
@@ -200,7 +203,9 @@ export function uploadFit(
     }
 
     const tUpload = performance.now();
+    startupBegin("uploadFit.compile");
     const { layers } = compileAllExprs({ rebuildUi: false });
+    startupEnd("uploadFit.compile", { layerCount: layers.length });
     setExprCompileOk(true);
 
     // Keyframe identity uses UI target deg — never progressive step deg (pause ladder
@@ -293,6 +298,7 @@ export function uploadFit(
       }
     };
 
+    startupBegin("uploadFit.layers");
     for (const L of layers) {
       const { color, color2, colors } = layerRgbFromItem(L.item);
       const fp = layerBakeFingerprint(L, uiDeg, half);
@@ -375,7 +381,12 @@ export function uploadFit(
 
       // Keyframe path: animated slider(s) → GPU blend (iso 1D) / CPU multilinear (cloud, iso N-D).
       const kfParams =
-        fromAnim && depends && dirty && L.compiled
+        isSplashContentReady() &&
+        isClipBakeGpuReady() &&
+        fromAnim &&
+        depends &&
+        dirty &&
+        L.compiled
           ? keyframeAnimParams(L.compiled.freeParams, dirty)
           : null;
       if (kfParams?.length && L.compiled && L.fn) {
@@ -486,7 +497,12 @@ export function uploadFit(
 
       if (L.role === "flow") {
         const kfParamsFlow =
-          fromAnim && depends && dirty && L.vectorCompiled
+          isSplashContentReady() &&
+          isClipBakeGpuReady() &&
+          fromAnim &&
+          depends &&
+          dirty &&
+          L.vectorCompiled
             ? keyframeAnimParams(L.vectorCompiled.freeParams, dirty)
             : null;
         if (kfParamsFlow?.length && L.vectorCompiled && L.vectorFn) {
@@ -629,6 +645,7 @@ export function uploadFit(
       }
       commitLayerFp(L.item.id, fp);
     }
+    startupEnd("uploadFit.layers", { fittedCount, keyframedCount, layerMs: performance.now() - tUpload });
 
     // WebGL preview texture: sum of cloud layers (skipped when WebGPU is active).
     let densSum = null;
@@ -717,16 +734,37 @@ export function uploadFit(
       prevM,
       gpuM: gpu.sceneM,
     });
+    startupMark("uploadFit.ready", {
+      fromAnim,
+      needUpload,
+      fittedCount,
+      keyframedCount,
+      sceneM: M,
+      uploadReady: isClipGpuUploadReady(),
+      renderReady: isClipBakeGpuReady(),
+      gpuM: gpu.sceneM,
+      layerMs: Math.round((performance.now() - tUpload) * 10) / 10,
+    });
     if (needUpload) {
-      if (fromAnim && isClipBakeGpuReady() && M !== gpu.sceneM) {
-        void prepareClipGpuForDegree(Math.max(1, M - 1)).then(() => {
-          if (state.lastSceneBake) bakeChebVolume();
+      const uploadDeg = fromAnim && M !== gpu.sceneM ? Math.max(1, M - 1) : deg;
+      const uploadSource = fromAnim ? "uploadFit-anim" : "uploadFit-static";
+      startupMark("uploadFit.upload-scheduled", {
+        uploadDeg,
+        uploadReady: isClipGpuUploadReady(),
+        renderReady: isClipBakeGpuReady(),
+        gpuM: gpu.sceneM,
+        source: uploadSource,
+      });
+      void ensureSceneGpuUpload(uploadDeg, uploadSource).then((ok) => {
+        if (!ok) return;
+        if (presentSceneAfterGpuReady("uploadFit")) return;
+        state.clipDirty = true;
+        syncClipPresentation();
+        if (!useGpuClipPath()) {
           state.clipDirty = true;
-          syncClipPresentation();
-        });
-      } else {
-        bakeChebVolume();
-      }
+          syncClipCpuVolume();
+        }
+      });
     } else if (keyframedCount > 0) {
       setConstraintKeyframeBlends(
         isosurfaceLayers
@@ -738,28 +776,20 @@ export function uploadFit(
             t: c.blend!.t,
           })),
       );
+      syncClipPresentation();
+    } else {
+      syncClipPresentation();
     }
 
     clipUniforms.uScale.value = densScale;
     clipUniforms.uSteps.value = steps;
     setBoxSize(boxSize);
 
-    if (!fromAnim) resize();
+    if (!progressive) resize();
     state.clipDirty = true;
-    if (needUpload && !fromAnim) {
-      void prepareClipGpuForDegree(deg).then(() => {
-        if (state.lastSceneBake) bakeChebVolume();
-        syncClipPresentation();
-        if (!useGpuClipPath()) {
-          state.clipDirty = true;
-          syncClipCpuVolume();
-        }
-      });
-    } else {
-      syncClipPresentation();
-    }
 
     tryMarkSplashBakeReady(layers.length > 0);
+    startupEnd("uploadFit", { uploadMs: Math.round((performance.now() - tUpload) * 10) / 10 });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     try {
@@ -779,6 +809,7 @@ export function uploadFit(
       };
     }
     tryMarkSplashBakeReady(false);
+    startupEnd("uploadFit", { error: message });
   }
 }
 
@@ -816,10 +847,7 @@ export function initKeyframeHandler() {
     if (done) {
       console.log(`[keyframes] async complete · ${layerId} · ${readyCount}/${K}`);
     }
-    if (
-      hasActiveKeyframeCaches() &&
-      (allKeyframesComplete() || (anyParamAnimating() && keyframesSplashReady()))
-    ) {
+    if (!isSplashContentReady()) {
       tryMarkSplashBakeReady(true);
     }
   });

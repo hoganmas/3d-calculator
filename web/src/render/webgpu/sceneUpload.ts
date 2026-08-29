@@ -6,6 +6,7 @@ import { flowPresenceSlice } from "../../math/fitVector.js";
 import { DEFAULT_FLOW_GRID_M, ensureFlowDyeBuffers, ensureFlowIbfvPipeline, destroyFlowDyeBuffers } from "./flowIbfv.js";
 import { destroyFlowParticleBuffers, ensureFlowParticleBuffers, ensureFlowParticlesPipeline } from "./flowParticles.js";
 import { gridMFromDens, isTearDebugEnabled, tearLog } from "../../app/tearDebug.js";
+import { startupMark } from "../../app/startupProfile.js";
 import { resampleVolumeGrid } from "../../math/volumeGrid.js";
 
 const MAX_FLOW_LAYERS = 4;
@@ -16,6 +17,7 @@ export interface SceneUploadPayload {
   flowLayers?: FlowLayer[];
   M: number;
   half?: number;
+  source?: string;
 }
 
 export interface SceneUploadResult {
@@ -223,7 +225,22 @@ export function uploadSceneVolumes(scene: SceneUploadPayload | null): SceneUploa
     });
   }
 
-  return { M, bakeMs: performance.now() - t0, epoch: gpu.sceneEpoch };
+  const bakeMs = performance.now() - t0;
+  startupMark("uploadSceneVolumes", {
+    source: scene.source ?? "unknown",
+    sceneM: M,
+    epoch: gpu.sceneEpoch,
+    isoLayers: cons.length,
+    densLayers: dens.length,
+    flowLayers: flow.length,
+    keyframeSlots: cons.reduce(
+      (n, c) => n + (Array.isArray(c.keyframes) && c.keyframes.length > 0 ? c.keyframes.length : 1),
+      0,
+    ),
+    bakeMs: Math.round(bakeMs * 10) / 10,
+  });
+
+  return { M, bakeMs, epoch: gpu.sceneEpoch };
 }
 
 export function setConstraintKeyframeBlends(blends: KeyframeBlendPatch[] | null | undefined): void {

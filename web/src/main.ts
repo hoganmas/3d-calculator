@@ -16,7 +16,7 @@ import {
   wirePipelineDom,
   handleColorChange,
 } from "./app/pipeline.js";
-import { clipUniforms, initWebglFallback } from "./app/webglFallback.js";
+import { clipUniforms, initWebglFallback, ensureSceneGpuUpload, warmClipGpuInit } from "./app/webglFallback.js";
 import { initPresentation, resize, bindHudText } from "./app/presentation.js";
 import { hudText, copyMetricsToClipboard } from "./app/hud.js";
 import { startRenderLoop } from "./app/loop.js";
@@ -26,6 +26,7 @@ import { initWebmcpSetupDialog } from "./app/webmcpSetupDialog.js";
 import { initSplash, markSplashSidebarReady, forceSplashDismiss } from "./app/splash.js";
 import { initKeyframeLoadBar } from "./app/keyframeLoadBar.js";
 import { initTearDebug } from "./app/tearDebug.js";
+import { initStartupProfile, startupBegin, startupEnd, startupMark } from "./app/startupProfile.js";
 import {
   initAutosave,
   restoreAutosave,
@@ -43,6 +44,7 @@ import {
 initSplash();
 initKeyframeLoadBar();
 initTearDebug();
+initStartupProfile();
 initTheme();
 initDom();
 initWebglFallback();
@@ -76,6 +78,7 @@ state.exprListApi = mountExprList({
 });
 
 async function bootstrap() {
+  startupBegin("boot.bootstrap");
   wirePipelineDom();
   initPanelResize(resize);
   initPanelToggle(resize);
@@ -112,11 +115,19 @@ async function bootstrap() {
 
   if (els.hud) els.hud.textContent = "clip-grid · idct volume";
 
+  startupMark("boot.before-render-loop");
+  warmClipGpuInit("boot-early");
   startRenderLoop();
 
+  startupBegin("boot.restore-autosave");
   const restored = await restoreAutosave();
+  startupEnd("boot.restore-autosave", { restored });
 
-  if (!restored) initCompile();
+  if (!restored) {
+    startupBegin("boot.init-compile");
+    initCompile();
+    startupEnd("boot.init-compile");
+  }
   ensureParamAnimationFromExprs();
   state.exprListApi?.render();
   markSplashSidebarReady();
@@ -126,9 +137,11 @@ async function bootstrap() {
     forceSplashDismiss("compile-errors");
   }
 
+  startupMark("boot.schedule-first-uploadFit", { animating: anyParamAnimating() });
   window.setTimeout(() => {
     uploadFit({ fromAnim: anyParamAnimating() });
   }, 0);
+  startupEnd("boot.bootstrap");
 }
 
 function initProjectActions() {

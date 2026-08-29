@@ -19,6 +19,7 @@ export type {
 } from "./marchTypes.js";
 
 export {
+  isClipGpuUploadReady,
   isClipBakeGpuReady,
   isClipMarchReady,
 } from "./marchReadiness.js";
@@ -42,6 +43,8 @@ export {
 export {
   ensurePipelinesForDegree,
   initClipBakeGpu,
+  scheduleMarchPipelines,
+  setMarchPipelinesReadyHandler,
 } from "./marchInit.js";
 
 export { renderClipFrameGpu } from "./renderFrame.js";

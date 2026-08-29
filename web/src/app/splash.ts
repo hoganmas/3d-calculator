@@ -1,7 +1,7 @@
 import { setErr } from "./hud.js";
 
 import { allKeyframesComplete, hasActiveKeyframeCaches, keyframesSplashReady } from "../model/keyframes.js";
-import { anyParamAnimating } from "../model/params.js";
+import { startupMark, startupReport } from "./startupProfile.js";
 
 const SPLASH_TIMEOUT_MS = 15_000;
 const SPLASH_EXIT_MS = 400;
@@ -67,6 +67,8 @@ function beginSplashExit(svg: SVGSVGElement) {
 function dismissSplash() {
   if (dismissed) return;
   dismissed = true;
+  startupMark("splash.dismiss");
+  startupReport("splash-dismiss");
   if (timeoutId) {
     clearTimeout(timeoutId);
     timeoutId = 0;
@@ -107,7 +109,7 @@ function tryDismiss() {
   }
 }
 
-/** True once the initial fit (and any keyframe cache) is ready. */
+/** True once the initial scene bake has finished (keyframe fill may still run). */
 export function isSplashContentReady() {
   return contentReady;
 }
@@ -118,22 +120,13 @@ export function getSplashDebugSnapshot() {
 }
 
 /**
- * Gate splash on the first scene bake. When auto-play is active, dismiss once each
- * layer's coarse blend pair is ready; background keyframe fill continues after.
+ * Gate splash on the first scene bake only. Keyframe grid refinement continues
+ * after dismiss (viewport + splash load bars).
  */
-export function tryMarkSplashBakeReady(hasSceneLayers: boolean) {
+export function tryMarkSplashBakeReady(_hasSceneLayers: boolean) {
   if (contentReady) return;
-  if (!hasSceneLayers) {
-    contentReady = true;
-    tryDismiss();
-    return;
-  }
-  if (hasActiveKeyframeCaches()) {
-    const full = allKeyframesComplete();
-    const splashReady = keyframesSplashReady();
-    if (!full && !(anyParamAnimating() && splashReady)) return;
-  }
   contentReady = true;
+  startupMark("splash.content-ready");
   tryDismiss();
 }
 
@@ -163,6 +156,7 @@ export function markSplashSidebarReady() {
 export function markSplashFrameReady() {
   if (frameReady) return;
   frameReady = true;
+  startupMark("splash.frame-ready");
   tryDismiss();
 }
 
