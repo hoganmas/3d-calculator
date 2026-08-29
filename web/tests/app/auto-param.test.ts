@@ -2,7 +2,12 @@ import "../helpers/setup-dom.ts";
 import {
   compileAllExprs,
   collectParamReferences,
+  pruneUnusedAutoParams,
 } from "../../src/app/compile.ts";
+import {
+  collectPendingParamsForExpr,
+  createParamRows,
+} from "../../src/app/pendingParams.ts";
 import {
   clearExpressions,
   commitAutoParams,
@@ -30,22 +35,17 @@ function paramRow(name: string) {
   return listExpressions().find((e) => String(e.latex || "").startsWith(`${name}=`));
 }
 
-function autoParamNames() {
-  return listExpressions()
-    .filter((e) => e.autoParam)
-    .map((e) => String(e.latex || "").split("=")[0]);
-}
-
 export async function run() {
   return runSuite("app / auto-param", [
     {
-      name: "compile creates multiple auto-param rows for a x + b y",
+      name: "createParamRows inserts multiple params for a x + b y",
       fn: () => {
         resetScene();
         setExpressions([{ id: "e1", latex: "a x + b y", enabled: true }]);
-        compileAllExprs({ rebuildUi: false });
-        assert(!!paramRow("a"), "auto row a");
-        assert(!!paramRow("b"), "auto row b");
+        const pending = collectPendingParamsForExpr(listExpressions()[0]!);
+        assert(createParamRows(pending), "created");
+        assert(!!paramRow("a"), "row a");
+        assert(!!paramRow("b"), "row b");
         assert(paramRow("a")?.autoParam === true, "a ephemeral");
         assert(paramRow("b")?.autoParam === true, "b ephemeral");
       },
@@ -55,7 +55,7 @@ export async function run() {
       fn: () => {
         resetScene();
         setExpressions([{ id: "e1", latex: "b x", enabled: true }]);
-        compileAllExprs({ rebuildUi: false });
+        createParamRows(["b"]);
         assert(!!paramRow("b"), "b auto row");
         splitExprAt("e1", "b ", "x");
         compileAllExprs({ rebuildUi: false });
@@ -71,7 +71,7 @@ export async function run() {
           { id: "e1", latex: "b ", enabled: true },
           { id: "e2", latex: "x", enabled: true },
         ]);
-        compileAllExprs({ rebuildUi: false });
+        createParamRows(["b"]);
         assert(!!paramRow("b"), "b auto row");
         updateExprSilent("e1", { latex: "b " });
         const merged = mergeExprIntoPrevious("e2");
@@ -86,7 +86,7 @@ export async function run() {
       fn: () => {
         resetScene();
         setExpressions([{ id: "e1", latex: "b x", enabled: true }]);
-        compileAllExprs({ rebuildUi: false });
+        createParamRows(["b"]);
         const bId = paramRow("b")?.id;
         assert(!!bId, "b exists");
         commitAutoParams();
@@ -107,7 +107,7 @@ export async function run() {
       },
     },
     {
-      name: "flow field auto-creates missing param",
+      name: "flow field pending param can be created explicitly",
       fn: () => {
         resetScene();
         setExpressions([
@@ -118,21 +118,24 @@ export async function run() {
             role: "flow",
           },
         ]);
-        compileAllExprs({ rebuildUi: false });
-        assert(!!paramRow("b"), "auto param for flow curl");
+        const pending = collectPendingParamsForExpr(listExpressions()[0]!);
+        createParamRows(pending);
+        assert(!!paramRow("b"), "param for flow curl");
         assert(collectParamReferences().has("b"), "b referenced");
       },
     },
     {
-      name: "param equation chain auto-creates transitive deps",
+      name: "param equation chain creates transitive deps on demand",
       fn: () => {
         resetScene();
         setExpressions([
           { id: "e1", latex: "a x", enabled: true },
           { id: "e2", latex: "a=2 b", enabled: true },
         ]);
+        createParamRows(collectPendingParamsForExpr(listExpressions()[0]!));
+        createParamRows(collectPendingParamsForExpr(listExpressions()[1]!));
         compileAllExprs({ rebuildUi: false });
-        assert(!!paramRow("b"), "auto b for a=2b");
+        assert(!!paramRow("b"), "b for a=2b");
         const vals = getParamValues();
         assert(Number.isFinite(vals.a ?? NaN), "a resolves");
       },
@@ -151,6 +154,18 @@ export async function run() {
         compileAllExprs({ rebuildUi: false });
         assert(!paramRow("b"), "old b row unused");
         assert(!!paramRow("c"), "c row present");
+      },
+    },
+    {
+      name: "pruneUnusedAutoParams removes unreferenced ephemeral rows",
+      fn: () => {
+        resetScene();
+        setExpressions([{ id: "e1", latex: "b x", enabled: true }]);
+        createParamRows(["b"]);
+        assert(!!paramRow("b"), "b exists");
+        updateExprSilent("e1", { latex: "x^2" });
+        assert(pruneUnusedAutoParams(), "pruned");
+        assert(!paramRow("b"), "b gone");
       },
     },
   ]);

@@ -33,6 +33,15 @@ import {
   } from "./helpers.ts";
   import { openGradientEditor } from "./popovers.ts";
   import ParamRail from "./ParamRail.svelte";
+  import { convertLatexToMarkup } from "mathlive";
+  import {
+  collectPendingParamsForExpr,
+  createParamRows,
+  formatPendingParamLabelPlain,
+  formatPendingParamNamesLatex,
+  formatPendingParamOverflow,
+  pendingParamErrorMessage,
+} from "../../app/pendingParams.js";
 
   interface Props {
     item: ExprItem;
@@ -72,9 +81,28 @@ import {
   let mfEl: MathfieldElement | undefined = $state();
 
   const warn = $derived(getExprWarning(item.id));
-  const paramName = $derived(neededParamForItem(item));
-  const paramErr = $derived(paramName ? getParam(paramName)?.error ?? null : null);
-  const rowError = $derived(warn ?? paramErr);
+  const paramName = $derived.by(() => {
+    void paramTick;
+    return neededParamForItem(item, paramTick);
+  });
+  const paramErr = $derived.by(() => {
+    void paramTick;
+    return paramName ? getParam(paramName)?.error ?? null : null;
+  });
+  const pendingParams = $derived.by(() => {
+    void paramTick;
+    return collectPendingParamsForExpr(item);
+  });
+  const pendingParamLabelPlain = $derived(formatPendingParamLabelPlain(pendingParams));
+  const pendingParamNamesLatex = $derived(formatPendingParamNamesLatex(pendingParams));
+  const pendingParamOverflow = $derived(formatPendingParamOverflow(pendingParams));
+  const pendingParamNamesMarkup = $derived(
+    pendingParamNamesLatex
+      ? convertLatexToMarkup(pendingParamNamesLatex, { defaultMode: "textstyle" })
+      : "",
+  );
+  const pendingErr = $derived(pendingParamErrorMessage(pendingParams));
+  const rowError = $derived(warn ?? paramErr ?? pendingErr);
   const isParamDef = $derived(isParameterRow(item.latex || ""));
   const grad = $derived(resolveExprGradient(item));
   const gradCss = $derived(cssGradientFromColors(grad.colors));
@@ -128,8 +156,36 @@ import {
     onExprChange();
   }
 
+  function syncFieldLatex() {
+    if (!mfEl) return;
+    updateExpr(item.id, { latex: readFieldLatex(mfEl) });
+  }
+
+  function createPendingParams() {
+    if (!pendingParams.length) return false;
+    syncFieldLatex();
+    if (!createParamRows(pendingParams)) return false;
+    onStructuralChange();
+    onExprChange();
+    return true;
+  }
+
+  function onPendingParamsClick(ev: MouseEvent) {
+    ev.stopPropagation();
+    createPendingParams();
+  }
+
   function onMfKeydownCapture(ev: KeyboardEvent) {
     if (!mfEl) return;
+    if (ev.key === "Tab" && !ev.shiftKey) {
+      if (isSuggestionUiActive(mfEl)) return;
+      if (pendingParams.length > 0) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        createPendingParams();
+        return;
+      }
+    }
     if (ev.key === "ArrowUp" || ev.key === "ArrowDown") {
       if (isSuggestionUiActive(mfEl)) return;
       const list = listExpressions();
@@ -183,7 +239,7 @@ import {
 
   function onRowClick(ev: MouseEvent) {
     const t = ev.target;
-    if (t instanceof Element && t.closest(".expr-drag, .expr-color, .expr-vis, .expr-del, .expr-param-block")) {
+    if (t instanceof Element && t.closest(".expr-drag, .expr-color, .expr-vis, .expr-del, .expr-param-block, .expr-pending-params")) {
       return;
     }
     if (t === mfEl || (mfEl && mfEl.contains(t as Node))) return;
@@ -224,6 +280,7 @@ import {
   class:is-hidden={!item.enabled}
   class:is-param-def={isParamDef}
   class:has-error={!!rowError}
+  class:has-pending-params={pendingParams.length > 0}
   data-id={item.id}
   data-param={paramName ?? undefined}
   style:--expr-grad={gradCss}
@@ -267,6 +324,24 @@ import {
         onkeydowncapture={onMfKeydownCapture}
       ></math-field>
     </div>
+    {#if pendingParams.length}
+      <button
+        type="button"
+        class="expr-pending-params"
+        title={pendingErr ?? undefined}
+        aria-label={`Create parameter rows for ${pendingParamLabelPlain}. Press Tab.`}
+        onclick={onPendingParamsClick}
+      >
+        <span class="expr-pending-params-copy">
+          Create {pendingParams.length === 1 ? "parameter" : "parameters"}
+          <strong class="expr-pending-params-names">
+            <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+            {@html pendingParamNamesMarkup}{#if pendingParamOverflow}<span class="expr-pending-params-overflow"> +{pendingParamOverflow}</span>{/if}
+          </strong>
+        </span>
+        <kbd class="expr-pending-params-tab">Tab</kbd>
+      </button>
+    {/if}
     {#if paramName}
       <ParamRail
         {item}

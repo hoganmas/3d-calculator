@@ -3,7 +3,8 @@
  * RHS may reference other params.
  */
 
-import { compileParamLatex, formatParamLatexValue, classifyExpr } from "../math/fit.js";
+import { compileParamLatex, classifyExpr } from "../math/fit.js";
+import { formatParamDefLatex } from "../math/paramSymbols.js";
 import type { AnimMode, ParamState } from "../types/models.js";
 import { listExpressions, updateExprSilent } from "./expressions.js";
 
@@ -72,7 +73,7 @@ function makeParam(name: string, init: ParamInit = {}): ParamState {
   const latex =
     typeof init.latex === "string" && init.latex.trim()
       ? init.latex.trim()
-      : `${name}=${formatParamLatexValue(value)}`;
+      : formatParamDefLatex(name, value);
   return {
     value,
     min,
@@ -211,7 +212,7 @@ export function applyParamSeed(seed: Record<string, ParamInit>) {
     if (!cur) continue;
     const next = makeParam(name, { ...cur, ...init, latex: cur.latex, exprId: cur.exprId });
     if (Number.isFinite(init.value) && (typeof init.latex !== "string" || !init.latex.trim())) {
-      next.latex = `${name}=${formatParamLatexValue(init.value as number)}`;
+      next.latex = formatParamDefLatex(name, init.value as number);
       next.value = Math.min(next.max, Math.max(next.min, init.value as number));
     }
     if (init.animating === undefined && init.animate === undefined) next.animating = cur.animating;
@@ -234,7 +235,7 @@ export function updateParam(name: string, patch: Partial<ParamState>) {
   value = Math.min(max, Math.max(min, value));
   let latex = typeof patch.latex === "string" ? patch.latex : cur.latex;
   if (Number.isFinite(patch.value) && patch.latex === undefined) {
-    latex = `${name}=${formatParamLatexValue(value)}`;
+    latex = formatParamDefLatex(name, value);
   }
   const next = {
     ...cur,
@@ -270,7 +271,7 @@ export function setParamValue(
     ...cur,
     value: v,
     animating: stopAnim ? false : cur.animating,
-    latex: rewriteLatex ? `${name}=${formatParamLatexValue(v)}` : cur.latex,
+    latex: rewriteLatex ? formatParamDefLatex(name, v) : cur.latex,
     driven: rewriteLatex ? false : cur.driven,
     freeParams: rewriteLatex ? [] : cur.freeParams,
     error: rewriteLatex ? null : cur.error,
@@ -432,7 +433,7 @@ export function tickParamAnimation(timeSec: number) {
       params.set(name, {
         ...p,
         value,
-        latex: `${name}=${formatParamLatexValue(value)}`,
+        latex: formatParamDefLatex(name, value),
       });
       changed = true;
     }

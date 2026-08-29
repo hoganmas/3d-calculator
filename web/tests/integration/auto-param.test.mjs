@@ -1,5 +1,5 @@
 /**
- * Playwright smoke: auto-param row creation on blur and prune on undo.
+ * Playwright smoke: intentional param creation via Tab and prune on undo.
  * Requires dev server: npm run dev
  * Run: npm run test:integration
  */
@@ -46,6 +46,7 @@ try {
     } catch (e) {
       return { error: `setValue failed: ${e}` };
     }
+    mf.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
     mf.blur?.();
     document.body.click();
     return { ok: true, rowId };

@@ -1,4 +1,4 @@
-import { compileExpr, classifyExpr, PRESETS, formatParamLatexValue, compileParamLatex } from "../math/fit.js";
+import { compileExpr, classifyExpr, PRESETS, compileParamLatex } from "../math/fit.js";
 import { compileVectorExpr } from "../math/fitVector.js";
 import {
   syncParamsFromDefinitions,
@@ -18,13 +18,16 @@ import {
   hexToRgb01,
   resolveExprRole,
   replaceExprWarnings,
-  insertExprAt,
   removeExprSilent,
   resolveExprGradient,
 } from "../model/expressions.js";
 import { closeSettingsDialog, els } from "./dom.js";
-import { isMathFieldFocused } from "../ui/expr-sidebar/helpers.js";
 import { state } from "./state.js";
+import {
+  collectPendingParamsForExpr,
+  pendingParamErrorMessage,
+  ensureParamExprRows,
+} from "./pendingParams.js";
 import type { ClassifiedExpr, CompileAllResult, CompileLayerResult, ExprItem } from "../types/models.js";
 
 function symbolEntryFromClassified(item: ExprItem, classified: ClassifiedExpr): SymbolEntry | null {
@@ -88,26 +91,8 @@ export function fmtParamNum(v: number) {
   return String(Math.round(v * 1000) / 1000);
 }
 
-/** Insert missing `name=value` expression rows at the bottom (sorted) without UI notify. */
-export function ensureParamExprRows(names: string[]) {
-  const missing = [...new Set(names)].filter(Boolean).sort();
-  if (!missing.length) return false;
-  for (const name of missing) {
-    const seed = state.pendingParamSeed[name] ?? {};
-    const value = Number.isFinite(seed.value) ? seed.value! : 1;
-    insertExprAt(listExpressions().length, {
-      latex: `${name}=${formatParamLatexValue(value)}`,
-      sliderMin: seed.min,
-      sliderMax: seed.max,
-      sliderSpeed: seed.speed,
-      sliderAnimating: !!(seed.animate ?? seed.animating),
-      sliderPhase: seed.phase,
-      sliderAnimMode: seed.animMode === "loop" ? "loop" : "pingpong",
-      autoParam: true,
-    });
-  }
-  return true;
-}
+/** Re-exported for presets and tests. */
+export { ensureParamExprRows, createParamRows } from "./pendingParams.js";
 
 function listNonemptyExprs() {
   return listExpressions().filter((e) => String(e.latex || "").trim());
@@ -160,19 +145,6 @@ export function pruneUnusedAutoParams() {
   return removed;
 }
 
-export function shouldDeferAutoParamRows() {
-  const ae = document.activeElement;
-  if (!ae) return false;
-  const mf =
-    (ae.closest && ae.closest("math-field")) ||
-    (ae.tagName === "MATH-FIELD" ? ae : null);
-  if (!(mf instanceof HTMLElement)) return false;
-  if (!isMathFieldFocused(mf as MathfieldElement)) return false;
-  const row = mf.closest?.(".expr-row");
-  if (!row || row.classList.contains("is-param-def")) return false;
-  return true;
-}
-
 interface CompileOpts {
   rebuildUi?: boolean;
   _afterEnsure?: boolean;
@@ -213,9 +185,17 @@ export function compileAllExprs(opts: CompileOpts = {}): CompileAllResult {
       if (!entry || entry.exprId !== item.id) continue;
       definedParams.add(name);
       paramRows.push({ item, name });
+      const pendingMsg = pendingParamErrorMessage(collectPendingParamsForExpr(item));
+      if (pendingMsg) warnings.push([item.id, pendingMsg]);
       continue;
     }
     if (!item.enabled) continue;
+
+    const pendingMsg = pendingParamErrorMessage(collectPendingParamsForExpr(item));
+    if (pendingMsg) {
+      warnings.push([item.id, pendingMsg]);
+      continue;
+    }
 
     const fieldLatex = classified.compileLatex;
     const role = resolveExprRole(item.role, classified.kind, fieldLatex, registry);
@@ -278,18 +258,10 @@ export function compileAllExprs(opts: CompileOpts = {}): CompileAllResult {
 
   syncParamsFromDefinitions(defs, state.pendingParamSeed);
 
-  const depNames = recompileAllParams();
-  const known = new Set(defs.map((d) => d.name));
-  const needRows = [
-    ...[...freeSet].filter((n) => !definedParams.has(n)),
-    ...[...new Set(depNames)].filter((n) => !known.has(n) && !definedParams.has(n)),
-  ];
+  recompileAllParams();
 
-  const deferAuto = shouldDeferAutoParamRows();
-  const pruned = !opts._afterEnsure && !deferAuto && pruneUnusedAutoParams();
-  const toCreate = deferAuto ? [] : needRows;
-  if ((pruned || toCreate.length) && !opts._afterEnsure) {
-    if (toCreate.length) ensureParamExprRows(toCreate);
+  const pruned = !opts._afterEnsure && pruneUnusedAutoParams();
+  if (pruned && !opts._afterEnsure) {
     return compileAllExprs({ ...opts, _afterEnsure: true });
   }
 
@@ -354,6 +326,8 @@ export function applyPreset(key: string) {
   } else {
     setExpressions([{ latex: p.latex ?? "" }]);
   }
+  const seedNames = Object.keys(p.params ?? {});
+  if (seedNames.length) ensureParamExprRows(seedNames);
   // Insert any auto-param rows before a single UI rebuild.
   try {
     compileAllExprs({ rebuildUi: false });
