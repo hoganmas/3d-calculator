@@ -24,7 +24,7 @@ import type { AnimMode, ExprItem } from "../types/models.js";
 import { applyPreset } from "./compile.js";
 import { getRenderSettingsSnapshot, serializeExpr, serializeParam } from "./persistence/document.js";
 import { els } from "./dom.js";
-import { syncExprCompileState, buildMetricsReport, refreshMetricsDump } from "./hud.js";
+import { syncExprCompileState, buildMetricsReport, refreshMetricsDump, getExpressionErrorReport } from "./hud.js";
 import {
   scheduleUploadFit,
   uploadFit,
@@ -209,24 +209,42 @@ function tools(): ToolDef[] {
     },
     {
       name: "laplacian_get_compile_status",
-      description: "Run compile sync and return ok/error plus warnings.",
+      description: "Run compile sync and return ok/error plus structured expression errors.",
       readOnly: true,
       inputSchema: { type: "object", properties: {} },
       execute: async () => {
         try {
           const result = syncExprCompileState();
+          const report = getExpressionErrorReport();
           return ok({
             ok: result,
             error: els.err.textContent || null,
+            errorCount: report?.errorCount ?? 0,
+            errors: report?.errors ?? [],
             meta: state.lastExprMeta,
           });
         } catch (e) {
+          const report = getExpressionErrorReport();
           return ok({
             ok: false,
             error: e instanceof Error ? e.message : String(e),
+            errorCount: report?.errorCount ?? 0,
+            errors: report?.errors ?? [],
             meta: state.lastExprMeta,
           });
         }
+      },
+    },
+    {
+      name: "laplacian_get_expression_errors",
+      description:
+        "Structured report of expression compile warnings, parameter errors, and global compile failures. Runs compile sync first.",
+      readOnly: true,
+      inputSchema: { type: "object", properties: {} },
+      execute: async () => {
+        syncExprCompileState();
+        const report = getExpressionErrorReport();
+        return ok(report ?? { compileOk: true, globalError: null, errors: [], expressionCount: 0, errorCount: 0 });
       },
     },
     {

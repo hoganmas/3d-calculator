@@ -9,6 +9,7 @@ import {
   mathJsonHasError,
   normalizeCalcLatex,
   normalizeLatexAliases,
+  parseDivergenceMatch,
   peelDefiniteIntegrals,
   scalarFromUnaryOpJson,
   tripleFromUnaryOpJson,
@@ -242,6 +243,17 @@ const MATH_OPERATORS = new Set([
   "Error",
 ]);
 
+const VECTOR_CALC_OPS = new Set(["div", "curl", "grad", "laplacian"]);
+
+function isVectorOpMultiply(json: unknown): { op: string; argIndex: number } | null {
+  if (!Array.isArray(json) || json[0] !== "Multiply" || json.length !== 3) return null;
+  const a1 = typeof json[1] === "string" ? json[1].toLowerCase() : null;
+  const a2 = typeof json[2] === "string" ? json[2].toLowerCase() : null;
+  if (a1 && VECTOR_CALC_OPS.has(a1)) return { op: a1, argIndex: 2 };
+  if (a2 && VECTOR_CALC_OPS.has(a2)) return { op: a2, argIndex: 1 };
+  return null;
+}
+
 /**
  * LaTeX left of `=` looks like `f(...)` / `f\left(...\right)`.
  * Catches CE's `f(r)` → Multiply(f,r) misparse for single-arg defs.
@@ -250,7 +262,27 @@ function latexLooksLikeFunctionDef(src: string) {
   const eq = String(src).search(/=/);
   if (eq < 0) return false;
   const left = String(src).slice(0, eq).trim();
+  if (/\\operatorname\s*\{\s*(div|curl|grad|laplacian)\s*\}/i.test(left)) return false;
   return /^[A-Za-z][A-Za-z0-9]*\s*(\\left\s*)?\(/.test(left);
+}
+
+function isVectorCalcCall(json: unknown): boolean {
+  const vecOp = isVectorOpMultiply(json);
+  if (vecOp) return true;
+  if (isUserFunctionCall(json)) {
+    const name = String(jsonArr(json)[0]).toLowerCase();
+    if (VECTOR_CALC_OPS.has(name as "div" | "curl" | "grad" | "laplacian")) return true;
+  }
+  return false;
+}
+
+function latexHasVectorCalcOperator(src: string): boolean {
+  return (
+    /\\operatorname\s*\{\s*(div|curl|grad|laplacian)\s*\}/i.test(src) ||
+    /\\nabla\s*\\cdot/i.test(src) ||
+    /\\nabla\s*\\times/i.test(src) ||
+    /\\(?:div|curl|laplacian)\b/i.test(src)
+  );
 }
 
 function isUserFunctionCall(json: unknown) {
@@ -511,17 +543,6 @@ function expandJson(json: unknown, registry: SymbolRegistry, warnings?: string[]
   return json;
 }
 
-const VECTOR_CALC_OPS = new Set(["div", "curl", "grad", "laplacian"]);
-
-function isVectorOpMultiply(json: unknown): { op: string; argIndex: number } | null {
-  if (!Array.isArray(json) || json[0] !== "Multiply" || json.length !== 3) return null;
-  const a1 = typeof json[1] === "string" ? json[1].toLowerCase() : null;
-  const a2 = typeof json[2] === "string" ? json[2].toLowerCase() : null;
-  if (a1 && VECTOR_CALC_OPS.has(a1)) return { op: a1, argIndex: 2 };
-  if (a2 && VECTOR_CALC_OPS.has(a2)) return { op: a2, argIndex: 1 };
-  return null;
-}
-
 function resolveVectorOpInner(inner: string, registry: SymbolRegistry, warnings?: string[]): string {
   const trimmed = unwrapLatexSymbolTokens(String(inner ?? "").trim());
   if (!trimmed) return trimmed;
@@ -606,6 +627,12 @@ export function expandDefinitions(
  *   paramName?: string,
  * }}
  */
+function normalizedCeLatex(box: { latex?: string } | null | undefined, fallback: string): string {
+  const raw = String(box?.latex ?? fallback ?? "").trim();
+  if (!raw) return "";
+  return normalizeForCe(raw) || raw;
+}
+
 export function classifyExpr(raw: string): ClassifiedExpr {
   const src = normalizeForCe(raw);
   if (!src) throw new Error("Empty expression");
@@ -632,12 +659,14 @@ export function classifyExpr(raw: string): ClassifiedExpr {
     const lhs = ja[1];
     const rhs = ja[2];
     const asDef =
-      latexLooksLikeFunctionDef(src) || isUserFunctionCall(lhs);
+      !isVectorCalcCall(lhs) &&
+      !latexHasVectorCalcOperator(src) &&
+      (latexLooksLikeFunctionDef(src) || isUserFunctionCall(lhs));
 
     if (asDef) {
       const { funcName, funcArgs } = parseFuncDefLhs(src, lhs);
       const rhsBox = ce.box(rhs as never);
-      const rhsLatex = rhsBox.latex || src.split("=").slice(1).join("=").trim();
+      const rhsLatex = normalizedCeLatex(rhsBox, src.split("=").slice(1).join("=").trim());
       if (!rhsLatex) throw new Error("Empty right-hand side");
       return {
         kind: "funcdef",
@@ -658,7 +687,7 @@ export function classifyExpr(raw: string): ClassifiedExpr {
       /^[A-Za-z][A-Za-z0-9_]*$/.test(lhsName)
     ) {
       const rhsBox = ce.box(rhs as never);
-      const rhsLatex = rhsBox.latex || src.split("=").slice(1).join("=").trim();
+      const rhsLatex = normalizedCeLatex(rhsBox, src.split("=").slice(1).join("=").trim());
       if (!rhsLatex) throw new Error("Empty right-hand side");
       const rhsResult = compileLatex(rhsLatex);
       const { usesSpace } = collectFreeParams(rhsResult.freeSymbols, rhsLatex, {
@@ -685,7 +714,7 @@ export function classifyExpr(raw: string): ClassifiedExpr {
     }
 
     const diff = ce.box(["Subtract", lhs, rhs] as never);
-    const constraintLatex = diff.latex;
+    const constraintLatex = normalizedCeLatex(diff, "");
     if (!constraintLatex) throw new Error("Could not form constraint residual");
     return {
       kind: "constraint",
@@ -888,26 +917,8 @@ function looksLikeLaplacian(src: string, json: unknown): string | null {
   return null;
 }
 
-function looksLikeDivergence(src: string, json: unknown): string[] | null {
-  const fromJson = tripleFromUnaryOpJsonLocal(json, "div");
-  if (fromJson?.length === 3) return fromJson;
-
-  if (/\\div|\\operatorname\s*\{\s*div/i.test(src)) {
-    const m = src.match(
-      /\\(?:operatorname\s*\{\s*div\s*\}|div)\s*(?:\\left)?[\{\(]?\s*([\s\S]+?)\s*(?:\\right)?[\}\)]?\s*$/i,
-    );
-    if (m?.[1]) {
-      try {
-        const inner = ce.parse(m[1].trim());
-        const j = inner?.json ?? (typeof inner?.toJSON === "function" ? inner.toJSON() : null);
-        const triple = extractTriple(j);
-        if (triple?.length === 3) return triple;
-      } catch {
-        /* fall through */
-      }
-    }
-  }
-  return null;
+function looksLikeDivergence(src: string, json: unknown) {
+  return parseDivergenceMatch(src, json);
 }
 
 function bindScalarFromLatex(latex: string, freeParams: string[]) {
@@ -1118,6 +1129,23 @@ function compileDefiniteIntegralExpr(
   };
 }
 
+function compileConstantScalarExpr(
+  value: number,
+  classified: ClassifiedExpr,
+): CompiledExpr {
+  return {
+    freeParams: [],
+    usesSpace: false,
+    kind: classified.kind as FieldKind,
+    shade: "none",
+    isoLevel: classified.isoLevel,
+    classifyLabel: "constant (not graphed)",
+    bind() {
+      return () => value;
+    },
+  };
+}
+
 function compileDivergenceExpr(
   raw: string,
   parts: [string, string, string],
@@ -1219,10 +1247,20 @@ export function compileExpr(
       const classified = classifyExpr(expandedRaw);
       return compileLaplacianExpr(expandedRaw, lapInner, classified);
     }
-    const divParts = looksLikeDivergence(normalized, j);
-    if (divParts?.length === 3) {
+    const divMatch = looksLikeDivergence(normalized, j);
+    if (divMatch) {
       const classified = classifyExpr(expandedRaw);
-      return compileDivergenceExpr(expandedRaw, divParts as [string, string, string], classified);
+      if (divMatch.mode === "laplacian") {
+        return compileLaplacianExpr(expandedRaw, divMatch.inner, classified);
+      }
+      if (divMatch.mode === "constant") {
+        return compileConstantScalarExpr(divMatch.value, classified);
+      }
+      return compileDivergenceExpr(
+        expandedRaw,
+        divMatch.parts,
+        classified,
+      );
     }
   }
 

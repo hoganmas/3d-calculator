@@ -26,7 +26,12 @@ const TOOL_CATALOG = [
   {
     name: "laplacian_get_compile_status",
     readOnly: true,
-    summary: "Run compile sync; return ok/error and layer meta.",
+    summary: "Run compile sync; return ok/error, structured errors, and layer meta.",
+  },
+  {
+    name: "laplacian_get_expression_errors",
+    readOnly: true,
+    summary: "Structured expression + parameter error report (runs compile sync).",
   },
   {
     name: "laplacian_list_expressions",

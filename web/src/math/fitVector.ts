@@ -224,6 +224,10 @@ function tripleFromUnaryOpWithError(
 }
 
 function looksLikeCurl(src: string, json: unknown): string[] | null {
+  if (Array.isArray(json) && String(json[0]).toLowerCase() === "curl" && json[1] != null) {
+    if (scalarFromGradJson(json[1])) return ["0", "0", "0"];
+  }
+
   const fromJson = tripleFromUnaryOpWithError(json, "curl", isCurlErrorNode);
   if (fromJson?.length === 3) return fromJson;
 
@@ -232,13 +236,15 @@ function looksLikeCurl(src: string, json: unknown): string[] | null {
       /\\(?:operatorname\s*\{\s*curl\s*\}|curl)\s*(?:\\left)?[\{\(]?\s*([\s\S]+?)\s*(?:\\right)?[\}\)]?\s*$/,
     );
     if (m?.[1]) {
+      const innerLatex = m[1].trim();
       try {
-        const inner = ce.parse(m[1].trim());
+        const inner = ce.parse(normalizeForCe(innerLatex));
         const j = inner?.json ?? (typeof inner?.toJSON === "function" ? inner.toJSON() : null);
+        if (scalarFromGradJson(j)) return ["0", "0", "0"];
         const triple = extractTriple(j);
         if (triple?.length === 3) return triple;
       } catch {
-        /* fall through */
+        if (looksLikeGrad(innerLatex, null)) return ["0", "0", "0"];
       }
     }
   }
@@ -376,7 +382,11 @@ export function compileVectorExpr(
       if (us) usesSpace = true;
     }
     const freeParams = [...freeSet].sort();
-    if (!usesSpace) throw new Error("Curl field must depend on x, y, or z");
+    const constantCurl = compLatex.every((latex) => /^-?\d+(?:\.\d+)?$/.test(latex.trim()));
+    if (!usesSpace && !constantCurl) {
+      throw new Error("Curl field must depend on x, y, or z");
+    }
+    if (constantCurl) usesSpace = true;
 
     const bindTuple = (params: Record<string, number> = {}) => {
       const fns = compLatex.map((latex, i) => {

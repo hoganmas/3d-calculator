@@ -119,7 +119,7 @@ export function useGpuClipPath() {
 /** True when the first baked volume is visible (WebGPU march or WebGL fallback). */
 export function isVolumePresented() {
   const bake = state.lastSceneBake;
-  if (!bake) return false;
+  if (!bake) return true;
   const hasLayers =
     (bake.cloudLayers?.length ?? 0) > 0 ||
     (bake.isosurfaceLayers?.length ?? 0) > 0 ||

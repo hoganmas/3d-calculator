@@ -3,7 +3,7 @@ import { setErr } from "./hud.js";
 import { allKeyframesComplete, hasActiveKeyframeCaches } from "../model/keyframes.js";
 
 const SPLASH_TIMEOUT_MS = 15_000;
-const SPLASH_EXIT_MS = 700;
+const SPLASH_EXIT_MS = 400;
 
 let splashEl: HTMLElement | null = null;
 let timeoutId = 0;
@@ -51,6 +51,18 @@ function fadeSplashOut() {
   window.setTimeout(removeSplash, 500);
 }
 
+function beginSplashExit(svg: SVGSVGElement) {
+  svg.classList.add("splash-exit");
+  for (const el of svg.querySelectorAll(".splash-nabla-sweep, .splash-two-stroke, .splash-two-layer")) {
+    el.getAnimations().forEach((anim) => anim.cancel());
+    if (el instanceof SVGElement) el.style.animation = "none";
+  }
+  void svg.getBoundingClientRect();
+  for (const el of svg.querySelectorAll(".splash-nabla-sweep, .splash-two-stroke, .splash-two-layer")) {
+    if (el instanceof SVGElement) el.style.removeProperty("animation");
+  }
+}
+
 function dismissSplash() {
   if (dismissed) return;
   dismissed = true;
@@ -66,7 +78,7 @@ function dismissSplash() {
 
   const svg = getSplashSvg();
   if (svg) {
-    svg.classList.add("splash-exit");
+    beginSplashExit(svg);
     window.setTimeout(fadeSplashOut, SPLASH_EXIT_MS);
     return;
   }
@@ -74,14 +86,33 @@ function dismissSplash() {
   fadeSplashOut();
 }
 
+function splashDebugState(extra: Record<string, unknown> = {}) {
+  return {
+    dismissed,
+    sidebarReady,
+    contentReady,
+    frameReady,
+    keyframeCaches: hasActiveKeyframeCaches(),
+    keyframesComplete: allKeyframesComplete(),
+    ...extra,
+  };
+}
+
 function tryDismiss() {
   if (dismissed) return;
-  if (sidebarReady && contentReady && frameReady) dismissSplash();
+  if (sidebarReady && contentReady && frameReady) {
+    dismissSplash();
+  }
 }
 
 /** True once the initial fit (and any keyframe cache) is ready. */
 export function isSplashContentReady() {
   return contentReady;
+}
+
+/** Snapshot for console debugging: copy(JSON.stringify(window.__laplacianSplash())) */
+export function getSplashDebugSnapshot() {
+  return splashDebugState();
 }
 
 /**
@@ -95,13 +126,19 @@ export function tryMarkSplashBakeReady(hasSceneLayers: boolean) {
     tryDismiss();
     return;
   }
-  if (hasActiveKeyframeCaches() && !allKeyframesComplete()) return;
+  if (hasActiveKeyframeCaches() && !allKeyframesComplete()) {
+    return;
+  }
   contentReady = true;
   tryDismiss();
 }
 
 export function initSplash() {
   splashEl = document.getElementById("splash");
+  if (typeof window !== "undefined") {
+    (window as Window & { __laplacianSplash?: () => ReturnType<typeof getSplashDebugSnapshot> }).__laplacianSplash =
+      getSplashDebugSnapshot;
+  }
   timeoutId = window.setTimeout(() => {
     if (!contentReady) {
       setErr("Startup took longer than expected — some features may still be loading.");
@@ -123,4 +160,12 @@ export function markSplashFrameReady() {
   if (frameReady) return;
   frameReady = true;
   tryDismiss();
+}
+
+/** Boot escape hatch when compile failed or we must not block on fit/GPU present. */
+export function forceSplashDismiss(_reason?: string) {
+  sidebarReady = true;
+  if (!contentReady) contentReady = true;
+  if (!frameReady) frameReady = true;
+  dismissSplash();
 }

@@ -42,8 +42,6 @@ function setStatus(next: AutosaveStatus, detail?: string) {
     case "saved":
       text = "Saved";
       state = "saved";
-      if (detail) console.info("[autosave]", detail);
-      else console.info("[autosave] saved");
       break;
     case "error":
       text = detail ?? "Save failed";
@@ -152,7 +150,9 @@ export async function persistNow() {
 /** Silent restore on load; returns true when a document was applied. */
 export async function restoreAutosave(): Promise<boolean> {
   const doc = await readDocument();
-  if (!doc) return false;
+  if (!doc) {
+    return false;
+  }
   await applyDocument(doc);
   setStatus("saved", `restored rev ${doc.revision} · ${doc.savedAt}`);
   return true;

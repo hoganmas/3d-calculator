@@ -66,7 +66,11 @@ function buildSymbolRegistry(items: ExprItem[]) {
     let classified: ClassifiedExpr;
     try {
       classified = classifyExpr(item.latex);
-    } catch {
+    } catch (e) {
+      warnings.push([
+        item.id,
+        e instanceof Error ? e.message : "Invalid expression",
+      ]);
       continue;
     }
     const entry = symbolEntryFromClassified(item, classified);
@@ -195,7 +199,11 @@ export function compileAllExprs(opts: CompileOpts = {}): CompileAllResult {
     let classified;
     try {
       classified = classifyExpr(item.latex);
-    } catch {
+    } catch (e) {
+      warnings.push([
+        item.id,
+        e instanceof Error ? e.message : "Invalid expression",
+      ]);
       continue;
     }
     if (classified.kind === "parameter") {

@@ -176,6 +176,21 @@ export function getExprWarning(id: string) {
   return exprWarnings.get(id) ?? null;
 }
 
+/** All per-row warnings with expression metadata. */
+export function listExprWarnings() {
+  const out: { id: string; latex: string; message: string }[] = [];
+  for (const item of listExpressions()) {
+    const message = exprWarnings.get(item.id);
+    if (!message) continue;
+    out.push({ id: item.id, latex: item.latex, message });
+  }
+  return out;
+}
+
+export function hasExprWarnings() {
+  return exprWarnings.size > 0;
+}
+
 function emit() {
   ensureTrailingEmptyExpr();
   if (onChange) onChange();

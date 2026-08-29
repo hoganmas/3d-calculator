@@ -12,6 +12,12 @@ import {
   marchFramebufferSize,
 } from "./presentation.js";
 import { compileAllExprs, fmtParamNum } from "./compile.js";
+import {
+  collectExpressionErrors,
+  formatExpressionErrors,
+  logExpressionErrors,
+  type ExpressionErrorReport,
+} from "./exprErrors.js";
 
 export function fmtRel(v: number) {
   if (!Number.isFinite(v)) return "∞";
@@ -19,8 +25,15 @@ export function fmtRel(v: number) {
   return v.toPrecision(3);
 }
 
+let lastErrorReport: ExpressionErrorReport | null = null;
+
+export function getExpressionErrorReport() {
+  return lastErrorReport;
+}
+
 export function setErr(msg: string) {
   els.err.textContent = msg || "";
+  els.err.hidden = !msg;
 }
 
 /** Highlight expression fields when compile fails (preserve duplicate-var warnings). */
@@ -35,9 +48,7 @@ export function setExprCompileOk(ok: boolean) {
       return;
     }
     mf.classList.toggle("invalid", !ok);
-    if (mf instanceof HTMLElement && !ok) {
-      /* keep existing title if any */
-    } else if (mf instanceof HTMLElement) {
+    if (mf instanceof HTMLElement && ok) {
       mf.removeAttribute("title");
     }
   });
@@ -45,14 +56,22 @@ export function setExprCompileOk(ok: boolean) {
 
 export function syncExprCompileState() {
   try {
-    const result = compileAllExprs({ rebuildUi: true });
+    compileAllExprs({ rebuildUi: true });
     setExprCompileOk(true);
-    const warn = result?.warnings?.length ? result.warnings.join(" · ") : "";
-    setErr(warn);
+    const report = collectExpressionErrors(true, null);
+    lastErrorReport = report;
+    const banner = formatExpressionErrors(report);
+    setErr(banner);
+    if (report.errorCount) logExpressionErrors(report);
     return true;
   } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
     setExprCompileOk(false);
-    setErr(e instanceof Error ? e.message : String(e));
+    const report = collectExpressionErrors(false, message);
+    lastErrorReport = report;
+    setErr(formatExpressionErrors(report) || message);
+    logExpressionErrors(report);
+    console.error("[expressions] compile failed:", message);
     return false;
   }
 }
@@ -94,7 +113,11 @@ export function hudText() {
     p.presentIntervalMs > 0 && performance.now() - p.lastPresentAt < 1200
       ? ` · present ${p.presentIntervalMs.toFixed(0)}ms`
       : "";
-  const clip = ` · rAF ${state.frameDtSmooth.toFixed(0)}ms · ${submit}${gpuSplit}${present} · vol ${state.lastVolumeM}³`;
+  const errHint =
+    lastErrorReport && lastErrorReport.errorCount > 0
+      ? ` · ${lastErrorReport.errorCount} expr err`
+      : "";
+  const clip = ` · rAF ${state.frameDtSmooth.toFixed(0)}ms · ${submit}${gpuSplit}${present}${errHint} · vol ${state.lastVolumeM}³`;
   return `clip-grid · ${hudFpsText()} · ${state.cpuMsSmooth.toFixed(1)}ms js${clip} · ${Math.round(w * pr)}×${Math.round(h * pr)}`;
 }
 
@@ -136,6 +159,18 @@ export function buildMetricsReport() {
     `fit_rel_L2      ${Number.isFinite(state.lastFitRel) ? fmtRel(state.lastFitRel) : "—"}`,
     `n_coeffs        ${state.lastNCoeff || "—"}`,
   ];
+  if (lastErrorReport?.errorCount) {
+    lines.push(`expr_errors      ${lastErrorReport.errorCount}`);
+    for (const e of lastErrorReport.errors) {
+      const where =
+        e.kind === "parameter"
+          ? `param ${e.name}`
+          : e.kind === "global"
+            ? "global"
+            : `row ${e.row ?? e.id}`;
+      lines.push(`  ${where}: ${e.message}`);
+    }
+  }
   if (state.lastFitTiming) {
     const t = state.lastFitTiming;
     lines.push(
