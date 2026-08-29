@@ -140,6 +140,18 @@ export function buildCapabilities() {
           description:
             "Vector calculus operators on scalar/vector fields → scalar volume (laplacian / divergence).",
         },
+        {
+          form: "\\frac{\\partial f}{\\partial x}, \\partial_x f, \\grad_x f (and y/z variants)",
+          kind: "cloud",
+          description:
+            "Single-axis partial derivative of a scalar field → scalar volume cloud.",
+        },
+        {
+          form: "\\int_{a}^{b} f\\,dx (chained \\int for multiple axes; empty bounds default to [-half,half])",
+          kind: "cloud",
+          description:
+            "Definite integral of a scalar field; integrated axes become constant (broadcast in volume).",
+        },
       ],
       roles: {
         auto: "Infer cloud / isosurface / flow from syntax.",

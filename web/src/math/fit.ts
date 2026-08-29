@@ -5,20 +5,29 @@ import { MAX_DEG } from "./limits.js";
 import {
   extractTriple,
   extractOperatornameArg,
+  looksLikePartial,
   mathJsonHasError,
   normalizeCalcLatex,
   normalizeLatexAliases,
+  peelDefiniteIntegrals,
   scalarFromUnaryOpJson,
   tripleFromUnaryOpJson,
   unwrapLatexSymbolTokens,
 } from "./calcOps.js";
-import { idctCheb3D, idctChebDivergence3D, idctChebLaplacian3D } from "./idct.js";
+import {
+  chebDefiniteInt3D,
+  idctCheb3D,
+  idctChebDivergence3D,
+  idctChebLaplacian3D,
+  idctChebPartial3D,
+} from "./idct.js";
 import type {
   ChebFitResult,
   ClassifiedExpr,
   CompiledExpr,
   CompiledParam,
   FieldKind,
+  IntegralAxisSpec,
   PresetDef,
   ScalarFitResult,
   ChebFitTiming,
@@ -74,8 +83,9 @@ const KNOWN_FUNCTION_NAMES = new Set([
   "sqrt", "cbrt", "abs", "sign", "floor", "ceil", "round",
   "max", "min", "hypot", "pow",
   "sinc", "erf", "gamma",
-  // Vector calculus operators (CE may leave these as free symbols when unparsed).
+  // Vector/calculus operators (CE may leave these as free symbols when unparsed).
   "curl", "div", "grad", "laplacian", "nabla", "del",
+  "partial_x", "partial_y", "partial_z",
 ]);
 
 /** Longest-first so `arccos` wins over `cos`. */
@@ -822,6 +832,22 @@ function bindLaplacianFromScalar(
   };
 }
 
+function bindPartialFromScalar(
+  scalarFn: (x: number, y: number, z: number) => number,
+  axis: 0 | 1 | 2,
+  eps = 1e-5,
+): (x: number, y: number, z: number) => number {
+  return (x: number, y: number, z: number) => {
+    if (axis === 0) {
+      return (scalarFn(x + eps, y, z) - scalarFn(x - eps, y, z)) / (2 * eps);
+    }
+    if (axis === 1) {
+      return (scalarFn(x, y + eps, z) - scalarFn(x, y - eps, z)) / (2 * eps);
+    }
+    return (scalarFn(x, y, z + eps) - scalarFn(x, y, z - eps)) / (2 * eps);
+  };
+}
+
 function bindDivergenceFromVector(
   vectorFn: (x: number, y: number, z: number) => [number, number, number],
   eps = 1e-5,
@@ -961,6 +987,137 @@ function compileLaplacianExpr(
   };
 }
 
+function compilePartialExpr(
+  scalarLatex: string,
+  axis: 0 | 1 | 2,
+  classified: ClassifiedExpr,
+): CompiledExpr {
+  const scalarResult = compileLatex(scalarLatex);
+  if (!scalarResult?.success || typeof scalarResult.run !== "function") {
+    throw new Error("Could not compile scalar inside partial derivative");
+  }
+  const { freeParams, usesSpace } = collectFreeParams(scalarResult.freeSymbols, scalarLatex);
+  if (!usesSpace) throw new Error("Partial derivative field must depend on x, y, or z");
+  const shade = classified.shade === "none" ? "none" : classified.shade;
+  const axisLabel = axis === 0 ? "x" : axis === 1 ? "y" : "z";
+  return {
+    freeParams,
+    usesSpace,
+    kind: classified.kind as FieldKind,
+    shade,
+    isoLevel: classified.isoLevel,
+    classifyLabel: `partial derivative (∂/∂${axisLabel})`,
+    operator: "partial",
+    partialAxis: axis,
+    scalarCompileLatex: scalarLatex,
+    bind(params: Record<string, number> = {}) {
+      const scalar = bindScalarFromLatex(scalarLatex, freeParams)(params);
+      return bindPartialFromScalar(scalar, axis);
+    },
+    bindScalar(params: Record<string, number> = {}) {
+      return bindScalarFromLatex(scalarLatex, freeParams)(params);
+    },
+  };
+}
+
+function compileBoundLatex(
+  latex: string,
+  freeParams: string[],
+  params: Record<string, number>,
+  half: number,
+  which: "a" | "b",
+): number {
+  const trimmed = String(latex ?? "").trim();
+  if (!trimmed) return which === "a" ? -half : half;
+  const num = Number(trimmed);
+  if (Number.isFinite(num)) return num;
+  const result = compileLatex(trimmed);
+  if (!result?.success || typeof result.run !== "function") {
+    throw new Error(`Could not compile integral bound: ${trimmed}`);
+  }
+  return coerceNumber(result.run(params));
+}
+
+function integrateAlongAxis(
+  fn: (x: number, y: number, z: number) => number,
+  axis: 0 | 1 | 2,
+  a: number,
+  b: number,
+  x: number,
+  y: number,
+  z: number,
+  steps = 64,
+): number {
+  const h = (b - a) / steps;
+  let sum = 0;
+  for (let m = 0; m <= steps; m++) {
+    const t = a + m * h;
+    const px = axis === 0 ? t : x;
+    const py = axis === 1 ? t : y;
+    const pz = axis === 2 ? t : z;
+    const f = fn(px, py, pz);
+    if (m === 0 || m === steps) sum += f;
+    else if (m % 2 === 0) sum += 2 * f;
+    else sum += 4 * f;
+  }
+  return (sum * h) / 3;
+}
+
+function bindDefiniteIntegralFromScalar(
+  scalarFn: (x: number, y: number, z: number) => number,
+  axes: IntegralAxisSpec[],
+  boundEval: (latex: string, which: "a" | "b") => number,
+): (x: number, y: number, z: number) => number {
+  let fn = scalarFn;
+  for (const { axis, aLatex, bLatex } of axes) {
+    const prev = fn;
+    fn = (x, y, z) =>
+      integrateAlongAxis(
+        prev,
+        axis,
+        boundEval(aLatex, "a"),
+        boundEval(bLatex, "b"),
+        x,
+        y,
+        z,
+      );
+  }
+  return fn;
+}
+
+function compileDefiniteIntegralExpr(
+  innerLatex: string,
+  axes: IntegralAxisSpec[],
+  classified: ClassifiedExpr,
+): CompiledExpr {
+  const scalarResult = compileLatex(innerLatex);
+  if (!scalarResult?.success || typeof scalarResult.run !== "function") {
+    throw new Error("Could not compile integrand");
+  }
+  const { freeParams } = collectFreeParams(scalarResult.freeSymbols, innerLatex);
+  const shade = classified.shade === "none" ? "none" : classified.shade;
+  return {
+    freeParams,
+    usesSpace: true,
+    kind: classified.kind as FieldKind,
+    shade,
+    isoLevel: classified.isoLevel,
+    classifyLabel: "definite integral field",
+    operator: "definite_integral",
+    scalarCompileLatex: innerLatex,
+    integralAxes: axes,
+    bind(params: Record<string, number> = {}) {
+      const scalar = bindScalarFromLatex(innerLatex, freeParams)(params);
+      const boundEval = (latex: string, which: "a" | "b") =>
+        compileBoundLatex(latex, freeParams, params, 1, which);
+      return bindDefiniteIntegralFromScalar(scalar, axes, boundEval);
+    },
+    bindScalar(params: Record<string, number> = {}) {
+      return bindScalarFromLatex(innerLatex, freeParams)(params);
+    },
+  };
+}
+
 function compileDivergenceExpr(
   raw: string,
   parts: [string, string, string],
@@ -1005,6 +1162,9 @@ function compileDivergenceExpr(
  */
 function isLikelyFlowLatex(raw: string): boolean {
   const s = normalizeLatexAliases(String(raw ?? "").trim());
+  if (/\\partial|\\operatorname\s*\{\s*partial_[xyz]/i.test(s)) return false;
+  if (/\\grad\s*_\s*\{?\s*[xyz]/i.test(s)) return false;
+  if (/\\int(?:\s*_\s*\{|\s*\^\s*\{|\s+)/i.test(s)) return false;
   if (/\\curl|\\operatorname\s*\{\s*curl\s*\}|\\nabla\s*\\times/i.test(s)) return true;
   if (/\\nabla\s*\^|\^2|\\laplacian|\\Delta|\\div|\\nabla\s*\\cdot/i.test(s)) return false;
   if (/\\grad|\\operatorname\s*\{\s*grad\s*\}|\\nabla/i.test(s)) return true;
@@ -1036,6 +1196,12 @@ export function compileExpr(
 
   const normalized = normalizeForCe(expandedRaw);
   if (normalized) {
+    const peeledInt = peelDefiniteIntegrals(normalized);
+    if (peeledInt) {
+      const classified = classifyExpr(expandedRaw);
+      return compileDefiniteIntegralExpr(peeledInt.inner, peeledInt.axes, classified);
+    }
+
     let box;
     try {
       box = ce.parse(normalized);
@@ -1043,6 +1209,11 @@ export function compileExpr(
       box = null;
     }
     const j = box?.json ?? (typeof box?.toJSON === "function" ? box.toJSON() : null);
+    const partialMatch = looksLikePartial(normalized, j);
+    if (partialMatch) {
+      const classified = classifyExpr(expandedRaw);
+      return compilePartialExpr(partialMatch.inner, partialMatch.axis, classified);
+    }
     const lapInner = looksLikeLaplacian(normalized, j);
     if (lapInner) {
       const classified = classifyExpr(expandedRaw);
@@ -1482,6 +1653,52 @@ export function fitScalarField(
       cheb: fit.cheb,
       fitRelL2: fit.fitRelL2,
       M: lap.M,
+      deg: fit.deg,
+      timing: fit.timing,
+    };
+  }
+
+  if (
+    compiled.operator === "partial" &&
+    compiled.bindScalar &&
+    compiled.partialAxis != null
+  ) {
+    const fit = fitChebyshev3D(compiled.bindScalar(), half, deg, { skipL2, skipMono });
+    const part = idctChebPartial3D(fit.cheb, deg, compiled.partialAxis, deg + 1);
+    const scale = 1 / half;
+    const dens = new Float32Array(part.dens.length);
+    for (let i = 0; i < dens.length; i++) dens[i] = part.dens[i]! * scale;
+    return {
+      dens,
+      cheb: fit.cheb,
+      fitRelL2: fit.fitRelL2,
+      M: part.M,
+      deg: fit.deg,
+      timing: fit.timing,
+    };
+  }
+
+  if (
+    compiled.operator === "definite_integral" &&
+    compiled.bindScalar &&
+    compiled.integralAxes?.length
+  ) {
+    const fit = fitChebyshev3D(compiled.bindScalar(), half, deg, { skipL2, skipMono });
+    let coeffs = Float64Array.from(fit.cheb);
+    const integratedAxes: (0 | 1 | 2)[] = [];
+    for (const spec of compiled.integralAxes) {
+      const a = compileBoundLatex(spec.aLatex, compiled.freeParams, {}, half, "a");
+      const b = compileBoundLatex(spec.bLatex, compiled.freeParams, {}, half, "b");
+      coeffs = chebDefiniteInt3D(coeffs, deg, spec.axis, a, b, half);
+      integratedAxes.push(spec.axis);
+    }
+    void integratedAxes;
+    const idct = idctCheb3D(Float32Array.from(coeffs), deg, deg + 1);
+    return {
+      dens: idct.dens,
+      cheb: Float32Array.from(coeffs),
+      fitRelL2: fit.fitRelL2,
+      M: idct.M,
       deg: fit.deg,
       timing: fit.timing,
     };
