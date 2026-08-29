@@ -73,7 +73,7 @@ export async function run() {
       },
     },
     {
-      name: "uses gzip for larger payloads",
+      name: "uses deflate for larger payloads",
       fn: async () => {
         const exprs = Array.from({ length: 8 }, (_, i) =>
           sampleExpr({
@@ -82,10 +82,37 @@ export async function run() {
           }),
         );
         const fragment = await encodeExpressionsFragment(exprs);
-        assert(fragment.startsWith(`e=${EXPR_SHARE_VERSION}z.`), "uses gzip encoding");
+        assert(fragment.startsWith(`e=${EXPR_SHARE_VERSION}d.`), "uses deflate encoding");
         const decoded = await decodeExpressionsFragment(fragment);
         assert(decoded?.length === 8, "row count");
         assert(decoded![1]?.latex.includes("(x-a)"), "latex preserved");
+      },
+    },
+    {
+      name: "omits default palette colors and round-trips explicit palette index",
+      fn: async () => {
+        const exprs = [
+          sampleExpr({ id: "e1", latex: "x" }),
+          sampleExpr({
+            id: "e2",
+            latex: "y",
+            color: "#ff4500",
+            color2: "#ffec00",
+            colors: ["#ff4500", "#ffec00"],
+          }),
+          sampleExpr({
+            id: "e3",
+            latex: "z",
+            color: "#ff1493",
+            color2: "#7b2fff",
+            colors: ["#ff1493", "#7b2fff"],
+          }),
+        ];
+        const fragment = await encodeExpressionsFragment(exprs);
+        const decoded = await decodeExpressionsFragment(fragment);
+        assert(decoded?.length === 3, "three rows");
+        assert(decoded![2]?.color === "#ff1493", "palette colors restored");
+        assert(decoded![2]?.color2 === "#7b2fff", "palette colors restored");
       },
     },
     {

@@ -1,16 +1,22 @@
 /**
  * Low-level expression fragment codec — shared by production encode/decode and benchmarks.
  */
+import { EXPR_GRADIENTS } from "../../model/expressions.js";
 import type { AnimMode, ExprItem } from "../../types/models.js";
 
 export const EXPR_SHARE_VERSION = 1;
 export const FRAGMENT_PREFIX = "e=";
-export const GZIP_THRESHOLD = 150;
+/** Minimum JSON byte length before auto mode compresses the payload. */
+export const COMPRESS_THRESHOLD = 150;
+/** @deprecated Use COMPRESS_THRESHOLD */
+export const GZIP_THRESHOLD = COMPRESS_THRESHOLD;
 export const MAX_EXPR_ROWS = 100;
 export const MAX_JSON_BYTES = 64_000;
 
 export type CompactExprRow = {
   l: string;
+  /** Palette gradient index (0–4) when colors match EXPR_GRADIENTS but differ from row default. */
+  g?: number;
   e?: 0;
   c?: string;
   c2?: string;
@@ -38,41 +44,96 @@ export function stripTrailingBlank(exprs: ExprItem[]): ExprItem[] {
   return copy;
 }
 
-export function compactExprRow(item: ExprItem): CompactExprRow {
+function normHex(color: string) {
+  const s = String(color || "").trim().toLowerCase();
+  return s.startsWith("#") ? s : `#${s}`;
+}
+
+function defaultGradientForIndex(index: number) {
+  return EXPR_GRADIENTS[index % EXPR_GRADIENTS.length]!;
+}
+
+function paletteIndexForPair(color: string, color2: string) {
+  const c = normHex(color);
+  const c2 = normHex(color2);
+  for (let i = 0; i < EXPR_GRADIENTS.length; i++) {
+    const grad = EXPR_GRADIENTS[i]!;
+    if (normHex(grad.color) === c && normHex(grad.color2) === c2) return i;
+  }
+  return null;
+}
+
+function hasCustomGradStops(item: ExprItem) {
+  if (!item.colors?.length) return false;
+  if (item.colors.length > 2) return true;
+  return item.colors.some(
+    (c, i) => normHex(c) !== normHex(i === 0 ? item.color : item.color2),
+  );
+}
+
+function compactAnimFields(row: CompactExprRow, item: ExprItem) {
+  if (!item.sliderAnimating) return;
+  row.a = 1;
+  row.mn = item.sliderMin;
+  row.mx = item.sliderMax;
+  row.sp = item.sliderSpeed;
+  if (item.sliderAnimMode !== "pingpong") row.am = item.sliderAnimMode;
+  if (Number.isFinite(item.sliderPhase)) row.ph = item.sliderPhase;
+}
+
+function compactColorFields(row: CompactExprRow, item: ExprItem, index: number) {
+  if (hasCustomGradStops(item)) {
+    row.cs = item.colors.map((c) => normHex(c));
+    return;
+  }
+
+  const defaultGrad = defaultGradientForIndex(index);
+  const matchesDefault =
+    normHex(item.color) === normHex(defaultGrad.color) &&
+    normHex(item.color2) === normHex(defaultGrad.color2);
+  if (matchesDefault) return;
+
+  const paletteIdx = paletteIndexForPair(item.color, item.color2);
+  if (paletteIdx != null) {
+    row.g = paletteIdx;
+    return;
+  }
+
+  row.c = normHex(item.color);
+  row.c2 = normHex(item.color2);
+}
+
+export function compactExprRow(item: ExprItem, index: number): CompactExprRow {
   const row: CompactExprRow = { l: item.latex };
   if (item.enabled === false) row.e = 0;
-  if (item.color) row.c = item.color;
-  if (item.color2) row.c2 = item.color2;
-  if (
-    item.colors?.length &&
-    (item.colors.length > 2 ||
-      item.colors.some((c, i) => i < 2 && c !== (i === 0 ? item.color : item.color2)))
-  ) {
-    row.cs = item.colors.slice();
-  }
-  if (item.sliderAnimating) {
-    row.a = 1;
-    row.mn = item.sliderMin;
-    row.mx = item.sliderMax;
-    row.sp = item.sliderSpeed;
-    if (item.sliderAnimMode !== "pingpong") row.am = item.sliderAnimMode;
-    if (Number.isFinite(item.sliderPhase)) row.ph = item.sliderPhase;
-  }
+  compactColorFields(row, item, index);
+  compactAnimFields(row, item);
   if (item.autoParam) row.ap = 1;
   return row;
 }
 
 export function compactExprPayload(exprs: ExprItem[]): CompactExprRow[] {
-  return stripTrailingBlank(exprs).map(compactExprRow);
+  return stripTrailingBlank(exprs).map((item, index) => compactExprRow(item, index));
 }
 
-export function expandCompactRow(row: CompactExprRow): Partial<ExprItem> {
+export function expandCompactRow(row: CompactExprRow, index = 0): Partial<ExprItem> {
   if (typeof row.l !== "string") throw new Error("expression row missing latex");
   const out: Partial<ExprItem> = { latex: row.l };
   if (row.e === 0) out.enabled = false;
-  if (row.c) out.color = row.c;
-  if (row.c2) out.color2 = row.c2;
-  if (row.cs?.length) out.colors = row.cs.slice();
+  if (row.cs?.length) {
+    out.colors = row.cs.map((c) => normHex(c));
+    out.color = out.colors[0];
+    out.color2 = out.colors[out.colors.length - 1];
+  } else if (row.g != null) {
+    const grad = EXPR_GRADIENTS[row.g] ?? defaultGradientForIndex(index);
+    out.color = grad.color;
+    out.color2 = grad.color2;
+    out.colors = [grad.color, grad.color2];
+  } else if (row.c) {
+    out.color = normHex(row.c);
+    out.color2 = normHex(row.c2 ?? row.c);
+    out.colors = [out.color, out.color2];
+  }
   if (row.a === 1) {
     out.sliderAnimating = true;
     if (row.mn != null) out.sliderMin = row.mn;
@@ -95,6 +156,9 @@ export function validateCompactPayload(payload: unknown): CompactExprRow[] {
     }
     const r = row as CompactExprRow;
     if (typeof r.l !== "string") throw new Error(`expressions[${i}].l: expected string`);
+    if (r.g != null && (!Number.isInteger(r.g) || r.g < 0 || r.g >= EXPR_GRADIENTS.length)) {
+      throw new Error(`expressions[${i}].g: invalid palette index`);
+    }
     return r;
   });
 }
@@ -142,20 +206,21 @@ export async function decompressBytes(input: Uint8Array, flag: "" | "z" | "d"): 
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
-export function pickCompressMode(jsonByteLength: number, mode: CompressMode): Exclude<CompressMode, "auto"> {
-  if (mode !== "auto") return mode;
-  return jsonByteLength >= GZIP_THRESHOLD ? "gzip" : "none";
-}
-
 /** Build `e=1[zd]?.…` from JSON bytes and a compression mode. */
 export async function buildFragmentFromJsonBytes(
   jsonBytes: Uint8Array,
   mode: CompressMode = "auto",
   version = EXPR_SHARE_VERSION,
 ): Promise<string> {
-  const picked = pickCompressMode(jsonBytes.length, mode);
-  const body = picked === "none" ? jsonBytes : await compressBytes(jsonBytes, picked);
-  return `${FRAGMENT_PREFIX}${version}${compressFlag(picked)}.${bytesToBase64Url(body)}`;
+  if (mode !== "auto") {
+    const body = mode === "none" ? jsonBytes : await compressBytes(jsonBytes, mode);
+    return `${FRAGMENT_PREFIX}${version}${compressFlag(mode)}.${bytesToBase64Url(body)}`;
+  }
+
+  const rawFragment = `${FRAGMENT_PREFIX}${version}.${bytesToBase64Url(jsonBytes)}`;
+  const deflated = await compressBytes(jsonBytes, "deflate");
+  const deflateFragment = `${FRAGMENT_PREFIX}${version}d.${bytesToBase64Url(deflated)}`;
+  return deflateFragment.length < rawFragment.length ? deflateFragment : rawFragment;
 }
 
 export async function encodeCompactFragment(
@@ -185,5 +250,5 @@ export async function decodeCompactFragment(hash: string): Promise<Partial<ExprI
 
   const json = new TextDecoder().decode(jsonBytes);
   const payload = validateCompactPayload(JSON.parse(json));
-  return payload.map(expandCompactRow);
+  return payload.map((row, i) => expandCompactRow(row, i));
 }

@@ -7,10 +7,9 @@ import { PRESETS } from "../../src/math/fit.ts";
 import {
   bytesToBase64Url,
   compactExprPayload,
+  COMPRESS_THRESHOLD,
   EXPR_SHARE_VERSION,
   FRAGMENT_PREFIX,
-  GZIP_THRESHOLD,
-  pickCompressMode,
   type CompactExprRow,
 } from "../../src/app/persistence/exprShareCodec.ts";
 import type { ExprItem } from "../../src/types/models.ts";
@@ -37,22 +36,22 @@ export type BenchStrategy = {
 export const BENCH_STRATEGIES: BenchStrategy[] = [
   { id: "compact-raw", label: "compact/raw", lossy: false },
   { id: "compact-gzip", label: "compact/gzip", lossy: false },
-  { id: "compact-deflate", label: "compact/deflate", lossy: false },
-  { id: "compact-auto", label: "compact/auto", lossy: false, note: "production" },
+  { id: "compact-deflate", label: "compact/deflate", lossy: false, note: "production" },
+  { id: "compact-auto", label: "compact/auto", lossy: false, note: "alias" },
   { id: "latex-json-raw", label: "latex[]/raw", lossy: true, note: "latex only" },
   { id: "latex-json-gzip", label: "latex[]/gzip", lossy: true, note: "latex only" },
   { id: "latex-lines-gzip", label: "latex\\n/gzip", lossy: true, note: "latex only" },
   { id: "full-json-gzip", label: "full/gzip", lossy: false, note: "verbose JSON" },
 ];
 
-/** Upper bounds for production (compact-auto) fragment length — update when optimizing. */
+/** Upper bounds for production (compact-auto / deflate) fragment length — update when optimizing. */
 export const PRODUCTION_FRAGMENT_BASELINES: Record<string, number> = {
-  blob: 110,
-  sincos: 260,
-  lavalamp: 320,
-  swirl: 90,
-  "12-clouds": 380,
-  "20-long": 1450,
+  blob: 55,
+  sincos: 160,
+  lavalamp: 270,
+  swirl: 35,
+  "12-clouds": 180,
+  "20-long": 1390,
 };
 
 export function benchExpr(overrides: Partial<ExprItem> = {}): ExprItem {
@@ -179,8 +178,9 @@ function measureStrategy(
     case "compact-deflate":
       return encodeNodeFragment(jsonBytes, "deflate").length;
     case "compact-auto": {
-      const mode = pickCompressMode(jsonBytes.length, "auto");
-      return encodeNodeFragment(jsonBytes, mode).length;
+      const rawLen = encodeNodeFragment(jsonBytes, "none").length;
+      const deflateLen = encodeNodeFragment(jsonBytes, "deflate").length;
+      return Math.min(rawLen, deflateLen);
     }
     case "latex-json-raw": {
       const payload = JSON.stringify(latexOnlyPayload(exprs));
@@ -213,7 +213,9 @@ export function measureFixture(name: string, exprs: ExprItem[]): BenchRow {
     id: s.id,
     chars: strategies[s.id],
   }));
-  const productionCandidates = lossless.filter((s) => s.id !== "compact-deflate" && s.id !== "full-json-gzip");
+  const productionCandidates = lossless.filter(
+    (s) => s.id === "compact-raw" || s.id === "compact-auto" || s.id === "compact-deflate",
+  );
   const lossy = BENCH_STRATEGIES.filter((s) => s.lossy).map((s) => ({
     id: s.id,
     chars: strategies[s.id],
@@ -268,9 +270,9 @@ export function formatBenchmarkTable(rows: BenchRow[]): string {
 
   lines.push("");
   lines.push(`origin: ${SAMPLE_ORIGIN}`);
-  lines.push(`gzip threshold (compact-auto): ${GZIP_THRESHOLD} json bytes`);
-  lines.push("gap = production fragment chars minus shortest raw/gzip/auto strategy");
-  lines.push("deflate column shows potential savings if deflate encoding is added");
+  lines.push(`compress threshold (compact-auto): ${COMPRESS_THRESHOLD} json bytes`);
+  lines.push("gap = production fragment chars minus shortest raw/deflate/auto strategy");
+  lines.push("production auto mode uses deflate (d); legacy gzip (z) still decodes");
   return lines.join("\n");
 }
 
@@ -282,12 +284,13 @@ export function formatOptimizationHints(rows: BenchRow[]): string {
         `  ${row.fixture}: production could save ${row.productionGap} chars with ${row.bestProduction.id} (${row.strategies["compact-auto"]} → ${row.bestProduction.chars})`,
       );
     }
-    if (row.deflateSavings > 0) {
+    const prod = row.strategies["compact-auto"];
+    const gzip = row.strategies["compact-gzip"];
+    if (gzip > prod) {
       hints.push(
-        `  ${row.fixture}: deflate would save ${row.deflateSavings} chars vs production (${row.strategies["compact-deflate"]} vs ${row.strategies["compact-auto"]})`,
+        `  ${row.fixture}: deflate saves ${gzip - prod} chars vs gzip (${prod} vs ${gzip})`,
       );
     }
-    const prod = row.strategies["compact-auto"];
     const lossy = row.bestLossy.chars;
     if (lossy + 20 < prod) {
       hints.push(
@@ -295,6 +298,6 @@ export function formatOptimizationHints(rows: BenchRow[]): string {
       );
     }
   }
-  if (hints.length === 1) hints.push("  production already matches best raw/gzip/auto strategy on all fixtures");
+  if (hints.length === 1) hints.push("  production already matches best raw/deflate/auto strategy on all fixtures");
   return hints.join("\n");
 }

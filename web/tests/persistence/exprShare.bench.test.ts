@@ -49,8 +49,10 @@ export async function run() {
           const bench = rows.find((r) => r.fixture === name)!;
           const raw = await encodeCompactFragment(exprs, "none");
           const gzip = await encodeCompactFragment(exprs, "gzip");
+          const deflate = await encodeCompactFragment(exprs, "deflate");
           assert(raw.length === bench.strategies["compact-raw"], `${name} raw`);
           assert(gzip.length === bench.strategies["compact-gzip"], `${name} gzip`);
+          assert(deflate.length === bench.strategies["compact-deflate"], `${name} deflate`);
         }
       },
     },
@@ -97,7 +99,7 @@ export async function run() {
           const prod = row.strategies["compact-auto"];
           assert(
             prod <= row.bestProduction.chars + 1,
-            `${row.fixture}: production (${prod}) worse than best raw/gzip/auto (${row.bestProduction.chars})`,
+            `${row.fixture}: production (${prod}) worse than best raw/deflate/auto (${row.bestProduction.chars})`,
           );
         }
       },

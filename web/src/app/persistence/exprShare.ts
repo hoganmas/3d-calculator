@@ -10,13 +10,14 @@ import {
 
 export {
   EXPR_SHARE_VERSION,
+  COMPRESS_THRESHOLD,
   GZIP_THRESHOLD,
   compactExprPayload,
   type CompactExprRow,
   type CompressMode,
 } from "./exprShareCodec.js";
 
-/** Encode expression rows to a fragment body (`e=1…` / `e=1z…`). */
+/** Encode expression rows to a fragment body (`e=1…` / `e=1d…` / legacy `e=1z…`). */
 export async function encodeExpressionsFragment(exprs: ExprItem[]): Promise<string> {
   return encodeCompactFragment(exprs, "auto");
 }
