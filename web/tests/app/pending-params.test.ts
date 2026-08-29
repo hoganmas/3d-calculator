@@ -4,6 +4,8 @@ import {
   collectPendingParamsForExpr,
   createParamRows,
   formatPendingParamLabel,
+  formatPendingParamLabelPlain,
+  formatPendingParamNamesLatex,
   pendingParamErrorMessage,
 } from "../../src/app/pendingParams.ts";
 import { compileAllExprs } from "../../src/app/compile.ts";
@@ -84,6 +86,12 @@ export async function run() {
         assert(formatPendingParamLabel(["a"]) === "a", "single");
         assert(formatPendingParamLabel(["a", "b", "c"]) === "a, b, c", "triple");
         assert(formatPendingParamLabel(["a", "b", "c", "d"]) === "a, b +2", "many");
+        assert(formatPendingParamLabel(["alpha"]) === "\\alpha", "greek latex");
+        assert(formatPendingParamLabelPlain(["alpha"]) === "α", "greek plain");
+        assert(
+          formatPendingParamNamesLatex(["alpha", "beta"]) === "\\alpha,\\ \\beta",
+          "greek list latex",
+        );
       },
     },
     {

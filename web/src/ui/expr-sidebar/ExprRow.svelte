@@ -33,10 +33,13 @@ import {
   } from "./helpers.ts";
   import { openGradientEditor } from "./popovers.ts";
   import ParamRail from "./ParamRail.svelte";
+  import { convertLatexToMarkup } from "mathlive";
   import {
   collectPendingParamsForExpr,
   createParamRows,
-  formatPendingParamLabel,
+  formatPendingParamLabelPlain,
+  formatPendingParamNamesLatex,
+  formatPendingParamOverflow,
   pendingParamErrorMessage,
 } from "../../app/pendingParams.js";
 
@@ -90,7 +93,14 @@ import {
     void paramTick;
     return collectPendingParamsForExpr(item);
   });
-  const pendingParamLabel = $derived(formatPendingParamLabel(pendingParams));
+  const pendingParamLabelPlain = $derived(formatPendingParamLabelPlain(pendingParams));
+  const pendingParamNamesLatex = $derived(formatPendingParamNamesLatex(pendingParams));
+  const pendingParamOverflow = $derived(formatPendingParamOverflow(pendingParams));
+  const pendingParamNamesMarkup = $derived(
+    pendingParamNamesLatex
+      ? convertLatexToMarkup(pendingParamNamesLatex, { defaultMode: "textstyle" })
+      : "",
+  );
   const pendingErr = $derived(pendingParamErrorMessage(pendingParams));
   const rowError = $derived(warn ?? paramErr ?? pendingErr);
   const isParamDef = $derived(isParameterRow(item.latex || ""));
@@ -319,12 +329,15 @@ import {
         type="button"
         class="expr-pending-params"
         title={pendingErr ?? undefined}
-        aria-label={`Create parameter rows for ${pendingParamLabel}. Press Tab.`}
+        aria-label={`Create parameter rows for ${pendingParamLabelPlain}. Press Tab.`}
         onclick={onPendingParamsClick}
       >
         <span class="expr-pending-params-copy">
           Create {pendingParams.length === 1 ? "parameter" : "parameters"}
-          <strong class="expr-pending-params-names">{pendingParamLabel}</strong>
+          <strong class="expr-pending-params-names">
+            <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+            {@html pendingParamNamesMarkup}{#if pendingParamOverflow}<span class="expr-pending-params-overflow"> +{pendingParamOverflow}</span>{/if}
+          </strong>
         </span>
         <kbd class="expr-pending-params-tab">Tab</kbd>
       </button>

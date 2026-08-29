@@ -9,7 +9,11 @@ import {
   resolveExprRole,
   insertExprAt,
 } from "../model/expressions.js";
-import { formatParamLatexValue } from "../math/fit.js";
+import {
+  formatParamDefLatex,
+  paramCeIdToLatexSymbol,
+  paramCeIdToPlainSymbol,
+} from "../math/paramSymbols.js";
 import { SymbolRegistry } from "../model/symbols.js";
 import type { ClassifiedExpr, ExprItem } from "../types/models.js";
 import { state } from "./state.js";
@@ -117,16 +121,40 @@ export function collectPendingParamsForExpr(item: ExprItem): string[] {
   return [...pending].sort();
 }
 
-export function formatPendingParamLabel(names: string[]): string {
+function formatPendingParamLabelWith(
+  names: string[],
+  fmt: (name: string) => string,
+): string {
   if (!names.length) return "";
-  if (names.length === 1) return names[0]!;
-  if (names.length <= 3) return names.join(", ");
-  return `${names.slice(0, 2).join(", ")} +${names.length - 2}`;
+  if (names.length === 1) return fmt(names[0]!);
+  if (names.length <= 3) return names.map(fmt).join(", ");
+  return `${names.slice(0, 2).map(fmt).join(", ")} +${names.length - 2}`;
+}
+
+/** LaTeX label for rendered math in the pending-params button. */
+export function formatPendingParamLabel(names: string[]): string {
+  return formatPendingParamLabelWith(names, paramCeIdToLatexSymbol);
+}
+
+/** Plain-text label for tooltips and screen readers. */
+export function formatPendingParamLabelPlain(names: string[]): string {
+  return formatPendingParamLabelWith(names, paramCeIdToPlainSymbol);
+}
+
+/** LaTeX for the symbol list only (excludes overflow suffix). */
+export function formatPendingParamNamesLatex(names: string[]): string {
+  if (!names.length) return "";
+  const shown = names.length <= 3 ? names : names.slice(0, 2);
+  return shown.map(paramCeIdToLatexSymbol).join(",\\ ");
+}
+
+export function formatPendingParamOverflow(names: string[]): number {
+  return names.length > 3 ? names.length - 2 : 0;
 }
 
 export function pendingParamErrorMessage(names: string[]): string | null {
   if (!names.length) return null;
-  const label = formatPendingParamLabel(names);
+  const label = formatPendingParamLabelPlain(names);
   const noun = names.length === 1 ? "parameter" : "parameters";
   return `Undefined ${noun}: ${label}. Press Tab or click below to create.`;
 }
@@ -139,7 +167,7 @@ export function ensureParamExprRows(names: string[]) {
     const seed = state.pendingParamSeed[name] ?? {};
     const value = Number.isFinite(seed.value) ? seed.value! : 1;
     insertExprAt(listExpressions().length, {
-      latex: `${name}=${formatParamLatexValue(value)}`,
+      latex: formatParamDefLatex(name, value),
       sliderMin: seed.min,
       sliderMax: seed.max,
       sliderSpeed: seed.speed,

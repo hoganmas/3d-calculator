@@ -602,11 +602,21 @@
         min-width: 0;
       }
       .expr-pending-params-names {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 0.15em;
         margin-left: 0.35em;
         font-family: var(--mono, ui-monospace, monospace);
         font-weight: 700;
         color: var(--err);
         text-shadow: 0 0 6px color-mix(in srgb, var(--pending-glow) 35%, transparent);
+      }
+      .expr-pending-params-names .ML__latex {
+        font-size: 1.05em;
+        color: var(--err);
+      }
+      .expr-pending-params-overflow {
+        font-family: var(--mono, ui-monospace, monospace);
       }
       .expr-pending-params-tab {
         flex: 0 0 auto;
