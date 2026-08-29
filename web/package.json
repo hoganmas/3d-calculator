@@ -14,7 +14,9 @@
     "test:flow": "tsx tests/run.mjs flow",
     "test:cloud": "tsx tests/run.mjs cloud",
     "test:isosurface": "tsx tests/run.mjs isosurface",
-    "test:integration": "tsx tests/integration/webmcp.test.mjs"
+    "test:integration": "tsx tests/integration/webmcp.test.mjs",
+    "test:coverage": "c8 tsx tests/run.mjs",
+    "test:coverage:flow": "c8 tsx tests/run.mjs flow"
   },
   "dependencies": {
     "@cortex-js/compute-engine": "^0.119.0",
@@ -27,6 +29,7 @@
     "@sveltejs/vite-plugin-svelte": "^5.1.1",
     "@types/three": "^0.185.4",
     "@webgpu/types": "^0.1.72",
+    "c8": "^10.1.3",
     "playwright": "^1.49.0",
     "svelte": "^5.56.10",
     "tsx": "^4.23.0",
