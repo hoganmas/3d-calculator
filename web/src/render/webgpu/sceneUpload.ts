@@ -6,6 +6,7 @@ import { flowPresenceSlice } from "../../math/fitVector.js";
 import { DEFAULT_FLOW_GRID_M, ensureFlowDyeBuffers, ensureFlowIbfvPipeline, destroyFlowDyeBuffers } from "./flowIbfv.js";
 import { destroyFlowParticleBuffers, ensureFlowParticleBuffers, ensureFlowParticlesPipeline } from "./flowParticles.js";
 import { gridMFromDens, isTearDebugEnabled, tearLog } from "../../app/tearDebug.js";
+import { resampleVolumeGrid } from "../../math/volumeGrid.js";
 
 const MAX_FLOW_LAYERS = 4;
 
@@ -106,22 +107,23 @@ export function uploadSceneVolumes(scene: SceneUploadPayload | null): SceneUploa
   const putVol = (src: Float32Array | undefined, ctx?: { layerId?: string; slot?: number; field?: string }) => {
     if (!gpu.scenePacked) return;
     if (src && src.length) {
-      if (src.length >= volN) {
-        gpu.scenePacked.set(src.subarray(0, volN), off);
-      } else {
+      const srcM = Math.round(Math.cbrt(src.length));
+      let packed = src;
+      if (srcM !== M || src.length !== volN) {
         if (isTearDebugEnabled()) {
-          tearLog("upload-short", {
+          tearLog("upload-resample", {
             layerId: ctx?.layerId,
             slot: ctx?.slot,
             field: ctx?.field,
             sceneM: M,
+            srcM,
             srcLen: src.length,
             volN,
           });
         }
-        gpu.scenePacked.fill(0, off, off + volN);
-        gpu.scenePacked.set(src, off);
+        packed = resampleVolumeGrid(src, M);
       }
+      gpu.scenePacked.set(packed.subarray(0, volN), off);
     } else {
       gpu.scenePacked.fill(0, off, off + volN);
     }
@@ -169,7 +171,7 @@ export function uploadSceneVolumes(scene: SceneUploadPayload | null): SceneUploa
   gpu.flowLayerStart = flow.length > 0 ? scalarDens.length : -1;
   if (gpu.densPacked && gpu.scenePacked) {
     for (let i = 0; i < dens.length; i++) {
-      putVol(dens[i]!.dens);
+      putVol(dens[i]!.dens, { layerId: dens[i]!.id, field: "dens" });
     }
   }
   gpu.flowVelBase = off;
@@ -261,27 +263,6 @@ export function patchConstraintKeyframeFrame(
   }
   const frameM = gridMFromDens(frame.dens);
   const volN = gpu.sceneM * gpu.sceneM * gpu.sceneM;
-  if (frameM > 0 && frameM !== gpu.sceneM) {
-    tearLog("patch-m-mismatch", {
-      layerId,
-      slot: k,
-      frameM,
-      gpuM: gpu.sceneM,
-      densLen: frame.dens?.length ?? 0,
-      volN,
-    });
-    return false;
-  }
-  if (frame.dens?.length && frame.dens.length < volN) {
-    tearLog("patch-short", {
-      layerId,
-      slot: k,
-      gpuM: gpu.sceneM,
-      densLen: frame.dens.length,
-      volN,
-    });
-    return false;
-  }
   const stride = c.frameStride || 4 * volN;
   const base = c.base + k * stride;
   if (base + stride > gpu.scenePacked.length) return false;
@@ -289,11 +270,24 @@ export function patchConstraintKeyframeFrame(
   const put = (src: Float32Array | undefined, slot: number) => {
     const off = base + slot * volN;
     if (src && src.length) {
-      gpu.scenePacked!.set(src.length >= volN ? src.subarray(0, volN) : src, off);
+      const srcM = Math.round(Math.cbrt(src.length));
+      const packed =
+        srcM === gpu.sceneM && src.length === volN ? src : resampleVolumeGrid(src, gpu.sceneM);
+      gpu.scenePacked!.set(packed.subarray(0, volN), off);
     } else {
       gpu.scenePacked!.fill(0, off, off + volN);
     }
   };
+  if (frameM > 0 && frameM !== gpu.sceneM) {
+    tearLog("patch-resample", {
+      layerId,
+      slot: k,
+      frameM,
+      gpuM: gpu.sceneM,
+      densLen: frame.dens?.length ?? 0,
+      volN,
+    });
+  }
   put(frame.dens, 0);
   put(frame.gx, 1);
   put(frame.gy, 2);
