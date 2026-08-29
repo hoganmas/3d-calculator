@@ -13,7 +13,7 @@ function sampleDoc(revision = 1): LaplacianDocument {
     revision,
     savedAt: "2026-01-01T00:00:00.000Z",
     meta: { preset: "sincos" },
-    expressions: [{ latex: "\\sin(x)+\\cos(y)", enabled: true, role: "auto" }],
+    expressions: [{ latex: "\\sin(x)+\\cos(y)", enabled: true }],
     params: { a: { value: 1, min: 0, max: 2, animating: false } },
     render: {
       deg: 20,

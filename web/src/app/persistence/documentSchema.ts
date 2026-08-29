@@ -82,9 +82,6 @@ function validateExprItem(v: unknown, path: string) {
   if (v.enabled != null && typeof v.enabled !== "boolean") {
     throw new Error(`${path}.enabled: expected boolean`);
   }
-  if (v.role != null && typeof v.role !== "string") {
-    throw new Error(`${path}.role: expected string`);
-  }
   if (v.id != null && typeof v.id !== "string") throw new Error(`${path}.id: expected string`);
 }
 

@@ -353,7 +353,7 @@ function looksLikeVectorFieldSyntax(raw: string): boolean {
   return false;
 }
 
-/** Quick check for auto role inference. */
+/** Quick check for vector-field LaTeX inference. */
 export function isVectorFieldLatex(raw: string, registry?: SymbolRegistry): boolean {
   const src = normalizeVectorLatex(String(raw ?? "").trim());
   if (parseGradDotMatch(src)) return false;
@@ -373,7 +373,7 @@ export function classifyVectorExpr(raw: string): ClassifiedVectorExpr {
   if (!src) throw new Error("Empty vector expression");
 
   if (parseTupleDotMatch(src) || parseGradDotMatch(src)) {
-    throw new Error("Dot product is a scalar field — use cloud or isosurface role");
+    throw new Error("Dot product is a scalar field — use scalar expression syntax");
   }
 
   const crossMatch = parseTupleCrossMatch(src);

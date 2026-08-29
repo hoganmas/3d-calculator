@@ -1,7 +1,7 @@
 /**
  * Low-level expression fragment codec — shared by production encode/decode and benchmarks.
  */
-import type { AnimMode, ExprItem, ExprRole } from "../../types/models.js";
+import type { AnimMode, ExprItem } from "../../types/models.js";
 
 export const EXPR_SHARE_VERSION = 1;
 export const FRAGMENT_PREFIX = "e=";
@@ -11,7 +11,6 @@ export const MAX_JSON_BYTES = 64_000;
 
 export type CompactExprRow = {
   l: string;
-  r?: ExprRole;
   e?: 0;
   c?: string;
   c2?: string;
@@ -39,13 +38,8 @@ export function stripTrailingBlank(exprs: ExprItem[]): ExprItem[] {
   return copy;
 }
 
-function isDefaultRole(role: ExprRole | undefined) {
-  return !role || role === "auto";
-}
-
 export function compactExprRow(item: ExprItem): CompactExprRow {
   const row: CompactExprRow = { l: item.latex };
-  if (!isDefaultRole(item.role)) row.r = item.role;
   if (item.enabled === false) row.e = 0;
   if (item.color) row.c = item.color;
   if (item.color2) row.c2 = item.color2;
@@ -75,7 +69,6 @@ export function compactExprPayload(exprs: ExprItem[]): CompactExprRow[] {
 export function expandCompactRow(row: CompactExprRow): Partial<ExprItem> {
   if (typeof row.l !== "string") throw new Error("expression row missing latex");
   const out: Partial<ExprItem> = { latex: row.l };
-  if (row.r) out.role = row.r;
   if (row.e === 0) out.enabled = false;
   if (row.c) out.color = row.c;
   if (row.c2) out.color2 = row.c2;

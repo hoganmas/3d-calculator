@@ -15,7 +15,6 @@ function sampleExpr(overrides: Partial<ExprItem> = {}): ExprItem {
     color: "#ff4500",
     color2: "#ffec00",
     colors: ["#ff4500", "#ffec00"],
-    role: "auto",
     enabled: true,
     sliderMin: -10,
     sliderMax: 10,
@@ -42,7 +41,6 @@ export async function run() {
         const decoded = await decodeExpressionsFragment(fragment);
         assert(decoded != null, "decoded");
         assert(decoded![0]?.latex === sampleExpr().latex, "latex");
-        assert(decoded![0]?.role === undefined || decoded![0]?.role === "auto", "default role omitted");
       },
     },
     {
@@ -81,25 +79,23 @@ export async function run() {
           sampleExpr({
             id: `e${i + 1}`,
             latex: String.raw`\exp(-${i}((x-a)^2+(y-b)^2+(z-${i})^2))`,
-            role: i % 2 === 0 ? "cloud" : "isosurface",
           }),
         );
         const fragment = await encodeExpressionsFragment(exprs);
         assert(fragment.startsWith(`e=${EXPR_SHARE_VERSION}z.`), "uses gzip encoding");
         const decoded = await decodeExpressionsFragment(fragment);
         assert(decoded?.length === 8, "row count");
-        assert(decoded![1]?.role === "isosurface", "role preserved");
+        assert(decoded![1]?.latex.includes("(x-a)"), "latex preserved");
       },
     },
     {
       name: "decodes manually gzipped fragment",
       fn: async () => {
-        const payload = [{ l: "x^2+y^2+z^2=1", r: "isosurface" as const }];
+        const payload = [{ l: "x^2+y^2+z^2=1" }];
         const gz = gzipSync(JSON.stringify(payload));
         const fragment = `e=${EXPR_SHARE_VERSION}z.${bytesToBase64Url(gz)}`;
         const decoded = await decodeExpressionsFragment(fragment);
         assert(decoded?.[0]?.latex === payload[0]!.l, "latex");
-        assert(decoded?.[0]?.role === "isosurface", "role");
       },
     },
     {

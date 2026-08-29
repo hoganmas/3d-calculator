@@ -42,7 +42,7 @@ export async function run() {
           { id: "e2", latex: String.raw`T=x^2+y^2`, enabled: true },
           { id: "e3", latex: String.raw`f(x)=\sin(x)`, enabled: true },
           { id: "e4", latex: "T", enabled: true },
-          { id: "e5", latex: String.raw`(-y,x,0)`, enabled: true, role: "flow" },
+          { id: "e5", latex: String.raw`(-y,x,0)`, enabled: true },
         ]);
         const result = compileAllExprs({ rebuildUi: false });
         assert(result.layers.length >= 2, `expected layers, got ${result.layers.length}`);
@@ -78,14 +78,13 @@ export async function run() {
       },
     },
     {
-      name: "compileAllExprs: invalid flow field warns",
+      name: "compileAllExprs: scalar field compiles as cloud",
       fn: () => {
         resetScene();
-        setExpressions([{ id: "e1", latex: "x^2", enabled: true, role: "flow" }]);
-        compileAllExprs({ rebuildUi: false });
-        const warn = getExprWarning("e1");
-        assert(!!warn, "expected flow compile warning");
-        assert(warn!.toLowerCase().includes("flow") || warn!.toLowerCase().includes("tuple"), warn!);
+        setExpressions([{ id: "e1", latex: "x^2", enabled: true }]);
+        const result = compileAllExprs({ rebuildUi: false });
+        assert(result.layers.length === 1, "one cloud layer");
+        assert(result.layers[0]?.role === "cloud", "cloud layer");
       },
     },
     {
@@ -94,7 +93,7 @@ export async function run() {
         resetScene();
         setExpressions([
           { id: "e1", latex: String.raw`f(x,y,z)=(-y,x,0)`, enabled: false },
-          { id: "e2", latex: String.raw`\del \times f`, enabled: true, role: "flow" },
+          { id: "e2", latex: String.raw`\del \times f`, enabled: true },
         ]);
         const result = compileAllExprs({ rebuildUi: false });
         assert(result.layers.length >= 1, "curl layer compiles");
@@ -253,7 +252,7 @@ export async function run() {
       fn: () => {
         resetScene();
         const latex = String.raw`\nabla\left(r\right)\cdot\nabla\left(r\right)`;
-        setExpressions([{ id: "e1", latex, enabled: true, role: "auto" }]);
+        setExpressions([{ id: "e1", latex, enabled: true }]);
         const result = compileAllExprs({ rebuildUi: false });
         assert(result.layers.length === 1, "one layer");
         assert(result.layers[0]?.role === "cloud", "cloud role");

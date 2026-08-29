@@ -62,7 +62,6 @@ export function benchExpr(overrides: Partial<ExprItem> = {}): ExprItem {
     color: "#ff4500",
     color2: "#ffec00",
     colors: ["#ff4500", "#ffec00"],
-    role: "auto",
     enabled: true,
     sliderMin: -10,
     sliderMax: 10,
@@ -80,7 +79,6 @@ function fullSerializeRow(item: ExprItem) {
     id: item.id,
     latex: item.latex,
     enabled: item.enabled,
-    role: item.role,
     color: item.color,
     color2: item.color2,
     colors: item.colors?.slice(),
@@ -121,7 +119,7 @@ export function benchFixtures(): { name: string; exprs: ExprItem[] }[] {
     const rows = preset.expressions?.length
       ? preset.expressions
       : preset.latex
-        ? [{ latex: preset.latex, role: preset.role }]
+        ? [{ latex: preset.latex }]
         : [];
     return buildFixture(name, rows);
   };
@@ -135,14 +133,12 @@ export function benchFixtures(): { name: string; exprs: ExprItem[] }[] {
       "12-clouds",
       Array.from({ length: 12 }, (_, i) => ({
         latex: String.raw`\exp(-${i}((x-a)^2+(y-b)^2+(z-${i})^2))`,
-        role: (i % 2 === 0 ? "cloud" : "isosurface") as ExprItem["role"],
       })),
     ),
     buildFixture(
       "20-long",
       Array.from({ length: 20 }, (_, i) => ({
         latex: LONG_LATEX.replace(/t/g, String(i)),
-        role: "cloud" as const,
         color: "#ff4500",
         color2: "#ffec00",
         sliderAnimating: i % 3 === 0,

@@ -8,7 +8,6 @@ import {
   updateExpr,
   insertExprAt,
   removeExpr,
-  normalizeExprRole,
 } from "../model/expressions.js";
 import {
   listParamNames,
@@ -249,7 +248,7 @@ function tools(): ToolDef[] {
     },
     {
       name: "laplacian_list_expressions",
-      description: "List all expression rows with id, latex, enabled, role, warnings.",
+      description: "List all expression rows with id, latex, enabled, warnings.",
       readOnly: true,
       inputSchema: { type: "object", properties: {} },
       execute: async () => ok({ expressions: listExpressions().map(serializeExpr) }),
@@ -279,7 +278,6 @@ function tools(): ToolDef[] {
           id: { type: "string", description: "Expression row id" },
           latex: { type: "string" },
           enabled: { type: "boolean" },
-          role: { type: "string", enum: ["auto", "cloud", "isosurface", "flow", "density", "constraint"] },
           color: { type: "string", description: "Gradient start hex e.g. #ff4500" },
           color2: { type: "string", description: "Gradient end hex e.g. #ffec00" },
         },
@@ -291,7 +289,6 @@ function tools(): ToolDef[] {
         const patch: Partial<ExprItem> = {};
         if (input.latex != null) patch.latex = String(input.latex);
         if (input.enabled != null) patch.enabled = Boolean(input.enabled);
-        if (input.role != null) patch.role = normalizeExprRole(String(input.role));
         if (input.color != null) patch.color = String(input.color);
         if (input.color2 != null) patch.color2 = String(input.color2);
         const row = updateExpr(id, patch);

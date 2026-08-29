@@ -56,7 +56,6 @@ function serializeExpression(item: ExprItem): Partial<ExprItem> {
     id: item.id,
     latex: item.latex,
     enabled: item.enabled,
-    role: item.role,
     color: item.color,
     color2: item.color2,
     colors: item.colors?.slice(),
