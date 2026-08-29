@@ -1,5 +1,6 @@
 import {
   advectFlowParticles,
+  beginFlowParticleGhost,
   buildFlowParticleDensityGrid,
   buildFlowParticleDensityGrids,
   FLOW_PARTICLE_DENSITY_GRID,
@@ -8,6 +9,7 @@ import {
   flowParticleSpeedMinMax,
   flowSpeedMinMax,
   flowSpeedPercentileMinMax,
+  isFlowParticleGhost,
   MAX_FLOW_TRAIL_STEPS,
   pickLowDensitySpawn,
   pushFlowTrailHist,
@@ -19,7 +21,6 @@ import {
   updateFlowTrailHead,
   sampleVelGridAt,
   seedFlowParticles,
-  seedFlowTrailHist,
   sortFlowParticlesByDepth,
 } from "../../src/math/fitVector.ts";
 import { assert } from "../helpers/assert.ts";
@@ -119,7 +120,7 @@ export async function run() {
       },
     },
     {
-      name: "expired particle respawn collapses trail history",
+      name: "expired particle preserves trail during ghost fade",
       fn: () => {
         const M = 4;
         const n = M * M * M;
@@ -148,8 +149,50 @@ export async function run() {
           ageMax: 1,
           frameIdx: 0,
         }, trailHist, trailSteps);
-        assert(Math.abs(trailHist[5]! - trailHist[0]!) < 1e-5, "slot 1 matches respawn x");
-        assert(Math.abs(trailHist[10]! - trailHist[0]!) < 1e-5, "slot 2 matches respawn x");
+        assert(isFlowParticleGhost(posAge, 0), "entered ghost fade");
+        assert(Math.abs(trailHist[5]! - 9) < 1e-5, "trail history preserved on death");
+        assert(posAge[4]! < -0.5, "ghost countdown active");
+      },
+    },
+    {
+      name: "ghost fade push completes with respawn",
+      fn: () => {
+        const M = 4;
+        const n = M * M * M;
+        const fx = new Float32Array(n).fill(1);
+        const fy = new Float32Array(n).fill(0);
+        const fz = new Float32Array(n).fill(0);
+        const layers = [{ fx, fy, fz }];
+        const posAge = new Float32Array(5);
+        posAge[3] = 5;
+        const layerIds = new Uint32Array([0]);
+        const trailSteps = 2;
+        const trailHist = new Float32Array(MAX_FLOW_TRAIL_STEPS * FLOW_PARTICLE_STRIDE);
+        beginFlowParticleGhost(posAge, 0, trailSteps);
+        const pushCtx = {
+          layerIds,
+          layers,
+          M,
+          half: 1,
+          gridSpacing: 0.5,
+          gridPoints: false,
+          frameIdx: 0,
+        };
+        pushFlowTrailHist(posAge, trailHist, trailSteps, 1, pushCtx);
+        assert(isFlowParticleGhost(posAge, 0), "still fading after first push");
+        pushFlowTrailHist(posAge, trailHist, trailSteps, 1, pushCtx);
+        assert(!isFlowParticleGhost(posAge, 0), "respawned after fade");
+        assert(posAge[3]! < 0.5, "fresh age after respawn");
+      },
+    },
+    {
+      name: "resetFlowTrailHistSlot backfills one step along velocity",
+      fn: () => {
+        const trailHist = new Float32Array(MAX_FLOW_TRAIL_STEPS * FLOW_PARTICLE_STRIDE);
+        resetFlowTrailHistSlot(trailHist, 3, 0, 0, 0, 0, 0, 2, [1, 0, 0], 0.5);
+        assert(Math.abs(trailHist[0]!) < 1e-6, "head at spawn");
+        assert(Math.abs(trailHist[5]! + 0.5) < 1e-6, "slot 1 one step behind flow");
+        assert(Math.abs(trailHist[10]! + 0.5) < 1e-6, "older slots duplicate slot 1");
       },
     },
     {

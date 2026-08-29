@@ -410,7 +410,17 @@ export function tickFlowParticles(
     updateFlowTrailHead(posAge, trailHist, gpu.flowParticleCount);
     trailPushCounter++;
     if (trailPushCounter >= TRAIL_PUSH_INTERVAL) {
-      pushFlowTrailHist(posAge, trailHist, steps, gpu.flowParticleCount);
+      pushFlowTrailHist(posAge, trailHist, steps, gpu.flowParticleCount, {
+        layerIds,
+        layers,
+        M: gpu.sceneM,
+        half: gpu.flowHalf,
+        gridSpacing: state.flowNoiseScale,
+        gridPoints: state.flowGridPoints,
+        frameIdx: flowParticleFrameIdx,
+        density: densityGrids,
+        densityRes: FLOW_PARTICLE_DENSITY_GRID,
+      });
       trailPushCounter = 0;
     }
   }

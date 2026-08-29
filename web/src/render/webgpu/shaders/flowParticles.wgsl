@@ -91,12 +91,13 @@ fn ribbonU(slot: u32) -> f32 {
 }
 
 fn ribbonWidthEnvelope(u: f32) -> f32 {
+  // Bulge along the trail body; the leading cap on segment 0 supplies the rounded head.
   return sin(3.14159265 * clamp(u, 0.0, 1.0));
 }
 
 fn ribbonAlphaEnvelope(u: f32) -> f32 {
   let width = ribbonWidthEnvelope(u);
-  // Fade opacity toward the oldest end (u→1); keep newest end visible via width envelope only.
+  // Fade opacity toward the oldest end (u→1).
   let tailFade = 1.0 - smoothstep(0.62, 1.0, u);
   return width * tailFade;
 }
@@ -168,7 +169,8 @@ fn vsMain(
   let pNew = trailPosAge(particleIdx, slotNew);
   let pOld = trailPosAge(particleIdx, slotOld);
   let segLen = length(pNew.xyz - pOld.xyz);
-  if (segLen < 1e-5 || segLen > u.maxSegLen) { return o; }
+  if (segLen > u.maxSegLen) { return o; }
+  if (segLen < 1e-5 && slotNew != 0u) { return o; }
 
   let corner = SEG_QUAD[vi % 6u];
   let tAlong = corner.x;
@@ -176,15 +178,30 @@ fn vsMain(
 
   let uNew = ribbonU(slotNew);
   let uOld = ribbonU(slotOld);
-  let ribbonPos = mix(uNew, uOld, tAlong);
+  var ribbonPos = mix(uNew, uOld, tAlong);
 
   let wNew = ribbonWidthEnvelope(uNew);
   let wOld = ribbonWidthEnvelope(uOld);
-  let widthMix = mix(wNew, wOld, tAlong);
+  var widthMix = mix(wNew, wOld, tAlong);
 
-  let world = mix(pNew.xyz, pOld.xyz, tAlong);
-  let tangent = trailTangent(pNew.xyz, pOld.xyz);
-  if (length(tangent) < 1e-6) { return o; }
+  var world = mix(pNew.xyz, pOld.xyz, tAlong);
+  var tangent = trailTangent(pNew.xyz, pOld.xyz);
+  if (length(tangent) < 1e-6) {
+    if (slotNew != 0u) { return o; }
+    tangent = normalize(vec3f(u.ro - pNew.xyz));
+  }
+
+  // Rounded leading cap: extend slightly forward of the head along motion.
+  if (slotNew == 0u) {
+    let capFrac = 0.22;
+    if (tAlong < capFrac) {
+      let capT = tAlong / capFrac;
+      let capLen = max(segLen * 0.45, u.half * 0.004);
+      world = pNew.xyz - tangent * capLen * (1.0 - capT);
+      widthMix = sin(1.5707963 * capT) * max(wNew, 0.35);
+      ribbonPos = capT * uNew;
+    }
+  }
 
   let side = ribbonSide(tangent, world);
   let halfW = ribbonHalfWidthWorld(world, widthMix);
