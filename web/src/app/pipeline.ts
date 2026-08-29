@@ -59,16 +59,7 @@ import {
   syncExprCompileState,
   refreshMetricsDump,
 } from "./hud.js";
-import { markSplashSceneReady } from "./splash.js";
 import { scheduleAutosave } from "./persistence/autosave.js";
-
-let splashSceneReported = false;
-
-function reportSplashSceneReady() {
-  if (splashSceneReported) return;
-  splashSceneReported = true;
-  markSplashSceneReady();
-}
 
 interface CachedLayer {
   kind: "cloud" | "isosurface" | "flow";
@@ -481,11 +472,9 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
           state.clipDirty = true;
           syncClipCpuVolume();
         }
-        reportSplashSceneReady();
       });
     } else {
       syncClipPresentation();
-      reportSplashSceneReady();
     }
   } catch (e) {
     try {

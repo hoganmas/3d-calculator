@@ -71,11 +71,6 @@ state.exprListApi = mountExprList({
 });
 
 async function bootstrap() {
-  const restored = await restoreAutosave();
-  if (!restored) initCompile();
-  state.exprListApi?.render();
-  requestAnimationFrame(() => markSplashSidebarReady());
-
   wirePipelineDom();
   initPanelResize(resize);
   initPanelToggle(resize);
@@ -111,8 +106,16 @@ async function bootstrap() {
   void initWebMCP();
 
   if (els.hud) els.hud.textContent = "clip-grid · idct volume";
-  uploadFit();
+
+  // Begin rendering immediately; restore + fit run without blocking the loop.
   startRenderLoop();
+
+  const restored = await restoreAutosave();
+  if (!restored) initCompile();
+  state.exprListApi?.render();
+  requestAnimationFrame(() => markSplashSidebarReady());
+
+  uploadFit();
 }
 
 function initProjectActions() {

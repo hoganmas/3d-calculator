@@ -5,7 +5,6 @@ import { PRESETS } from "../../math/fit.js";
 import { listExpressions, setExpressions, getExprWarning } from "../../model/expressions.js";
 import { listParamNames, getParam } from "../../model/params.js";
 import type { AnimMode, ExprItem, ParamState, PresetParamSeed } from "../../types/models.js";
-import { compileAllExprs } from "../compile.js";
 import { els } from "../dom.js";
 import { syncExprCompileState } from "../hud.js";
 import { applyRenderHyperparams } from "../pipeline.js";
@@ -16,7 +15,6 @@ import {
   resetClipGpuProfile,
   setIsoInterpHermite,
 } from "../../render/webgpu/march.js";
-import { prepareClipGpuForDegree } from "../webglFallback.js";
 import {
   bumpDocumentRevision,
   getDocumentRevision,
@@ -229,7 +227,7 @@ function syncFlowDom(flow: LaplacianFlowSnapshot) {
   if (els.flowTrailWidth) els.flowTrailWidth.value = String(flow.flowTrailWidth);
 }
 
-/** Apply a validated document (mirrors applyPreset flow). Skips autosave while running. */
+/** Apply a validated document (DOM/state only; uploadFit performs refit). */
 export async function applyDocument(doc: LaplacianDocument) {
   persistSuspended = true;
   try {
@@ -248,17 +246,10 @@ export async function applyDocument(doc: LaplacianDocument) {
       controls.update();
       state.clipDirty = true;
     }
-    try {
-      compileAllExprs({ rebuildUi: false });
-    } catch {
-      /* uploadFit / syncExprCompileState will surface errors */
-    }
-    state.exprListApi?.render();
     const hermite = doc.render.isoInterp === "hermite";
     if (setIsoInterpHermite(hermite)) {
       resetClipGpuProfile();
       state.clipDirty = true;
-      await prepareClipGpuForDegree(state.fitDeg || doc.render.deg || 23);
     }
     syncExprCompileState();
   } finally {
