@@ -134,7 +134,7 @@ function frame(rafNow: number) {
   state.cpuMsSmooth = state.cpuMsSmooth * 0.85 + dt * 0.15;
 
   // Keyframe progressive fill runs after draw so animation stays smooth.
-  tickKeyframePump();
+  if (anyParamAnimating()) tickKeyframePump();
   syncKeyframeLoadBar();
 
   requestAnimationFrame(frame);

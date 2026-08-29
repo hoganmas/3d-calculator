@@ -12,6 +12,7 @@ import {
   getKeyframeProgress,
   getKeyframeMetrics,
   hasActiveKeyframeCaches,
+  hasLayerKeyframeCache,
   keyframeAnimParam,
   keyframesSplashReady,
   logKeyframeBake,
@@ -427,6 +428,47 @@ export async function run() {
         clearKeyframeCaches();
         assert(!hasActiveKeyframeCaches(), "cleared");
         assert(allKeyframesComplete(), "vacuously complete");
+      },
+    },
+    {
+      name: "ensureLayerKeyframes reuses complete cache on anim restart",
+      fn: async () => {
+        clearKeyframeCaches();
+        setupAnimParam("t", 0.5);
+        const opts = { ...keyframeOpts("layer-restart", "t"), deg: 8, K: 3 };
+        const first = ensureLayerKeyframes(opts);
+        assert(first.baked, "initial sync bake");
+        await waitForComplete(20000);
+        assert(hasLayerKeyframeCache("layer-restart"), "memory cache");
+        const restart = ensureLayerKeyframes({ ...opts, deferSyncBake: true });
+        assert(!restart.baked, "no rebake on restart");
+        assert(restart.complete, "still complete");
+        assert(restart.readyCount === 3, "ready count preserved");
+        const load = getKeyframeLoadSummary();
+        assert(load.complete, "load bar done after restart");
+      },
+    },
+    {
+      name: "sync: progressive step deg must not drop keyframe cache",
+      fn: async () => {
+        clearKeyframeCaches();
+        setupAnimParam("t", 0.5);
+        const opts = { ...keyframeOpts("layer-prog-pause", "t"), deg: 16, K: 3 };
+        ensureLayerKeyframes(opts);
+        await waitForComplete(20000);
+        // Mimic pause progressive dens ladder: sync with intermediate fitDeg-like values
+        // while UI target remains 16 (what pipeline must pass).
+        syncKeyframeCachesWithExpressions(
+          [{ id: "layer-prog-pause", latex: opts.latex, enabled: true }],
+          { deg: 16, half: opts.half },
+        );
+        assert(hasLayerKeyframeCache("layer-prog-pause"), "kept at ui deg");
+        // Wrong: syncing with progressive step deg would drop — document the contract.
+        syncKeyframeCachesWithExpressions(
+          [{ id: "layer-prog-pause", latex: opts.latex, enabled: true }],
+          { deg: 4, half: opts.half },
+        );
+        assert(!hasLayerKeyframeCache("layer-prog-pause"), "step deg drops (caller bug)");
       },
     },
     {

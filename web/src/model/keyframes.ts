@@ -247,7 +247,10 @@ export function clearKeyframeCaches() {
  * Keep keyframe caches across visibility toggles / structural refits.
  * - Deleted or latex/deg/half-changed expressions: discard (no bake until enabled + needed).
  * - Disabled but unchanged: park (pause async; reuse on re-enable).
- * - Enabled and unchanged: unpark and resume async fill if incomplete.
+ * - Enabled and unchanged: unpark (resume bake only when ensureLayerKeyframes runs).
+ *
+ * Callers must pass the **UI target** degree (not a progressive ladder step).
+ * Progressive dens refits after pause would otherwise wipe animation caches.
  */
 export function syncKeyframeCachesWithExpressions(
   items: ReadonlyArray<{ id: string; latex: string; enabled: boolean }>,
@@ -1063,6 +1066,59 @@ function keyframesFullyReady(cache: LayerKeyframeCache): boolean {
   return cache.readyCount >= cache.K;
 }
 
+/** True when an in-memory keyframe cache exists (not parked / disabled). */
+export function hasLayerKeyframeCache(layerId: string): boolean {
+  return caches.has(layerId) && !isParkedKeyframeLayer(layerId);
+}
+
+type EnsureKeyframesResult = {
+  frames: KeyframeFrame[];
+  rawFrames: (KeyframeFrame | null)[];
+  blend: { i0: number; i1: number; t: number };
+  cheb?: Float32Array;
+  fitRel?: number;
+  M: number;
+  baked: boolean;
+  gpuUploadNeeded: boolean;
+  readyCount: number;
+  complete: boolean;
+};
+
+function buildLayerKeyframeResult(
+  cache: LayerKeyframeCache,
+  value: number,
+  opts: EnsureKeyframesOpts,
+  baked: boolean,
+  syncPromoted: number[] = [],
+): EnsureKeyframesResult {
+  const displayBlend = displayBlendForValue(cache, value);
+  const frames =
+    cache.role === "isosurface"
+      ? materializeKeyframeFramesAtM(
+          cache.frames,
+          isoBlendSceneM(cache, displayBlend.i0, displayBlend.i1, displayBlend.t),
+        )
+      : materializeKeyframeFrames(cache.frames);
+  const a = frames[displayBlend.i0]!;
+  const b = frames[displayBlend.i1]!;
+  return {
+    frames,
+    rawFrames: cache.frames.slice(),
+    blend: displayBlend,
+    cheb: displayBlend.t < 0.5 ? a.cheb : b.cheb,
+    fitRel: displayBlend.t < 0.5 ? a.fitRel : b.fitRel,
+    M: gridMFromFrame(a),
+    baked,
+    gpuUploadNeeded:
+      opts.role === "isosurface" &&
+      syncPromoted.length > 0 &&
+      syncPromoted.includes(displayBlend.i0) &&
+      syncPromoted.includes(displayBlend.i1),
+    readyCount: cache.readyCount,
+    complete: keyframesFullyReady(cache),
+  };
+}
+
 function maybeLogBlendPairReady(
   cache: LayerKeyframeCache,
   layerId: string,
@@ -1379,6 +1435,10 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
       compiled: opts.compiled,
       vectorCompiled: opts.vectorCompiled,
     };
+    // Anim restart / replay: skip sync + async when expression unchanged and K slots ready.
+    if (keyframesFullyReady(cache)) {
+      return buildLayerKeyframeResult(cache, value, opts, false);
+    }
   }
 
   const blend = segmentForValue(cache, value);
@@ -1448,31 +1508,7 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
     scheduleAsyncFill(key, cache);
   }
 
-  const frames =
-    cache.role === "isosurface"
-      ? materializeKeyframeFramesAtM(
-          cache.frames,
-          isoBlendSceneM(cache, displayBlend.i0, displayBlend.i1, displayBlend.t),
-        )
-      : materializeKeyframeFrames(cache.frames);
-  const a = frames[displayBlend.i0];
-  const b = frames[displayBlend.i1];
-  return {
-    frames,
-    rawFrames: cache.frames.slice(),
-    blend: displayBlend,
-    cheb: displayBlend.t < 0.5 ? a.cheb : b.cheb,
-    fitRel: displayBlend.t < 0.5 ? a.fitRel : b.fitRel,
-    M: gridMFromFrame(a),
-    baked,
-    gpuUploadNeeded:
-      opts.role === "isosurface" &&
-      syncPromoted.length > 0 &&
-      syncPromoted.includes(displayBlend.i0) &&
-      syncPromoted.includes(displayBlend.i1),
-    readyCount: cache.readyCount,
-    complete: keyframesFullyReady(cache),
-  };
+  return buildLayerKeyframeResult(cache, value, opts, baked, syncPromoted);
 }
 
 /**

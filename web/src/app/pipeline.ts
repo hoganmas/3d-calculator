@@ -29,6 +29,7 @@ import {
   getKeyframeLayerRole,
   getIsoBlendSceneM,
   refreshIsoBlendDisplay,
+  hasLayerKeyframeCache,
 } from "../model/keyframes.js";
 import {
   getParamValues,
@@ -179,13 +180,18 @@ export function uploadFit(
     const { layers } = compileAllExprs({ rebuildUi: false });
     setExprCompileOk(true);
 
+    // Keyframe identity uses UI target deg — never progressive step deg (pause ladder
+    // would otherwise wipe animation caches on every intermediate fitDeg).
+    const syncKeyframeScene = () =>
+      syncKeyframeCachesWithExpressions(
+        listExpressions().map((e) => ({ id: e.id, latex: e.latex, enabled: e.enabled })),
+        { deg: uiDeg, half },
+      );
+
     // No visible / non-empty expressions → clear volume, draw nothing.
     // Park keyframe caches (don't wipe) so re-enabling can reuse them.
     if (!layers.length) {
-      syncKeyframeCachesWithExpressions(
-        listExpressions().map((e) => ({ id: e.id, latex: e.latex, enabled: e.enabled })),
-        { deg, half },
-      );
+      syncKeyframeScene();
       state.lastSceneBake = { cloudLayers: [], isosurfaceLayers: [], flowLayers: [], M: Math.max(2, deg + 1), dens: null };
       state.lastFitTiming = null;
       state.lastNCoeff = 0;
@@ -227,10 +233,7 @@ export function uploadFit(
     // Dirty layers with exactly one animating slider: GPU keyframe blend (iso) / CPU lerp (dens).
     // Structural refits (visibility, latex, …): park/drop keyframe caches instead of wiping all.
     const dirty = fromAnim ? collectAnimDirtyParams() : null;
-    syncKeyframeCachesWithExpressions(
-      listExpressions().map((e) => ({ id: e.id, latex: e.latex, enabled: e.enabled })),
-      { deg, half },
-    );
+    syncKeyframeScene();
     if (fromAnim) beginKeyframePass();
 
     const prevById = new Map<string, CachedLayer>();
@@ -338,6 +341,8 @@ export function uploadFit(
       if (kfParam && L.compiled && L.fn) {
         noteKeyframeLayer();
         keyframedCount++;
+        const memKf = hasLayerKeyframeCache(L.item.id);
+        const deferKf = fromAnim && (prevHasKf || memKf);
         if (L.role === "isosurface") {
           const sample = ensureLayerKeyframes({
             layerId: L.item.id,
@@ -349,10 +354,11 @@ export function uploadFit(
             baseParams,
             half,
             deg,
-            deferSyncBake: fromAnim && prevHasKf,
+            deferSyncBake: deferKf,
           });
           if (sample.baked) keyframeBaked = true;
-          if (sample.gpuUploadNeeded) isoGpuUploadNeeded = true;
+          // Pause replaces scene with dens-only; replay must re-upload GPU keyframe slots.
+          if (sample.gpuUploadNeeded || (memKf && !prevHasKf)) isoGpuUploadNeeded = true;
           M = sample.M || M;
           isosurfaceLayers.push({
             id: L.item.id,
@@ -380,7 +386,7 @@ export function uploadFit(
             baseParams,
             half,
             deg,
-            deferSyncBake: fromAnim && prevHasKf,
+            deferSyncBake: deferKf,
           });
           if (sample.baked) keyframeBaked = true;
           M = sample.M || M;
@@ -410,6 +416,8 @@ export function uploadFit(
         if (kfParam && L.vectorCompiled && L.vectorFn) {
           noteKeyframeLayer();
           keyframedCount++;
+          const memKf = hasLayerKeyframeCache(L.item.id);
+          const deferKf = fromAnim && (prevHasKf || memKf);
           const sample = sampleFlowLayerKeyframes({
             layerId: L.item.id,
             latex: L.item.latex,
@@ -419,7 +427,7 @@ export function uploadFit(
             baseParams,
             half,
             deg,
-            deferSyncBake: fromAnim && prevHasKf,
+            deferSyncBake: deferKf,
           });
           if (sample.baked) keyframeBaked = true;
           M = sample.M || M;
@@ -596,9 +604,17 @@ export function uploadFit(
     else if (!fromAnim && opts.progressiveFinal) state.worldCheb = null;
     state.fitDeg = deg;
     // GPU iso keyframes during anim: blend uniforms every frame; full upload only on
-    // sync coarse pair, async promote, or M change (tickGpuKeyframeBlends / progress handler).
+    // sync coarse pair, async promote, M change, or dens→keyframe rebind after pause.
+    const prevM = lastBake?.M ?? 0;
+    const sceneHasIsoKf = isosurfaceLayers.some((c) => (c.keyframes?.length ?? 0) > 1);
+    const gpuHasIsoKf = gpu.sceneConstraints.some((c) => (c.K ?? 1) > 1);
     const needUpload =
-      fittedCount > 0 || densKeyframedCpu || !fromAnim || isoGpuUploadNeeded;
+      fittedCount > 0 ||
+      densKeyframedCpu ||
+      !fromAnim ||
+      isoGpuUploadNeeded ||
+      (fromAnim && sceneHasIsoKf && !gpuHasIsoKf) ||
+      (fromAnim && keyframedCount > 0 && prevM > 0 && prevM !== M);
     tearLog("uploadFit", {
       fromAnim,
       progressive,
@@ -611,11 +627,22 @@ export function uploadFit(
       keyframeBaked,
       isoGpuUploadNeeded,
       densKeyframedCpu,
+      sceneHasIsoKf,
+      gpuHasIsoKf,
       sceneM: M,
+      prevM,
       gpuM: gpu.sceneM,
     });
     if (needUpload) {
-      bakeChebVolume();
+      if (fromAnim && isClipBakeGpuReady() && M !== gpu.sceneM) {
+        void prepareClipGpuForDegree(Math.max(1, M - 1)).then(() => {
+          if (state.lastSceneBake) bakeChebVolume();
+          state.clipDirty = true;
+          syncClipPresentation();
+        });
+      } else {
+        bakeChebVolume();
+      }
     } else if (keyframedCount > 0) {
       setConstraintKeyframeBlends(
         isosurfaceLayers
