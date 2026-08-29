@@ -28,6 +28,14 @@ import {
   updateExprSilent,
 } from "../../src/model/expressions.ts";
 import { SymbolRegistry } from "../../src/model/symbols.ts";
+import "../helpers/setup-dom.ts";
+import { layerRgbFromItem } from "../../src/app/compile.ts";
+import {
+  clearExpressions,
+  listExpressions,
+  setExpressions,
+  updateExpr,
+} from "../../src/model/expressions.ts";
 import { assert, assertNear } from "../helpers/assert.ts";
 import { runSuite } from "../helpers/runner.ts";
 
@@ -120,17 +128,58 @@ export async function run() {
       },
     },
     {
-      name: "updateExpr and updateExprSilent patch colors",
+      name: "updateExpr color/color2 overrides stale colors array",
+      fn: () => {
+        clearExpressions();
+        setExpressions([
+          {
+            id: "e1",
+            latex: "x",
+            colors: ["#ff4500", "#ffec00"],
+            color: "#ff4500",
+            color2: "#ffec00",
+          },
+        ]);
+        updateExpr("e1", { color: "#ff0000", color2: "#0000ff" });
+        const row = listExpressions().find((e) => e.id === "e1");
+        assert(row?.color === "#ff0000", "primary updated");
+        assert(row?.color2 === "#0000ff", "secondary updated");
+        assert(row?.colors?.[0] === "#ff0000", "colors array synced");
+        updateExprSilent("e1", { color: "#111111", color2: "#222222" });
+        const silent = listExpressions().find((e) => e.id === "e1");
+        assert(silent?.color === "#111111", "silent primary");
+        assert(silent?.color2 === "#222222", "silent secondary");
+      },
+    },
+    {
+      name: "updateExpr color patch flows to layerRgbFromItem",
+      fn: () => {
+        clearExpressions();
+        setExpressions([
+          {
+            id: "e1",
+            latex: "x^2",
+            colors: ["#ff4500", "#ffec00"],
+            color: "#ff4500",
+            color2: "#ffec00",
+          },
+        ]);
+        updateExpr("e1", { color: "#ff0000", color2: "#0000ff" });
+        const rgb = layerRgbFromItem(listExpressions().find((e) => e.id === "e1")!);
+        assertNear(rgb.color[0]!, 1, 1e-6, "compile rgb r");
+        assertNear(rgb.color2[2]!, 1, 1e-6, "compile rgb b");
+      },
+    },
+    {
+      name: "updateExpr colors array still works for gradient editor",
       fn: () => {
         clearExpressions();
         setExpressions([{ id: "e1", latex: "x" }]);
-        updateExpr("e1", { colors: ["#ff0000", "#0000ff"] });
+        updateExpr("e1", { colors: ["#aa0000", "#00aa00", "#0000aa"] });
         const row = listExpressions().find((e) => e.id === "e1");
-        assert(row?.color === "#ff0000", "color set");
-        updateExprSilent("e1", { colors: ["#111111", "#222222"] });
-        const silent = listExpressions().find((e) => e.id === "e1");
-        assert(silent?.colors?.length === 2, "silent colors");
-        assert(silent?.color === "#111111", "silent primary");
+        assert(row?.colors?.length === 3, "multi-stop");
+        assert(row?.color === "#aa0000", "first stop");
+        assert(row?.color2 === "#0000aa", "last stop");
       },
     },
     {

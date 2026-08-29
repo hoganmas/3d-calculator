@@ -36,17 +36,17 @@ Scoped to `src/math/**`, `src/model/**`, `src/app/compile.ts`, `src/app/exprErro
 
 | File | Lines | Notes |
 |------|------:|-------|
-| **Overall** | **~95%** | 22 suites, ~250 cases |
-| `math/calcOps.ts` | 93% | `flow/calcOps.test.ts` — div powers, partial JSON, regex fallback |
-| `math/idct.ts` | 100% | Spectral operators + y/z definite integrals |
-| `math/fit.ts` | 94% | Scalar compile/fit/integrals, monomial L2 |
-| `math/fitVector.ts` | 93% | Particles, trail hist, vector fit L2 |
+| **Overall** | **~90%** | 22 suites, ~210 cases |
+| `math/calcOps.ts` | 87% | Direct unit tests in `flow/calcOps.test.ts` |
+| `math/idct.ts` | 96% | Spectral operators in `math/idct-operators.test.ts` |
+| `math/fit.ts` | 91% | Scalar compile/fit/integrals |
+| `math/fitVector.ts` | 87% | Vector compile/fit/flow sim |
 | `app/compile.ts` | 93% | Integration via `app/compile.test.ts` |
-| `app/exprErrors.ts` | 100% | Format, collect, log |
-| `model/symbols.ts` | 100% | Registry |
-| `model/expressions.ts` | 97% | `model/expressions.test.ts` + compile tests |
-| `model/params.ts` | 98% | `model/params-animation.test.ts` + `symbols/params.test.ts` |
-| `model/keyframes.ts` | 98% | Sync/async bake, lerp, metrics |
+| `app/exprErrors.ts` | 84% | Format + collect |
+| `model/symbols.ts` | 97% | Registry |
+| `model/expressions.ts` | 86% | `model/expressions.test.ts` + compile tests |
+| `model/params.ts` | 95% | `model/params-animation.test.ts` + `symbols/params.test.ts` |
+| `model/keyframes.ts` | 96% | `model/keyframes.test.ts` (sync bake, async fill, lerp) |
 
 ### Out of scope (expected low/zero coverage)
 

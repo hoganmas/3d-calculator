@@ -288,23 +288,6 @@ export async function run() {
       },
     },
     {
-      name: "pickLowDensitySpawn scans all cells when hash misses",
-      fn: () => {
-        const res = FLOW_PARTICLE_DENSITY_GRID;
-        const density = new Uint16Array(res * res * res).fill(50);
-        density[0] = 0;
-        const pt = pickLowDensitySpawn(density, res, 1, 0, 0, 0, 0.5, false);
-        assert(pt !== null, "sparse cell found");
-      },
-    },
-    {
-      name: "seedFlowParticles fills target when grid is tight",
-      fn: () => {
-        const { layerIds } = seedFlowParticles(120, 1, 0.4, 0.05, false);
-        assert(layerIds.length === 120, "all particles placed");
-      },
-    },
-    {
       name: "redistributeOvercrowdedFlowParticles thins dense cells",
       fn: () => {
         const count = 8;

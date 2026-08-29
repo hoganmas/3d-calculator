@@ -14,7 +14,7 @@
     "test:flow": "tsx tests/run.mjs flow",
     "test:cloud": "tsx tests/run.mjs cloud",
     "test:isosurface": "tsx tests/run.mjs isosurface",
-    "test:integration": "tsx tests/integration/webmcp.test.mjs",
+    "test:integration": "tsx tests/integration/run.mjs",
     "test:coverage": "c8 tsx tests/run.mjs",
     "test:coverage:flow": "c8 tsx tests/run.mjs flow"
   },
