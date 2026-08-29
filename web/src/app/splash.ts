@@ -1,0 +1,84 @@
+import { setErr } from "./hud.js";
+
+const SPLASH_TIMEOUT_MS = 15_000;
+
+let splashEl: HTMLElement | null = null;
+let timeoutId = 0;
+let dismissed = false;
+let sidebarReady = false;
+let sceneReady = false;
+let frameReady = false;
+
+function prefersReducedMotion(): boolean {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function removeSplash() {
+  if (!splashEl?.isConnected) return;
+  splashEl.remove();
+  splashEl = null;
+}
+
+function dismissSplash() {
+  if (dismissed) return;
+  dismissed = true;
+  if (timeoutId) {
+    clearTimeout(timeoutId);
+    timeoutId = 0;
+  }
+
+  const root = document.documentElement;
+  delete root.dataset.booting;
+
+  if (!splashEl) return;
+  splashEl.setAttribute("aria-busy", "false");
+
+  if (prefersReducedMotion()) {
+    removeSplash();
+    return;
+  }
+
+  const onEnd = (ev: TransitionEvent) => {
+    if (ev.target !== splashEl || ev.propertyName !== "opacity") return;
+    splashEl?.removeEventListener("transitionend", onEnd);
+    removeSplash();
+  };
+  splashEl.addEventListener("transitionend", onEnd);
+  window.setTimeout(removeSplash, 500);
+}
+
+function tryDismiss() {
+  if (dismissed) return;
+  if (sidebarReady && sceneReady && frameReady) dismissSplash();
+}
+
+export function initSplash() {
+  splashEl = document.getElementById("splash");
+  timeoutId = window.setTimeout(() => {
+    if (!sceneReady) {
+      setErr("Startup took longer than expected — some features may still be loading.");
+    }
+    sidebarReady = true;
+    sceneReady = true;
+    frameReady = true;
+    dismissSplash();
+  }, SPLASH_TIMEOUT_MS);
+}
+
+export function markSplashSidebarReady() {
+  if (sidebarReady) return;
+  sidebarReady = true;
+  tryDismiss();
+}
+
+export function markSplashSceneReady() {
+  if (sceneReady) return;
+  sceneReady = true;
+  tryDismiss();
+}
+
+export function markSplashFrameReady() {
+  if (frameReady) return;
+  frameReady = true;
+  tryDismiss();
+}

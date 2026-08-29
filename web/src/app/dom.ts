@@ -47,6 +47,11 @@ export interface DomElements {
   flowParticleCount: HTMLInputElement | null;
   flowTrailSteps: HTMLInputElement | null;
   flowTrailWidth: HTMLInputElement | null;
+  downloadScene: HTMLButtonElement | null;
+  openScene: HTMLButtonElement | null;
+  shareScene: HTMLButtonElement | null;
+  sceneFileInput: HTMLInputElement | null;
+  autosaveStatus: HTMLElement | null;
 }
 
 export const els: DomElements = {
@@ -82,6 +87,11 @@ export const els: DomElements = {
   flowParticleCount: document.getElementById("flowParticleCount") as HTMLInputElement | null,
   flowTrailSteps: document.getElementById("flowTrailSteps") as HTMLInputElement | null,
   flowTrailWidth: document.getElementById("flowTrailWidth") as HTMLInputElement | null,
+  downloadScene: document.getElementById("downloadScene") as HTMLButtonElement | null,
+  openScene: document.getElementById("openScene") as HTMLButtonElement | null,
+  shareScene: document.getElementById("shareScene") as HTMLButtonElement | null,
+  sceneFileInput: document.getElementById("sceneFileInput") as HTMLInputElement | null,
+  autosaveStatus: document.getElementById("autosaveStatus"),
 };
 
 export function viewportSize() {

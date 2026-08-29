@@ -1062,6 +1062,27 @@
         text-transform: uppercase;
         letter-spacing: 0.04em;
       }
+      .project-section .project-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .project-section .project-actions button.secondary {
+        flex: 1 1 auto;
+        min-width: 5.5rem;
+      }
+      .autosave-status {
+        margin: 0;
+        font-size: 11px;
+        color: var(--muted);
+        letter-spacing: 0.02em;
+      }
+      .autosave-status[data-state="saving"] {
+        color: var(--text);
+      }
+      .autosave-status[data-state="dirty"] {
+        color: var(--accent, #c080ff);
+      }
       .settings-dialog label {
         display: flex;
         flex-direction: column;

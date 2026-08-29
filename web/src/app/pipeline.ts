@@ -59,6 +59,16 @@ import {
   syncExprCompileState,
   refreshMetricsDump,
 } from "./hud.js";
+import { markSplashSceneReady } from "./splash.js";
+import { scheduleAutosave } from "./persistence/autosave.js";
+
+let splashSceneReported = false;
+
+function reportSplashSceneReady() {
+  if (splashSceneReported) return;
+  splashSceneReported = true;
+  markSplashSceneReady();
+}
 
 interface CachedLayer {
   kind: "cloud" | "isosurface" | "flow";
@@ -471,9 +481,11 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
           state.clipDirty = true;
           syncClipCpuVolume();
         }
+        reportSplashSceneReady();
       });
     } else {
       syncClipPresentation();
+      reportSplashSceneReady();
     }
   } catch (e) {
     try {
@@ -527,15 +539,45 @@ export function initKeyframeHandler() {
   });
 }
 
+function autosave() {
+  scheduleAutosave();
+}
+
 export function wirePipelineDom() {
-  els.deg.addEventListener("input", () => scheduleUploadFit(200));
-  els.deg.addEventListener("change", () => scheduleUploadFit(0));
-  els.boxSize.addEventListener("input", () => scheduleUploadFit(200));
-  els.boxSize.addEventListener("change", () => scheduleUploadFit(0));
-  els.scale.addEventListener("input", applyRenderHyperparams);
-  els.scale.addEventListener("change", applyRenderHyperparams);
-  els.steps.addEventListener("input", applyRenderHyperparams);
-  els.steps.addEventListener("change", applyRenderHyperparams);
+  els.deg.addEventListener("input", () => {
+    scheduleUploadFit(200);
+    autosave();
+  });
+  els.deg.addEventListener("change", () => {
+    scheduleUploadFit(0);
+    autosave();
+  });
+  els.boxSize.addEventListener("input", () => {
+    scheduleUploadFit(200);
+    autosave();
+  });
+  els.boxSize.addEventListener("change", () => {
+    scheduleUploadFit(0);
+    autosave();
+  });
+  els.scale.addEventListener("input", () => {
+    applyRenderHyperparams();
+    autosave();
+  });
+  els.scale.addEventListener("change", () => {
+    applyRenderHyperparams();
+    autosave();
+  });
+  els.steps.addEventListener("input", () => {
+    applyRenderHyperparams();
+    autosave();
+  });
+  els.steps.addEventListener("change", () => {
+    applyRenderHyperparams();
+    autosave();
+  });
+  els.marchDownscale.addEventListener("input", autosave);
+  els.marchDownscale.addEventListener("change", autosave);
   els.isoInterp?.addEventListener("change", async () => {
     const hermite = els.isoInterp.value === "hermite";
     if (!setIsoInterpHermite(hermite)) return;
@@ -543,48 +585,61 @@ export function wirePipelineDom() {
     state.clipDirty = true;
     await prepareClipGpuForDegree(state.fitDeg || Number(els.deg.value) || 23);
     refreshMetricsDump();
+    autosave();
   });
   els.flowAlpha?.addEventListener("input", () => {
     state.flowAlpha = Math.max(0, Math.min(1, Number(els.flowAlpha!.value) || 0));
+    autosave();
   });
   els.flowVizMode?.addEventListener("change", () => {
     state.flowVizMode = els.flowVizMode!.value === "ibfv" ? "ibfv" : "particles";
+    autosave();
   });
   els.flowParticleCount?.addEventListener("change", () => {
     state.flowParticleCount = Math.max(100, Math.min(32000, Number(els.flowParticleCount!.value) || 1000));
     if (state.lastSceneBake?.flowLayers?.length) state.clipDirty = true;
+    autosave();
   });
   els.flowGridMode?.addEventListener("change", () => {
     state.flowGridPoints = els.flowGridMode!.value === "points";
     reseedFlowDyeBuffers();
     reseedFlowParticles();
+    autosave();
   });
   els.flowNoiseScale?.addEventListener("input", () => {
     state.flowNoiseScale = Math.max(0.05, Number(els.flowNoiseScale!.value) || 0);
     reseedFlowDyeBuffers();
     reseedFlowParticles();
+    autosave();
   });
   els.flowDt?.addEventListener("input", () => {
     state.flowDt = Math.max(0.001, Number(els.flowDt!.value) || 0);
+    autosave();
   });
   els.flowSpeed?.addEventListener("input", () => {
     state.flowSpeed = Math.max(0.05, Math.min(10, Number(els.flowSpeed!.value) || 0.1));
+    autosave();
   });
   els.flowTrailSteps?.addEventListener("change", () => {
     state.flowTrailSteps = Math.max(2, Math.min(32, Number(els.flowTrailSteps!.value) || 32));
     reseedFlowParticles();
+    autosave();
   });
   els.flowTrailWidth?.addEventListener("input", () => {
     state.flowTrailWidth = Math.max(1, Math.min(32, Number(els.flowTrailWidth!.value) || 10));
+    autosave();
   });
   els.flowVMax?.addEventListener("input", () => {
     state.flowVMax = Math.max(0, Number(els.flowVMax!.value) || 0);
+    autosave();
   });
   els.flowOpacity?.addEventListener("input", () => {
     state.flowOpacity = Math.max(0.01, Math.min(2, Number(els.flowOpacity!.value) || 0.5));
+    autosave();
   });
   els.flowAgeMax?.addEventListener("input", () => {
     state.flowAgeMax = Math.max(1, Math.min(120, Number(els.flowAgeMax!.value) || 30));
+    autosave();
   });
 }
 

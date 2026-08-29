@@ -1,6 +1,7 @@
 import {
   initClipBakeGpu,
   isClipBakeGpuReady,
+  isClipMarchReady,
   hasUploadedVolume,
   clearClipGpuFrame,
 } from "../render/webgpu/march.js";
@@ -33,6 +34,21 @@ import {
 import { uploadFit, tickGpuKeyframeBlends } from "./pipeline.js";
 import { hudText, refreshMetricsDump } from "./hud.js";
 import { syncClipPresentation } from "./presentation.js";
+import { markSplashFrameReady } from "./splash.js";
+
+let splashFrameReported = false;
+
+function reportSplashFrameReady() {
+  if (splashFrameReported) return;
+  if (!hasUploadedVolume()) return;
+  if (useGpuClipPath()) {
+    if (!isClipMarchReady()) return;
+  } else if (!state.worldCheb) {
+    return;
+  }
+  splashFrameReported = true;
+  markSplashFrameReady();
+}
 
 function frame(rafNow: number) {
   const t0 = performance.now();
@@ -113,6 +129,8 @@ function frame(rafNow: number) {
   if (!useGpuClipPath()) {
     labelRenderer.render(labelScene, camera);
   }
+
+  reportSplashFrameReady();
 
   const dt = performance.now() - t0;
   state.cpuMsSmooth = state.cpuMsSmooth * 0.85 + dt * 0.15;

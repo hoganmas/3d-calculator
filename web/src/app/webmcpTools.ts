@@ -5,7 +5,6 @@ import { PRESETS } from "../math/fit.js";
 import {
   listExpressions,
   getSelectedId,
-  getExprWarning,
   updateExpr,
   insertExprAt,
   removeExpr,
@@ -23,6 +22,7 @@ import {
 } from "../model/params.js";
 import type { AnimMode, ExprItem } from "../types/models.js";
 import { applyPreset } from "./compile.js";
+import { getRenderSettingsSnapshot, serializeExpr, serializeParam } from "./persistence/document.js";
 import { els } from "./dom.js";
 import { syncExprCompileState, buildMetricsReport, refreshMetricsDump } from "./hud.js";
 import {
@@ -52,49 +52,6 @@ export function ok(data: unknown): ToolResult {
 
 export function err(message: string): ToolResult {
   return { ok: false, error: message };
-}
-
-function serializeExpr(item: ExprItem) {
-  return {
-    id: item.id,
-    latex: item.latex,
-    enabled: item.enabled,
-    role: item.role,
-    color: item.color,
-    color2: item.color2,
-    autoParam: item.autoParam,
-    warning: getExprWarning(item.id) ?? null,
-  };
-}
-
-function serializeParam(name: string) {
-  const p = getParam(name);
-  if (!p) return null;
-  return {
-    name,
-    value: p.value,
-    min: p.min,
-    max: p.max,
-    speed: p.speed,
-    animating: p.animating,
-    animMode: p.animMode,
-    driven: p.driven,
-    latex: p.latex,
-    error: p.error,
-    exprId: p.exprId,
-  };
-}
-
-export function getRenderSettingsSnapshot() {
-  return {
-    deg: Number(els.deg.value),
-    scale: Number(els.scale.value),
-    steps: Number(els.steps.value),
-    boxSize: Number(els.boxSize.value),
-    marchDownscale: Number(els.marchDownscale.value),
-    isoInterp: els.isoInterp?.value ?? "trilinear",
-    preset: els.preset.value,
-  };
 }
 
 function refreshAfterStructuralChange(): boolean {

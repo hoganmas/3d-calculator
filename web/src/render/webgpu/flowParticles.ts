@@ -9,12 +9,13 @@ import {
   FLOW_TRAIL_SLOT_STRIDE,
   flowTrailBaseIndex,
   buildFlowParticleDensityGrid,
-  flowParticleSpeedMinMax,
-  flowSpeedPercentileMinMax,
   FLOW_PARTICLE_DENSITY_GRID,
+  flowTrailSpeedMax,
+  flowTrailSpeedStats,
   MAX_FLOW_TRAIL_STEPS,
   pushFlowTrailHist,
   redistributeOvercrowdedFlowParticles,
+  resolveFlowParticleColorRange,
   sampleVelGridAt,
   seedFlowParticles,
   seedFlowTrailHist,
@@ -86,6 +87,8 @@ export function ensureFlowParticleBuffers(layerCount: number, half: number): voi
   const posBytes = Math.max(256, Math.ceil((count * FLOW_PARTICLE_STRIDE * 4) / 256) * 256);
   const trailFloats = count * MAX_FLOW_TRAIL_STEPS * FLOW_TRAIL_SLOT_STRIDE;
   const trailBytes = Math.max(256, Math.ceil((trailFloats * 4) / 256) * 256);
+  gpu.flowLayerCount = layerCount;
+  gpu.flowHalf = half;
   const resize =
     !gpu.flowParticleBuf ||
     !gpu.flowParticleLayerBuf ||
@@ -123,13 +126,13 @@ export function ensureFlowParticleBuffers(layerCount: number, half: number): voi
     trailHist = new Float32Array(count * MAX_FLOW_TRAIL_STEPS * FLOW_TRAIL_SLOT_STRIDE);
     seedFlowTrailHist(posAge, trailHist, steps, count);
     sortScratch = new Uint32Array(count);
+    const layers = extractFlowLayers();
+    if (layers.length) refreshTrailSpeeds(layers, gpu.sceneM, half, count, steps);
     device.queue.writeBuffer(gpu.flowParticleBuf, 0, posAge);
     device.queue.writeBuffer(gpu.flowParticleLayerBuf, 0, layerIds);
     device.queue.writeBuffer(gpu.flowTrailBuf, 0, trailHist);
   }
 
-  gpu.flowLayerCount = layerCount;
-  gpu.flowHalf = half;
   flowParticleFrameIdx = 0;
   trailPushCounter = 0;
 }
@@ -152,6 +155,8 @@ export function reseedFlowParticles(): void {
     trailHist = new Float32Array(count * MAX_FLOW_TRAIL_STEPS * FLOW_TRAIL_SLOT_STRIDE);
   }
   seedFlowTrailHist(posAge, trailHist, steps, count);
+  const layers = extractFlowLayers();
+  if (layers.length) refreshTrailSpeeds(layers, gpu.sceneM, gpu.flowHalf, count, steps);
   device.queue.writeBuffer(gpu.flowParticleBuf, 0, posAge);
   device.queue.writeBuffer(gpu.flowParticleLayerBuf, 0, layerIds);
   if (gpu.flowTrailBuf) device.queue.writeBuffer(gpu.flowTrailBuf, 0, trailHist);
@@ -250,6 +255,9 @@ export function tickFlowParticles(
     flowParticleFrameIdx,
     trailHist,
     steps,
+    FLOW_PARTICLE_DENSITY_GRID,
+    layers,
+    gpu.sceneM,
   );
   refreshTrailSpeeds(layers, gpu.sceneM, gpu.flowHalf, gpu.flowParticleCount, steps);
   if (trailHist && gpu.flowTrailBuf) {
@@ -319,35 +327,129 @@ export async function ensureFlowParticlesPipeline(): Promise<boolean> {
   return true;
 }
 
-function flowSpeedRange(layers: FlowParticleLayerVel[]): [number, number] {
-  let vmin = Infinity;
-  let vmax = 0;
-  for (const { fx, fy, fz } of layers) {
-    const [lo, hi] = flowSpeedPercentileMinMax(fx, fy, fz);
-    if (lo < vmin) vmin = lo;
-    if (hi > vmax) vmax = hi;
-  }
-  if (!Number.isFinite(vmin) || vmax <= vmin) return [0, 1];
-  return [vmin, vmax];
+/** Throttled console diagnostics for particle speed → color2 mapping. */
+const FLOW_PARTICLE_COLOR_DEBUG = true;
+const FLOW_PARTICLE_COLOR_DEBUG_MS = 2000;
+let flowParticleColorDebugAt = 0;
+
+function rgbTripletEq(a: number[], b: number[], eps = 1e-4): boolean {
+  return Math.abs(a[0]! - b[0]!) < eps
+    && Math.abs(a[1]! - b[1]!) < eps
+    && Math.abs(a[2]! - b[2]!) < eps;
 }
 
-function resolveFlowSpeedRange(layers: FlowParticleLayerVel[]): [number, number] {
-  const live = posAge && gpu.flowParticleCount > 0
-    ? flowParticleSpeedMinMax(
-      posAge,
-      trailHist,
-      gpu.flowParticleCount,
-      trailSteps(),
-    )
-    : null;
-  if (live) {
-    let lo = live[0];
-    let hi = live[1];
-    const minSpan = Math.max(hi * 0.1, 1e-6);
-    if (hi - lo < minSpan) lo = Math.max(0, hi - minSpan);
-    return [lo, hi];
+function headSpeedStats(count: number): { min: number; max: number; sample0: number } | null {
+  if (!posAge || count <= 0) return null;
+  let vmin = Infinity;
+  let vmax = 0;
+  let any = false;
+  for (let i = 0; i < count; i++) {
+    const s = posAge[i * FLOW_PARTICLE_STRIDE + 4]!;
+    if (s <= 1e-8) continue;
+    any = true;
+    if (s < vmin) vmin = s;
+    if (s > vmax) vmax = s;
   }
-  return layers.length ? flowSpeedRange(layers) : [0, 1];
+  if (!any) return null;
+  return { min: vmin, max: vmax, sample0: posAge[4]! };
+}
+
+function logFlowParticleColorDebug(speedRange: [number, number]): void {
+  if (!FLOW_PARTICLE_COLOR_DEBUG || state.flowVizMode !== "particles") return;
+  const now = performance.now();
+  if (now - flowParticleColorDebugAt < FLOW_PARTICLE_COLOR_DEBUG_MS) return;
+  flowParticleColorDebugAt = now;
+
+  const steps = trailSteps();
+  const count = gpu.flowParticleCount;
+  const vRef = effectiveVMax();
+  const trailMax = trailHist && steps >= 2
+    ? flowTrailSpeedMax(trailHist, count, steps)
+    : null;
+  const trailStats = trailHist && steps >= 2
+    ? flowTrailSpeedStats(trailHist, count, steps)
+    : null;
+  const headStats = headSpeedStats(count);
+  const { col1, col2 } = flowLayerColorPair();
+  const flowIdx = layerIds?.[0] ?? 0;
+  const densLayer = gpu.flowLayerStart >= 0 ? gpu.flowLayerStart + flowIdx : flowIdx;
+  const gradStops = gpu.flowLayerStart >= 0 ? gpu.densGradStops[gpu.flowLayerStart] : null;
+  const flowVMax = speedRange[1];
+  const trailSample = (pIdx: number, slot: number) => {
+    if (!trailHist) return 0;
+    return trailHist[flowTrailBaseIndex(pIdx) + slot * FLOW_TRAIL_SLOT_STRIDE + 4]!;
+  };
+  const speedNorm = (spd: number) => Math.min(1, Math.max(0, spd / Math.max(flowVMax, 1e-6)));
+
+  const warnings: string[] = [];
+  if (rgbTripletEq(col1, col2)) {
+    warnings.push("col1 === col2 in densGradStops — no color2 to show");
+  }
+  if (!trailStats) {
+    warnings.push("all trail slot speeds are zero — shader speedNorm will be 0");
+  }
+  if (headStats && !trailStats) {
+    warnings.push("head speeds exist but trail speeds are zero (normalization/color mismatch)");
+  }
+  if (trailMax != null && flowVMax > trailMax * 1.01) {
+    warnings.push(`flowVMax (${flowVMax.toFixed(3)}) > trailMax (${trailMax.toFixed(3)}) — speedNorm compressed`);
+  }
+  if ((gradStops?.length ?? 0) < 2) {
+    warnings.push(`densGradStops has ${gradStops?.length ?? 0} stop(s) for flow layer`);
+  }
+
+  const snapshot = {
+    frame: flowParticleFrameIdx,
+    flowLayerStart: gpu.flowLayerStart,
+    densLayerIdx: densLayer,
+    flowIdxParticle0: flowIdx,
+    gradStopCount: gradStops?.length ?? 0,
+    colors: {
+      col1: [...col1],
+      col2: [...col2],
+      same: rgbTripletEq(col1, col2),
+      packedUniform: {
+        col1: [...col1],
+        col2: [...col2],
+      },
+    },
+    speeds: {
+      vRef,
+      trailMax,
+      head: headStats,
+      trail: trailStats,
+      sampleP0: {
+        head: posAge?.[4] ?? 0,
+        trailSlot0: trailSample(0, 0),
+        trailSlot1: trailSample(0, 1),
+      },
+    },
+    range: {
+      flowVMin: speedRange[0],
+      flowVMax: speedRange[1],
+    },
+    shaderEstimate: {
+      speedNormP0Slot0: speedNorm(trailSample(0, 0)),
+      speedNormP0Slot1: speedNorm(trailSample(0, 1)),
+      speedNormTrailMax: trailMax != null ? speedNorm(trailMax) : 0,
+    },
+    trailSteps: steps,
+    particleCount: count,
+    warnings,
+  };
+
+  (globalThis as typeof globalThis & { __flowParticleColorDebug?: unknown }).__flowParticleColorDebug = snapshot;
+  console.log("[flowParticles color]", snapshot);
+  if (warnings.length) console.warn("[flowParticles color]", warnings.join("; "));
+}
+
+function resolveFlowSpeedRange(): [number, number] {
+  return resolveFlowParticleColorRange(
+    trailHist,
+    gpu.flowParticleCount,
+    trailSteps(),
+    effectiveVMax(),
+  );
 }
 
 function refreshTrailSpeeds(
@@ -461,7 +563,6 @@ function recordRibbonDraw(
     layout: gpu.flowParticlesPipeline!.getBindGroupLayout(0),
     entries: [
       { binding: 0, resource: { buffer: gpu.flowParticlesParamBuf! } },
-      { binding: 1, resource: { buffer: gpu.volumeBuf! } },
       { binding: 2, resource: { buffer: gpu.flowParticleLayerBuf! } },
       { binding: 3, resource: { buffer: gpu.colorBuf! } },
       { binding: 4, resource: occlIsoView },
@@ -491,7 +592,7 @@ export function drawFlowParticlesPass(
 ): void {
   if (state.flowVizMode !== "particles") return;
   if (!gpu.flowParticlesPipeline || !gpu.flowParticlesParamBuf) return;
-  if (!gpu.flowParticleBuf || !gpu.flowParticleLayerBuf || !gpu.flowTrailBuf || !gpu.colorBuf || !gpu.volumeBuf) return;
+  if (!gpu.flowParticleBuf || !gpu.flowParticleLayerBuf || !gpu.flowTrailBuf || !gpu.colorBuf) return;
   if (gpu.flowParticleCount <= 0) return;
 
   const { device } = gpu;
@@ -512,8 +613,8 @@ export function drawFlowParticlesPass(
 
   const steps = trailSteps();
   const segCount = Math.max(1, steps - 1);
-  const layers = extractFlowLayers();
-  const speedRange = resolveFlowSpeedRange(layers);
+  const speedRange = resolveFlowSpeedRange();
+  logFlowParticleColorDebug(speedRange);
   recordRibbonDraw(
     device,
     sceneView,

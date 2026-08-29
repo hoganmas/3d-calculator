@@ -52,57 +52,11 @@ fn sampleGradStopsLayer(layer: u32, t: f32) -> vec3f {
   return mix(stops[i].xyz, stops[i + 1u].xyz, f);
 }
 
-fn chebIndex(xi: f32) -> f32 {
-  let x = clamp(xi, -1.0, 1.0);
-  return f32(u.gridM) / 3.141592653589793 * acos(x) - 0.5;
-}
-
-fn volAt(base: u32, ix: i32, iy: i32, iz: i32) -> f32 {
-  let M = i32(u.gridM);
-  let x = clamp(ix, 0, M - 1);
-  let y = clamp(iy, 0, M - 1);
-  let z = clamp(iz, 0, M - 1);
-  return volume[base + u32(x) + u32(y) * u.gridM + u32(z) * u.gridM * u.gridM];
-}
-
-fn sampleVelLayer(flowIdx: u32, p: vec3f) -> vec3f {
-  let half = u.half;
-  let xi = clamp(p / half, vec3f(-1.0), vec3f(1.0));
-  let M2 = u.gridM * u.gridM;
-  let volN = M2 * u.gridM;
-  let velBase = u32(u.flowVelBase) + flowIdx * volN * 3u;
-  var v = vec3f(0.0);
-  for (var c: u32 = 0u; c < 3u; c++) {
-    let compBase = velBase + c * volN;
-    let fx = chebIndex(xi.x);
-    let fy = chebIndex(xi.y);
-    let fz = chebIndex(xi.z);
-    let x0 = i32(floor(fx));
-    let y0 = i32(floor(fy));
-    let z0 = i32(floor(fz));
-    let tx = clamp(fx - f32(x0), 0.0, 1.0);
-    let ty = clamp(fy - f32(y0), 0.0, 1.0);
-    let tz = clamp(fz - f32(z0), 0.0, 1.0);
-    let c000 = volAt(compBase, x0, y0, z0);
-    let c100 = volAt(compBase, x0 + 1, y0, z0);
-    let c010 = volAt(compBase, x0, y0 + 1, z0);
-    let c110 = volAt(compBase, x0 + 1, y0 + 1, z0);
-    let c001 = volAt(compBase, x0, y0, z0 + 1);
-    let c101 = volAt(compBase, x0 + 1, y0, z0 + 1);
-    let c011 = volAt(compBase, x0, y0 + 1, z0 + 1);
-    let c111 = volAt(compBase, x0 + 1, y0 + 1, z0 + 1);
-    v[c] = mix(mix(mix(c000, c100, tx), mix(c010, c110, tx), ty),
-               mix(mix(c001, c101, tx), mix(c011, c111, tx), ty), tz);
-  }
-  return v;
-}
-
 fn speedColor(speed: f32, flowIdx: u32) -> vec3f {
   let densLayer = u32(max(u.flowLayerStart, 0.0)) + flowIdx;
   let col1 = sampleGradStopsLayer(densLayer, 0.0);
   let col2 = sampleGradStopsLayer(densLayer, 1.0);
-  let vRange = max(u.flowVMax - u.flowVMin, u.flowVMax * 0.08);
-  let speedNorm = clamp((speed - u.flowVMin) / vRange, 0.0, 1.0);
+  let speedNorm = clamp(speed / max(u.flowVMax, 1e-6), 0.0, 1.0);
   return mix(col1, col2, speedNorm);
 }
 

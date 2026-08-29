@@ -10,6 +10,7 @@ import {
   pickLowDensitySpawn,
   pushFlowTrailHist,
   redistributeOvercrowdedFlowParticles,
+  resolveFlowParticleColorRange,
   sampleVelGridAt,
   seedFlowParticles,
   seedFlowTrailHist,
@@ -184,6 +185,37 @@ export async function run() {
         const range = flowParticleSpeedMinMax(posAge, null, 2, 2);
         assert(range !== null, "uniform speeds still yield a range");
         assert(range![0]! < 2 && range![1]! >= 2, "range spans the shared speed");
+      },
+    },
+    {
+      name: "resolveFlowParticleColorRange uses vRef when trail speeds are zero",
+      fn: () => {
+        const posAge = new Float32Array([0, 0, 0, 0, 3]);
+        const trailHist = new Float32Array(MAX_FLOW_TRAIL_STEPS * 5);
+        const [lo, hi] = resolveFlowParticleColorRange(trailHist, 1, 2, 2);
+        assert(Math.abs(lo) < 1e-6, "flowVMin stays at zero");
+        assert(Math.abs(hi - 2) < 1e-6, "flowVMax falls back to vRef not head speed");
+        void posAge;
+      },
+    },
+    {
+      name: "resolveFlowParticleColorRange prefers live trail max over vRef",
+      fn: () => {
+        const trailHist = new Float32Array(MAX_FLOW_TRAIL_STEPS * 5);
+        trailHist[4] = 4;
+        const [lo, hi] = resolveFlowParticleColorRange(trailHist, 1, 2, 2);
+        assert(Math.abs(lo) < 1e-6, "flowVMin zero");
+        assert(Math.abs(hi - 4) < 1e-6, "flowVMax uses trail max");
+      },
+    },
+    {
+      name: "resolveFlowParticleColorRange ignores advection vRef when trails have speed",
+      fn: () => {
+        const trailHist = new Float32Array(MAX_FLOW_TRAIL_STEPS * 5);
+        trailHist[4] = 3.3;
+        const [lo, hi] = resolveFlowParticleColorRange(trailHist, 1, 2, 60);
+        assert(Math.abs(lo) < 1e-6, "flowVMin zero");
+        assert(Math.abs(hi - 3.3) < 1e-6, "flowVMax uses trail max not vMax clamp");
       },
     },
     {

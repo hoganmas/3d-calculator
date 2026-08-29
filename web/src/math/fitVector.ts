@@ -532,6 +532,89 @@ export function flowParticleSpeedMinMax(
   return [vmin, vmax];
 }
 
+/** Max |V| stored in trail history (same source the particle shader colors from). */
+export function flowTrailSpeedMax(
+  trailHist: Float32Array,
+  count: number,
+  trailSteps: number,
+): number | null {
+  let vmax = 0;
+  let samples = 0;
+  for (let i = 0; i < count; i++) {
+    const ho = flowTrailBaseIndex(i);
+    for (let j = 0; j < trailSteps; j++) {
+      const s = trailHist[ho + j * FLOW_TRAIL_SLOT_STRIDE + 4]!;
+      if (s <= 1e-8) continue;
+      samples++;
+      if (s > vmax) vmax = s;
+    }
+  }
+  if (samples === 0) return null;
+  return vmax;
+}
+
+/** Trail speed distribution (same buffer the shader reads for color). */
+export function flowTrailSpeedStats(
+  trailHist: Float32Array,
+  count: number,
+  trailSteps: number,
+): {
+  min: number;
+  max: number;
+  mean: number;
+  nonzero: number;
+  total: number;
+} | null {
+  let vmin = Infinity;
+  let vmax = 0;
+  let sum = 0;
+  let nonzero = 0;
+  let total = 0;
+  for (let i = 0; i < count; i++) {
+    const ho = flowTrailBaseIndex(i);
+    for (let j = 0; j < trailSteps; j++) {
+      total++;
+      const s = trailHist[ho + j * FLOW_TRAIL_SLOT_STRIDE + 4]!;
+      if (s <= 1e-8) continue;
+      nonzero++;
+      sum += s;
+      if (s < vmin) vmin = s;
+      if (s > vmax) vmax = s;
+    }
+  }
+  if (nonzero === 0) return null;
+  return { min: vmin, max: vmax, mean: sum / nonzero, nonzero, total };
+}
+
+/** Particle color range: flowVMin=0; flowVMax from live trail speeds, vRef only if trails are empty. */
+export function resolveFlowParticleColorRange(
+  trailHist: Float32Array | null,
+  count: number,
+  trailSteps: number,
+  vRef: number,
+): [min: number, max: number] {
+  const trailMax = trailHist && trailSteps >= 2
+    ? flowTrailSpeedMax(trailHist, count, trailSteps)
+    : null;
+  if (trailMax != null && trailMax > 1e-8) return [0, trailMax];
+  return [0, Math.max(vRef, 1e-6)];
+}
+
+function sampleFlowParticleSpeedAt(
+  layers: FlowParticleLayerVel[],
+  layer: number,
+  M: number,
+  half: number,
+  px: number,
+  py: number,
+  pz: number,
+): number {
+  const vel = layers[layer];
+  if (!vel) return 0;
+  const [vx, vy, vz] = sampleVelGridAt(vel.fx, vel.fy, vel.fz, M, half, px, py, pz);
+  return Math.hypot(vx, vy, vz);
+}
+
 /** CPU mirror: distance to nearest axis-aligned grid plane. */
 function ibfvGridLineDist(coord: number, spacing: number): number {
   const s = Math.max(spacing, 1e-4);
@@ -957,14 +1040,15 @@ function applyParticleSpawn(
   pz: number,
   trailHist: Float32Array | null | undefined,
   trailSteps: number,
+  speed = 0,
 ): void {
   const o = i * FLOW_PARTICLE_STRIDE;
   posAge[o] = px;
   posAge[o + 1] = py;
   posAge[o + 2] = pz;
   posAge[o + 3] = 0;
-  posAge[o + 4] = 0;
-  resetFlowTrailHistSlot(trailHist, trailSteps, i, px, py, pz, 0, 0);
+  posAge[o + 4] = speed;
+  resetFlowTrailHistSlot(trailHist, trailSteps, i, px, py, pz, 0, speed);
 }
 
 /** Move particles out of overcrowded cells into sparse regions. */
@@ -979,6 +1063,8 @@ export function redistributeOvercrowdedFlowParticles(
   trailHist: Float32Array | null,
   trailSteps: number,
   res = FLOW_PARTICLE_DENSITY_GRID,
+  layers: FlowParticleLayerVel[] | null = null,
+  gridM = 0,
 ): void {
   const density = buildFlowParticleDensityGrid(posAge, count, half, res);
   const cellCount = res * res * res;
@@ -993,7 +1079,10 @@ export function redistributeOvercrowdedFlowParticles(
       density, res, half, i, layer, frameIdx, gridSpacing, gridPoints,
     );
     if (!picked) continue;
-    applyParticleSpawn(posAge, i, picked[0], picked[1], picked[2], trailHist, trailSteps);
+    const speed = layers?.length && gridM > 0
+      ? sampleFlowParticleSpeedAt(layers, layer, gridM, half, picked[0], picked[1], picked[2])
+      : 0;
+    applyParticleSpawn(posAge, i, picked[0], picked[1], picked[2], trailHist, trailSteps, speed);
     density[ci] = Math.max(0, density[ci]! - 1) as number;
     const ni = flowParticleCellIndex(picked[0], picked[1], picked[2], half, res);
     if (density[ni]! < 65535) density[ni] = (density[ni]! + 1) as number;
@@ -1012,43 +1101,35 @@ function respawnParticle(
   trailSteps?: number,
   density?: Uint16Array | null,
   densityRes = FLOW_PARTICLE_DENSITY_GRID,
+  layers: FlowParticleLayerVel[] | null = null,
+  gridM = 0,
 ): void {
+  const spawnAt = (px: number, py: number, pz: number) => {
+    const speed = layers?.length && gridM > 0
+      ? sampleFlowParticleSpeedAt(layers, layer, gridM, half, px, py, pz)
+      : 0;
+    applyParticleSpawn(posAge, i, px, py, pz, trailHist, trailSteps ?? 0, speed);
+  };
   if (density) {
     const picked = pickLowDensitySpawn(
       density, densityRes, half, i, layer, frameIdx, gridSpacing, gridPoints,
     );
     if (picked) {
-      applyParticleSpawn(posAge, i, picked[0], picked[1], picked[2], trailHist, trailSteps ?? 0);
+      spawnAt(picked[0], picked[1], picked[2]);
       return;
     }
   }
-  const o = i * FLOW_PARTICLE_STRIDE;
   for (let t = 0; t < 24; t++) {
     const px = (hash01(i, t, frameIdx + layer) * 2 - 1) * half;
     const py = (hash01(i + 7, t, frameIdx) * 2 - 1) * half;
     const pz = (hash01(i + 13, t, frameIdx + 1) * 2 - 1) * half;
     const g = ibfvBackgroundGrid(px, py, pz, gridSpacing, gridPoints);
     if (g < 0.12 && t < 23) continue;
-    posAge[o] = px;
-    posAge[o + 1] = py;
-    posAge[o + 2] = pz;
-    posAge[o + 3] = 0;
-    posAge[o + 4] = 0;
-    resetFlowTrailHistSlot(trailHist, trailSteps ?? 0, i, px, py, pz, 0, 0);
+    spawnAt(px, py, pz);
     return;
   }
-  posAge[o + 3] = 0;
-  posAge[o + 4] = 0;
-  resetFlowTrailHistSlot(
-    trailHist,
-    trailSteps ?? 0,
-    i,
-    posAge[o]!,
-    posAge[o + 1]!,
-    posAge[o + 2]!,
-    0,
-    0,
-  );
+  const o = i * FLOW_PARTICLE_STRIDE;
+  spawnAt(posAge[o]!, posAge[o + 1]!, posAge[o + 2]!);
 }
 
 /** Fill all trail slots for one particle (e.g. on respawn). */
@@ -1170,7 +1251,10 @@ export function advectFlowParticles(
     const expired = age > ageMax;
     const stuck = speed <= 1e-5 && age > ageMax * 0.5;
     if (expired || stuck) {
-      respawnParticle(posAge, i, layer, half, gridSpacing, gridPoints, frameIdx, trailHist, trailSteps, density, densityRes);
+      respawnParticle(
+        posAge, i, layer, half, gridSpacing, gridPoints, frameIdx,
+        trailHist, trailSteps, density, densityRes, layers, M,
+      );
       continue;
     }
     px += cx * dt;
@@ -1178,7 +1262,10 @@ export function advectFlowParticles(
     pz += cz * dt;
     age += dt;
     if (alpha > 1e-6 && hash01(i, frameIdx, 919) < alpha) {
-      respawnParticle(posAge, i, layer, half, gridSpacing, gridPoints, frameIdx, trailHist, trailSteps, density, densityRes);
+      respawnParticle(
+        posAge, i, layer, half, gridSpacing, gridPoints, frameIdx,
+        trailHist, trailSteps, density, densityRes, layers, M,
+      );
       continue;
     }
     posAge[o] = px;

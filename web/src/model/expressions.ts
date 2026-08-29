@@ -21,6 +21,41 @@ export function normalizeExprRole(role: string | undefined): ExprRole {
 
 let nextId = 1;
 
+function parseExprIdNum(id: string): number | null {
+  const m = /^e(\d+)$/.exec(String(id || ""));
+  return m ? parseInt(m[1]!, 10) : null;
+}
+
+/** Keep auto-generated ids above every id already in the list. */
+function syncNextIdFromItems(extraIds: string[] = []) {
+  for (const item of items) {
+    const n = parseExprIdNum(item.id);
+    if (n != null) nextId = Math.max(nextId, n + 1);
+  }
+  for (const id of extraIds) {
+    const n = parseExprIdNum(id);
+    if (n != null) nextId = Math.max(nextId, n + 1);
+  }
+}
+
+/** Ensure ids are unique (e.g. after loading stale persistence). */
+function dedupeExprIds(rows: ExprItem[]): ExprItem[] {
+  const seen = new Set<string>();
+  const out: ExprItem[] = [];
+  for (const row of rows) {
+    if (!seen.has(row.id)) {
+      seen.add(row.id);
+      out.push(row);
+      continue;
+    }
+    let id = `e${nextId++}`;
+    while (seen.has(id)) id = `e${nextId++}`;
+    seen.add(id);
+    out.push({ ...row, id });
+  }
+  return out;
+}
+
 /** Max / min stops in a layer gradient. */
 export const MAX_GRAD_STOPS = 6;
 export const MIN_GRAD_STOPS = 2;
@@ -187,7 +222,12 @@ export function createExprItem(
     value?: number;
   } = {},
 ): ExprItem {
+  syncNextIdFromItems(init.id ? [init.id] : []);
   const id = init.id ?? `e${nextId++}`;
+  if (init.id) {
+    const n = parseExprIdNum(init.id);
+    if (n != null) nextId = Math.max(nextId, n + 1);
+  }
   let sliderMin: number = Number.isFinite(init.sliderMin)
     ? (init.sliderMin as number)
     : Number.isFinite(init.min)
@@ -249,12 +289,15 @@ export function selectExpr(id: string | null) {
  * @param {Partial<ExprItem>[]} list
  */
 export function setExpressions(list: Partial<ExprItem>[]) {
-  items = list.map((init, i) =>
-    createExprItem({
-      ...init,
-      color: init.color ?? colorForIndex(i),
-    }),
+  items = dedupeExprIds(
+    list.map((init, i) =>
+      createExprItem({
+        ...init,
+        color: init.color ?? colorForIndex(i),
+      }),
+    ),
   );
+  syncNextIdFromItems();
   selectedId = items[0]?.id ?? null;
   emit();
 }
