@@ -116,6 +116,19 @@ export function useGpuClipPath() {
   return isClipBakeGpuReady() && isClipMarchReady();
 }
 
+/** True when the first baked volume is visible (WebGPU march or WebGL fallback). */
+export function isVolumePresented() {
+  const bake = state.lastSceneBake;
+  if (!bake) return false;
+  const hasLayers =
+    (bake.cloudLayers?.length ?? 0) > 0 ||
+    (bake.isosurfaceLayers?.length ?? 0) > 0 ||
+    (bake.flowLayers?.length ?? 0) > 0;
+  if (!hasLayers) return true;
+  if (useGpuClipPath()) return hasUploadedVolume() && state.densSubmittedThisFrame;
+  return clipQuad.visible;
+}
+
 /** Lazy dens sum for the WebGL Beer texture (skipped on the GPU path). */
 export function ensureDensSumForWebGl() {
   if (!state.lastSceneBake) return null;

@@ -115,9 +115,8 @@ async function bootstrap() {
   if (!restored) initCompile();
   ensureParamAnimationFromExprs();
   state.exprListApi?.render();
-  requestAnimationFrame(() => markSplashSidebarReady());
-
   uploadFit({ fromAnim: anyParamAnimating() });
+  markSplashSidebarReady();
 }
 
 function initProjectActions() {

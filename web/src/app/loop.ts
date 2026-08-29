@@ -29,16 +29,18 @@ import {
   syncClipCpuVolume,
   drawClipGpuFrame,
   prepareClipGpuForDegree,
+  isVolumePresented,
 } from "./webglFallback.js";
 import { uploadFit, tickGpuKeyframeBlends } from "./pipeline.js";
 import { hudText, refreshMetricsDump } from "./hud.js";
 import { syncClipPresentation } from "./presentation.js";
-import { markSplashFrameReady, markSplashSceneReady } from "./splash.js";
+import { isSplashContentReady, markSplashFrameReady } from "./splash.js";
 
 let splashFrameReported = false;
 
 function reportSplashFrameReady() {
   if (splashFrameReported) return;
+  if (!isSplashContentReady() || !isVolumePresented()) return;
   splashFrameReported = true;
   markSplashFrameReady();
 }
@@ -131,8 +133,6 @@ function frame(rafNow: number) {
 }
 
 export function startRenderLoop() {
-  markSplashSceneReady();
-
   controls.addEventListener("start", () => {
     state.clipDirty = true;
   });
