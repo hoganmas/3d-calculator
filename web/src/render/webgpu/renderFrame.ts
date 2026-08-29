@@ -460,7 +460,9 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
   const occlForGrid = ranBeer
     ? targets.occlSurfTex.createView()
     : targets.occlIsoTex.createView();
-  drawGridOverlay(handles, occlForGrid, camera, swapView, half, dirMatrix, ro, outW, outH);
+  if (state.showGridAxes) {
+    drawGridOverlay(handles, occlForGrid, camera, swapView, half, dirMatrix, ro, outW, outH);
+  }
 
   const submitWallAt = performance.now();
   void device.queue.onSubmittedWorkDone().then(() => {

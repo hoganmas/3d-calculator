@@ -16,6 +16,7 @@ export interface LaplacianRenderSnapshot {
   steps: number;
   boxSize: number;
   marchDownscale: number;
+  showGridAxes: boolean;
   preset: string;
 }
 
@@ -126,6 +127,10 @@ function validateRender(v: unknown): LaplacianRenderSnapshot {
   if (marchDownscale < 1 || marchDownscale > 16) {
     throw new Error("render.marchDownscale: out of range");
   }
+  const showGridAxes = v.showGridAxes;
+  if (showGridAxes != null && typeof showGridAxes !== "boolean") {
+    throw new Error("render.showGridAxes: expected boolean");
+  }
   if (typeof preset !== "string") throw new Error("render.preset: expected string");
   return {
     deg: deg as number,
@@ -133,6 +138,7 @@ function validateRender(v: unknown): LaplacianRenderSnapshot {
     steps: steps as number,
     boxSize: boxSize as number,
     marchDownscale: marchDownscale as number,
+    showGridAxes: showGridAxes !== false,
     preset,
   };
 }

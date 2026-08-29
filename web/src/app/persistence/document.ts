@@ -8,7 +8,7 @@ import type { AnimMode, ExprItem, ParamState, PresetParamSeed } from "../../type
 import { els } from "../dom.js";
 import { syncExprCompileState } from "../hud.js";
 import { applyRenderHyperparams } from "../pipeline.js";
-import { syncMarchSlider } from "../presentation.js";
+import { syncMarchSlider, syncClipPresentation, syncShowGridAxesUi } from "../presentation.js";
 import { camera, controls } from "../scene.js";
 import { state } from "../state.js";
 import {
@@ -104,6 +104,7 @@ export function getRenderSettingsSnapshot(): LaplacianRenderSnapshot {
     steps: Number(els.steps.value),
     boxSize: Number(els.boxSize.value),
     marchDownscale: Number(els.marchDownscale.value),
+    showGridAxes: state.showGridAxes,
     preset: els.preset.value,
   };
 }
@@ -189,9 +190,12 @@ function syncRenderDom(render: LaplacianRenderSnapshot) {
   els.steps.value = String(Math.round(render.steps));
   els.boxSize.value = String(render.boxSize);
   els.marchDownscale.value = String(Math.round(render.marchDownscale));
+  state.showGridAxes = render.showGridAxes;
+  syncShowGridAxesUi();
   els.preset.value = render.preset in PRESETS ? render.preset : "sincos";
   syncMarchSlider();
   applyRenderHyperparams();
+  syncClipPresentation();
 }
 
 function syncFlowDom(flow: LaplacianFlowSnapshot) {

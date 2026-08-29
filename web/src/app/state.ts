@@ -59,6 +59,9 @@ export const state = {
   flowOpacity: 0.5,
   /** Age (seconds) at which advected dye reaches gradient color 2 / particle respawn. */
   flowAgeMax: 30.0,
+  /** World-unit grid planes and RGB axis guides (+ x/y/z labels). */
+  showGridAxes: true,
+
   /** Flow visualization: advected particles (depth-sorted) or IBFV dye grid. */
   flowVizMode: "particles" as "particles" | "ibfv",
   /** Particle count for flow advection (GPU instanced billboards). */

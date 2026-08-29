@@ -62,6 +62,16 @@ export function syncMarchSlider() {
   return n;
 }
 
+export function syncShowGridAxesUi() {
+  const btn = els.toggleGridAxes;
+  if (!btn) return;
+  const on = state.showGridAxes;
+  const label = on ? "Hide grid & axes" : "Show grid & axes";
+  btn.setAttribute("aria-pressed", on ? "true" : "false");
+  btn.setAttribute("aria-label", label);
+  btn.dataset.tooltip = label;
+}
+
 export function marchDownscale() {
   return readMarchDownscale();
 }
@@ -175,8 +185,9 @@ export function syncClipPresentation() {
   clipQuad.visible = !gpu && hasVolume && Boolean(state.worldCheb);
   // Grid/box/labels depth-test on the WebGPU overlay; WebGL fallback keeps
   // labels on a higher canvas (isos don't write depth there).
-  worldGrid.visible = !gpu;
-  worldLabels.visible = !gpu;
+  const showGrid = state.showGridAxes;
+  worldGrid.visible = !gpu && showGrid;
+  worldLabels.visible = !gpu && showGrid;
   boxHelper.visible = !gpu;
   labelRenderer.domElement.style.visibility = gpu ? "hidden" : "visible";
   setClipGpuCanvasVisible(isClipBakeGpuReady());

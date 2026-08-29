@@ -49,7 +49,7 @@ import {
   syncClipCpuVolume,
   prepareClipGpuForDegree,
 } from "./webglFallback.js";
-import { resize, syncClipPresentation } from "./presentation.js";
+import { resize, syncClipPresentation, syncShowGridAxesUi } from "./presentation.js";
 import { clearClipGpuFrame } from "../render/webgpu/march.js";
 import {
   setErr,
@@ -584,6 +584,13 @@ export function wirePipelineDom() {
   });
   els.marchDownscale.addEventListener("input", autosave);
   els.marchDownscale.addEventListener("change", autosave);
+  syncShowGridAxesUi();
+  els.toggleGridAxes?.addEventListener("click", () => {
+    state.showGridAxes = !state.showGridAxes;
+    syncShowGridAxesUi();
+    syncClipPresentation();
+    autosave();
+  });
   els.flowAlpha?.addEventListener("input", () => {
     state.flowAlpha = Math.max(0, Math.min(1, Number(els.flowAlpha!.value) || 0));
     autosave();

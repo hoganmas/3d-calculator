@@ -21,6 +21,7 @@ function sampleDoc(revision = 1): LaplacianDocument {
       steps: 16,
       boxSize: 5,
       marchDownscale: 2,
+      showGridAxes: true,
       preset: "sincos",
     },
     flow: {
@@ -98,6 +99,16 @@ export async function run() {
           assert(String(e).includes("latex"), "latex type error");
         }
         assert(threw, "bad expr rejected");
+      },
+    },
+    {
+      name: "render.showGridAxes defaults to true when omitted",
+      fn: () => {
+        const raw = sampleDoc();
+        const render = { ...raw.render } as Record<string, unknown>;
+        delete render.showGridAxes;
+        const parsed = validateDocument({ ...raw, render });
+        assert(parsed.render.showGridAxes === true, "default showGridAxes");
       },
     },
     {
