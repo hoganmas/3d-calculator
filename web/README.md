@@ -47,7 +47,7 @@ Requires a WebGPU-capable browser for the full multi-layer / manifold path. With
 
 Click **Setup MCP** in the header to copy server config for the current page. Requires Node.js (`npx`), an MCP client, and this tab open in a system browser (Chrome, Firefox, or Safari).
 
-WebMCP is on by default in dev and production builds. Disable with `?webmcp=0` or `localStorage.setItem("laplacian-webmcp", "0")`. Agents should start with `laplacian_get_capabilities`.
+WebMCP is **off by default** (avoids Chrome’s “access other apps and services” permission on casual visits). Enable via **Setup MCP** in the header, `?webmcp=1` on the URL, or `localStorage.setItem("laplacian-webmcp", "1")`. Disable with `?webmcp=0`. Agents should start with `laplacian_get_capabilities`.
 
 Optional dev CLI: `node scripts/webmcp-relay-call.mjs laplacian_setup_lava_lamp` (uses an existing tab only).
 

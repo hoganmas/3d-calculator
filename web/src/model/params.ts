@@ -3,8 +3,9 @@
  * RHS may reference other params.
  */
 
-import { compileParamLatex, formatParamLatexValue } from "../math/fit.js";
+import { compileParamLatex, formatParamLatexValue, classifyExpr } from "../math/fit.js";
 import type { AnimMode, ParamState } from "../types/models.js";
+import { listExpressions, updateExprSilent } from "./expressions.js";
 
 type ParamInit = Partial<ParamState> & { animate?: boolean };
 
@@ -373,6 +374,29 @@ export function toggleParamAnimate(name: string, timeSec = performance.now() / 1
   }
   params.set(name, next);
   return next;
+}
+
+/** Start animation for parameter rows marked sliderAnimating (e.g. default preset on load). */
+export function ensureParamAnimationFromExprs(timeSec = performance.now() / 1000) {
+  let changed = false;
+  for (const item of listExpressions()) {
+    if (!item.sliderAnimating) continue;
+    let name: string | null = null;
+    try {
+      const classified = classifyExpr(item.latex);
+      if (classified.kind !== "parameter" || !classified.paramName) continue;
+      name = classified.paramName;
+    } catch {
+      continue;
+    }
+    const cur = params.get(name);
+    if (!cur || cur.driven || cur.animating) continue;
+    const next = { ...cur, animating: true, phase: phaseForValue(cur, timeSec) };
+    params.set(name, next);
+    updateExprSilent(item.id, { sliderAnimating: true, sliderPhase: next.phase });
+    changed = true;
+  }
+  return changed;
 }
 
 /**

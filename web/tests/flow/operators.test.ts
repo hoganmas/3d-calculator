@@ -130,5 +130,84 @@ export async function run() {
         assert(maxErr < 0.3, `max curl fit error ${maxErr}`);
       },
     },
+    {
+      name: "\\frac{\\partial}{\\partial x}(x^2+y^2) evaluates to 2x",
+      fn: () => {
+        const compiled = compileExpr(String.raw`\frac{\partial}{\partial x}(x^2+y^2)`);
+        assert(compiled.operator === "partial", "expected partial operator");
+        assert(compiled.partialAxis === 0, "expected x axis");
+        const fn = compiled.bind({});
+        assertNear(fn(0.3, 0.4, 0.5), 0.6, 0.05, "partial d/dx");
+      },
+    },
+    {
+      name: "\\partial_y (x^2+y^2+z^2) evaluates to 2y",
+      fn: () => {
+        const compiled = compileExpr(String.raw`\partial_y (x^2+y^2+z^2)`);
+        assert(compiled.operator === "partial", "expected partial operator");
+        assert(compiled.partialAxis === 1, "expected y axis");
+        const fn = compiled.bind({});
+        assertNear(fn(0.1, 0.25, 0.3), 0.5, 0.05, "partial d/dy");
+      },
+    },
+    {
+      name: "\\grad_z (x^2+y^2+z^2) evaluates to 2z",
+      fn: () => {
+        const compiled = compileExpr(String.raw`\grad_z (x^2+y^2+z^2)`);
+        assert(compiled.operator === "partial", "expected partial operator");
+        assert(compiled.partialAxis === 2, "expected z axis");
+        const fn = compiled.bind({});
+        assertNear(fn(0.1, 0.2, 0.35), 0.7, 0.05, "partial d/dz via grad_z");
+      },
+    },
+    {
+      name: "\\partial_x e^{-(x^2+y^2+z^2)} evaluates to -2x e^{-(x^2+y^2+z^2)}",
+      fn: () => {
+        const compiled = compileExpr(String.raw`\partial_x e^{-(x^2+y^2+z^2)}`);
+        assert(compiled.operator === "partial", "expected partial operator");
+        assert(compiled.partialAxis === 0, "expected x axis");
+        const fn = compiled.bind({});
+        const x = 0.3;
+        const y = 0.4;
+        const z = 0.5;
+        const g = Math.exp(-(x * x + y * y + z * z));
+        assertNear(fn(x, y, z), -2 * x * g, 0.05, "partial d/dx of Gaussian");
+      },
+    },
+    {
+      name: "\\frac{\\partial}{\\partial x} e^{-(x^2+y^2+z^2)} evaluates to -2x e^{-(x^2+y^2+z^2)}",
+      fn: () => {
+        const latex = String.raw`\frac{\partial}{\partial x} e^{-(x^2+y^2+z^2)}`;
+        const compiled = compileExpr(latex);
+        assert(compiled.operator === "partial", "expected partial operator");
+        const fn = compiled.bind({});
+        const x = 0.2;
+        const y = 0.3;
+        const z = 0.4;
+        const g = Math.exp(-(x * x + y * y + z * z));
+        assertNear(fn(x, y, z), -2 * x * g, 0.05, "fraction partial of Gaussian");
+      },
+    },
+    {
+      name: "spectral partial d/dx of x^2+y^2 on Cheb grid",
+      fn: () => {
+        const compiled = compileExpr(String.raw`\frac{\partial}{\partial x}(x^2+y^2)`);
+        const half = 1;
+        const deg = 8;
+        const fit = fitScalarField(compiled, compiled.bind({}), half, deg, { skipMono: true });
+        let maxErr = 0;
+        for (let ix = 0; ix < fit.M; ix++) {
+          const x = chebWorld(ix, fit.M, half);
+          for (let iy = 0; iy < fit.M; iy++) {
+            const y = chebWorld(iy, fit.M, half);
+            for (let iz = 0; iz < fit.M; iz++) {
+              const idx = densIndex(ix, iy, iz, fit.M);
+              maxErr = Math.max(maxErr, Math.abs(fit.dens[idx]! - 2 * x));
+            }
+          }
+        }
+        assert(maxErr < 0.25, `max partial fit error ${maxErr}`);
+      },
+    },
   ]);
 }

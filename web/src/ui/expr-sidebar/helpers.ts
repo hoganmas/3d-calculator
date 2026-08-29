@@ -143,6 +143,8 @@ export function configureMathField(mf: MathfieldElement) {
       laplacian: "\\operatorname{laplacian}",
       div: "\\operatorname{div}",
       curl: "\\operatorname{curl}",
+      partial: "\\partial",
+      int: "\\int",
     };
   } catch {
     /* ignore */

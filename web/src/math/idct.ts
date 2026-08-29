@@ -9,8 +9,7 @@ import type {
   IdctCurl3DResult,
   IdctGrad3DResult,
 } from "../types/models.js";
-
-type ChebAxis = 0 | 1 | 2;
+import type { ChebAxis } from "./calcOps.js";
 
 /** Univariate IDCT at M Chebyshev roots: v_m = Σ_{i=0}^{n-1} c_i T_i(ξ_m). */
 function idctCheb1D(coeff: ArrayLike<number>, M: number): Float64Array {
@@ -264,4 +263,122 @@ export function idctChebCurl3D(
     deg,
     n,
   };
+}
+
+/** ∂f/∂ξ_axis on the Chebyshev-root grid (ξ derivatives; scale by 1/half for world). */
+export function idctChebPartial3D(
+  cheb: Float32Array | Float64Array,
+  deg: number,
+  axis: ChebAxis,
+  gridM?: number,
+): Idct3DResult {
+  const n = deg + 1;
+  const d = chebCoeffsDiff3D(cheb, deg, axis);
+  const { dens, M } = idctCheb3D(d, deg, gridM);
+  return { dens, M, deg, n };
+}
+
+/** Evaluate Σ c_i T_i(ξ) at ξ ∈ [-1, 1]. */
+export function evalCheb1D(coeff: ArrayLike<number>, xi: number): number {
+  const n = coeff.length;
+  const phase = Math.acos(Math.min(1, Math.max(-1, xi)));
+  let s = 0;
+  for (let i = 0; i < n; i++) {
+    const c = coeff[i];
+    if (c !== 0) s += c * Math.cos(i * phase);
+  }
+  return s;
+}
+
+/** ∫_{ξ0}^{ξ1} f(ξ) dξ via Simpson on a dense Chebyshev grid. */
+export function chebDefiniteInt1D(
+  coeff: ArrayLike<number>,
+  xi0: number,
+  xi1: number,
+  gridM = 256,
+): number {
+  const a = Math.min(xi0, xi1);
+  const b = Math.max(xi0, xi1);
+  if (b - a < 1e-15) return 0;
+  const h = (b - a) / gridM;
+  let sum = 0;
+  for (let m = 0; m <= gridM; m++) {
+    const xi = a + m * h;
+    const f = evalCheb1D(coeff, xi);
+    if (m === 0 || m === gridM) sum += f;
+    else if (m % 2 === 0) sum += 2 * f;
+    else sum += 4 * f;
+  }
+  const sign = xi1 >= xi0 ? 1 : -1;
+  return sign * (sum * h) / 3;
+}
+
+/**
+ * Definite integral along one axis in coefficient space.
+ * Collapses the integrated axis to T_0 (constant along that axis).
+ */
+export function chebDefiniteInt3D(
+  cheb: ArrayLike<number>,
+  deg: number,
+  axis: ChebAxis,
+  worldA: number,
+  worldB: number,
+  half: number,
+): Float64Array {
+  const n = deg + 1;
+  const n3 = n * n * n;
+  const out = new Float64Array(n3);
+  const xiA = worldA / half;
+  const xiB = worldB / half;
+  const row = new Float64Array(n);
+
+  if (axis === 0) {
+    for (let j = 0; j < n; j++) {
+      for (let k = 0; k < n; k++) {
+        for (let i = 0; i < n; i++) row[i] = cheb[i + j * n + k * n * n] || 0;
+        out[0 + j * n + k * n * n] = chebDefiniteInt1D(row, xiA, xiB) * half;
+      }
+    }
+    return out;
+  }
+  if (axis === 1) {
+    for (let i = 0; i < n; i++) {
+      for (let k = 0; k < n; k++) {
+        for (let j = 0; j < n; j++) row[j] = cheb[i + j * n + k * n * n] || 0;
+        out[i + 0 * n + k * n * n] = chebDefiniteInt1D(row, xiA, xiB) * half;
+      }
+    }
+    return out;
+  }
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      for (let k = 0; k < n; k++) row[k] = cheb[i + j * n + k * n * n] || 0;
+      out[i + j * n + 0 * n * n] = chebDefiniteInt1D(row, xiA, xiB) * half;
+    }
+  }
+  return out;
+}
+
+/** Broadcast reduced-axis Cheb tensor to full n³ layout for IDCT. */
+export function embedReducedCheb3D(
+  cheb: ArrayLike<number>,
+  deg: number,
+  integratedAxes: ChebAxis[],
+): Float64Array {
+  const n = deg + 1;
+  const n3 = n * n * n;
+  const out = new Float64Array(n3);
+  const axisSet = new Set(integratedAxes);
+
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      for (let k = 0; k < n; k++) {
+        const si = axisSet.has(0) ? 0 : i;
+        const sj = axisSet.has(1) ? 0 : j;
+        const sk = axisSet.has(2) ? 0 : k;
+        out[i + j * n + k * n * n] = cheb[si + sj * n + sk * n * n] || 0;
+      }
+    }
+  }
+  return out;
 }

@@ -58,6 +58,8 @@ import {
   refreshMetricsDump,
 } from "./hud.js";
 import { scheduleAutosave } from "./persistence/autosave.js";
+import { tryMarkSplashBakeReady } from "./splash.js";
+import { allKeyframesComplete } from "../model/keyframes.js";
 
 interface CachedLayer {
   kind: "cloud" | "isosurface" | "flow";
@@ -474,6 +476,8 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
     } else {
       syncClipPresentation();
     }
+
+    tryMarkSplashBakeReady(layers.length > 0);
   } catch (e) {
     try {
       compileAllExprs();
@@ -522,6 +526,9 @@ export function initKeyframeHandler() {
     }
     if (done) {
       console.log(`[keyframes] async complete · ${layerId} · ${readyCount}/${K}`);
+      if (allKeyframesComplete()) {
+        tryMarkSplashBakeReady(true);
+      }
     }
   });
 }

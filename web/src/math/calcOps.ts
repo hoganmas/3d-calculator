@@ -1,6 +1,7 @@
 /** Shared vector-calculus LaTeX normalization and MathJSON tuple extraction. */
 
 import { ComputeEngine } from "@cortex-js/compute-engine";
+import type { IntegralAxisSpec } from "../types/models.js";
 
 const ce = new ComputeEngine();
 
@@ -77,10 +78,126 @@ export function extractOperatornameArg(src: string, op: string): string | null {
   return bare?.[1]?.trim() ?? null;
 }
 
+export type ChebAxis = 0 | 1 | 2;
+
+const PARTIAL_OP_NAMES = ["partial_x", "partial_y", "partial_z"] as const;
+
+function axisFromVar(v: string): ChebAxis | null {
+  const c = v.toLowerCase();
+  if (c === "x") return 0;
+  if (c === "y") return 1;
+  if (c === "z") return 2;
+  return null;
+}
+
+function partialOpName(axis: ChebAxis): string {
+  return PARTIAL_OP_NAMES[axis]!;
+}
+
+function extractUnaryTail(rest: string): string | null {
+  let s = rest.replace(/^\s*\\left\s*/, "").trimStart();
+  if (!s) return null;
+
+  const open = s[0];
+  if (open === "(" || open === "{") {
+    const close = open === "(" ? ")" : "}";
+    let depth = 0;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i]!;
+      if (c === open) depth++;
+      else if (c === close) {
+        depth--;
+        if (depth === 0) return s.slice(1, i).trim();
+      }
+    }
+    return null;
+  }
+
+  return s.trim();
+}
+
+function wrapPartial(axis: ChebAxis, inner: string): string {
+  return `\\operatorname{${partialOpName(axis)}}{${inner.trim()}}`;
+}
+
+/** Normalize partial-derivative LaTeX before nabla→grad rules. */
+export function normalizePartialForms(latex: string): string {
+  let s = String(latex ?? "").trim();
+
+  const subscript = s.match(
+    /^\\(?:partial|grad)\s*_\s*\{?\s*([xyz])\s*\}?\s*([\s\S]+)$/i,
+  );
+  if (subscript?.[1] && subscript[2]) {
+    const axis = axisFromVar(subscript[1]);
+    const inner = extractUnaryTail(subscript[2]);
+    if (axis != null && inner) return wrapPartial(axis, inner);
+  }
+
+  const fracInner = s.match(
+    /^\\frac\s*\{\s*\\partial\s+([\s\S]+?)\s*\}\s*\{\s*\\partial\s*([xyz])\s*\}$/i,
+  );
+  if (fracInner?.[1] && fracInner[2]) {
+    const axis = axisFromVar(fracInner[2]);
+    if (axis != null) return wrapPartial(axis, fracInner[1]);
+  }
+
+  const fracPrefix = s.match(
+    /^\\frac\s*\{\s*\\partial\s*\}\s*\{\s*\\partial\s*([xyz])\s*\}\s*([\s\S]+)$/i,
+  );
+  if (fracPrefix?.[1] && fracPrefix[2]) {
+    const axis = axisFromVar(fracPrefix[1]);
+    const inner = extractUnaryTail(fracPrefix[2]);
+    if (axis != null && inner) return wrapPartial(axis, inner);
+  }
+
+  return s;
+}
+
+export interface PeeledDefiniteIntegral {
+  inner: string;
+  axes: IntegralAxisSpec[];
+}
+
+/** Peel chained \\int_{a}^{b} … dvar from the outside in. */
+export function peelDefiniteIntegrals(latex: string): PeeledDefiniteIntegral | null {
+  let s = String(latex ?? "").trim();
+  const bounds: { a: string; b: string }[] = [];
+
+  for (;;) {
+    const m = s.match(/^\\int\s*(?:_\s*\{([^}]*)\})?\s*(?:\^\s*\{([^}]*)\})?\s*/);
+    if (!m) break;
+    bounds.push({ a: (m[1] ?? "").trim(), b: (m[2] ?? "").trim() });
+    s = s.slice(m[0].length).trim();
+  }
+
+  if (bounds.length === 0) return null;
+
+  const axes: IntegralAxisSpec[] = [];
+  for (let i = 0; i < bounds.length; i++) {
+    const dm = s.match(/\s*(?:\\,)?\s*d\s*([xyz])\s*$/i);
+    if (!dm) return null;
+    const axis = axisFromVar(dm[1]!);
+    if (axis == null) return null;
+    s = s.slice(0, dm.index).trim();
+    axes.push({
+      axis,
+      aLatex: bounds[i]!.a,
+      bLatex: bounds[i]!.b,
+    });
+  }
+
+  const inner = s.trim();
+  if (!inner) return null;
+  // Innermost integral last in the array (application order).
+  axes.reverse();
+  return { inner, axes };
+}
+
 export function normalizeCalcLatex(latex: string): string {
   let s = String(latex ?? "").trim();
   s = s.replace(/\\left\s*/g, "");
   s = s.replace(/\\right\s*/g, "");
+  s = normalizePartialForms(s);
   // MathLive: \grad\mathrm{f}, \nabla\mathrm{f}
   s = s.replace(
     /\\grad\\(?:mathrm|mathbf|mathit)\s*\{([A-Za-z][A-Za-z0-9_]*)\}/g,
@@ -174,5 +291,44 @@ export function tripleFromOpLatex(src: string, opPattern: RegExp, innerLatex: st
   }
   void opPattern;
   void src;
+  return null;
+}
+
+export interface PartialMatch {
+  axis: ChebAxis;
+  inner: string;
+}
+
+/** Detect \\operatorname{partial_x}{f} and equivalent normalized forms. */
+export function looksLikePartial(src: string, json: unknown): PartialMatch | null {
+  for (let axis = 0 as ChebAxis; axis <= 2; axis = (axis + 1) as ChebAxis) {
+    const op = partialOpName(axis);
+    const fromJson = scalarFromUnaryOpJson(json, op);
+    if (fromJson) return { axis, inner: fromJson.trim() };
+
+    const inner = extractOperatornameArg(src, op);
+    if (inner) return { axis, inner };
+  }
+
+  // CE Derivative / PartialDerivative fallback
+  if (Array.isArray(json)) {
+    const head = String(json[0]);
+    if (head === "Derivative" || head === "PartialDerivative") {
+      const expr = json[1];
+      const wrt = json[2];
+      const varName =
+        typeof wrt === "string"
+          ? wrt
+          : Array.isArray(wrt) && wrt[0] === "Symbol"
+            ? String(wrt[1])
+            : null;
+      const axis = varName ? axisFromVar(varName) : null;
+      if (axis != null && expr != null) {
+        const inner = ce.box(expr as never).latex;
+        if (inner) return { axis, inner: inner.trim() };
+      }
+    }
+  }
+
   return null;
 }

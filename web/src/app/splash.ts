@@ -1,5 +1,7 @@
 import { setErr } from "./hud.js";
 
+import { allKeyframesComplete, hasActiveKeyframeCaches } from "../model/keyframes.js";
+
 const SPLASH_TIMEOUT_MS = 15_000;
 const SPLASH_EXIT_MS = 700;
 
@@ -7,7 +9,7 @@ let splashEl: HTMLElement | null = null;
 let timeoutId = 0;
 let dismissed = false;
 let sidebarReady = false;
-let sceneReady = false;
+let contentReady = false;
 let frameReady = false;
 
 function prefersReducedMotion(): boolean {
@@ -74,17 +76,38 @@ function dismissSplash() {
 
 function tryDismiss() {
   if (dismissed) return;
-  if (sidebarReady && sceneReady && frameReady) dismissSplash();
+  if (sidebarReady && contentReady && frameReady) dismissSplash();
+}
+
+/** True once the initial fit (and any keyframe cache) is ready. */
+export function isSplashContentReady() {
+  return contentReady;
+}
+
+/**
+ * Gate splash on the first scene bake. When keyframes are building, waits until
+ * every frame in the cache is ready so the default animation is fully loaded.
+ */
+export function tryMarkSplashBakeReady(hasSceneLayers: boolean) {
+  if (contentReady) return;
+  if (!hasSceneLayers) {
+    contentReady = true;
+    tryDismiss();
+    return;
+  }
+  if (hasActiveKeyframeCaches() && !allKeyframesComplete()) return;
+  contentReady = true;
+  tryDismiss();
 }
 
 export function initSplash() {
   splashEl = document.getElementById("splash");
   timeoutId = window.setTimeout(() => {
-    if (!sceneReady) {
+    if (!contentReady) {
       setErr("Startup took longer than expected — some features may still be loading.");
     }
     sidebarReady = true;
-    sceneReady = true;
+    contentReady = true;
     frameReady = true;
     dismissSplash();
   }, SPLASH_TIMEOUT_MS);
@@ -93,12 +116,6 @@ export function initSplash() {
 export function markSplashSidebarReady() {
   if (sidebarReady) return;
   sidebarReady = true;
-  tryDismiss();
-}
-
-export function markSplashSceneReady() {
-  if (sceneReady) return;
-  sceneReady = true;
   tryDismiss();
 }
 

@@ -138,6 +138,18 @@ export function clearKeyframeCaches() {
   lastBakeDetails = [];
 }
 
+export function hasActiveKeyframeCaches() {
+  return caches.size > 0;
+}
+
+export function allKeyframesComplete() {
+  if (!caches.size) return true;
+  for (const cache of caches.values()) {
+    if (cache.readyCount < cache.K) return false;
+  }
+  return true;
+}
+
 /**
  * Eligible when dirty free-params collapse to exactly one animated slider
  * (not driven by another equation).

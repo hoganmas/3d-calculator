@@ -140,6 +140,18 @@ export function buildCapabilities() {
           description:
             "Vector calculus operators on scalar/vector fields → scalar volume (laplacian / divergence).",
         },
+        {
+          form: "\\frac{\\partial f}{\\partial x}, \\partial_x f, \\grad_x f (and y/z variants)",
+          kind: "cloud",
+          description:
+            "Single-axis partial derivative of a scalar field → scalar volume cloud.",
+        },
+        {
+          form: "\\int_{a}^{b} f\\,dx (chained \\int for multiple axes; empty bounds default to [-half,half])",
+          kind: "cloud",
+          description:
+            "Definite integral of a scalar field; integrated axes become constant (broadcast in volume).",
+        },
       ],
       roles: {
         auto: "Infer cloud / isosurface / flow from syntax.",
@@ -193,7 +205,7 @@ export function buildCapabilities() {
     tools: TOOL_CATALOG,
     webmcp: {
       enable:
-        "On by default in dev and production builds (any http(s) host). Opt out with ?webmcp=0 or localStorage laplacian-webmcp=0.",
+        "Off by default. Opt in via Setup MCP, ?webmcp=1, or localStorage laplacian-webmcp=1. Opt out with ?webmcp=0.",
       relay:
         `@mcp-b/webmcp-local-relay with --widget-origin ${getWidgetOriginsForRelay()}. Local dev includes both 127.0.0.1 and localhost when applicable.`,
       setupDialog:

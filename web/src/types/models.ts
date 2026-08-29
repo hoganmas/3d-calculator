@@ -6,7 +6,13 @@ export type ExprKind = "parameter" | "alias" | "funcdef" | "constraint" | "defin
 export type DeclSymbolKind = "parameter" | "alias" | "funcdef";
 export type LayerRole = "parameter" | "cloud" | "isosurface" | "flow";
 export type VectorFieldKind = "tuple" | "gradient" | "curl" | "reference";
-export type ScalarFieldOperator = "none" | "laplacian" | "divergence";
+export type ScalarFieldOperator = "none" | "laplacian" | "divergence" | "partial" | "definite_integral";
+
+export interface IntegralAxisSpec {
+  axis: 0 | 1 | 2;
+  aLatex: string;
+  bLatex: string;
+}
 
 export interface ExprItem {
   id: string;
@@ -213,6 +219,10 @@ export interface CompiledExpr {
   scalarCompileLatex?: string;
   /** Tuple components for \\div(Fx,Fy,Fz). */
   divergenceParts?: [string, string, string];
+  /** Axis for \\partial_x etc. */
+  partialAxis?: 0 | 1 | 2;
+  /** Chained definite integrals (innermost first). */
+  integralAxes?: IntegralAxisSpec[];
   bind: (params?: Record<string, number>) => (x: number, y: number, z: number) => number;
   bindScalar?: (
     params?: Record<string, number>,

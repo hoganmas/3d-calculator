@@ -3,8 +3,6 @@
  */
 import { initializeWebMCPPolyfill } from "@mcp-b/webmcp-polyfill";
 import { registerLaplacianTools } from "./webmcpTools.js";
-import { maybeShowWebmcpSetupPrompt } from "./webmcpSetupDialog.js";
-
 const STORAGE_KEY = "laplacian-webmcp";
 const RELAY_SCRIPT_ID = "laplacian-webmcp-relay";
 const RELAY_CDN =
@@ -12,6 +10,7 @@ const RELAY_CDN =
 
 /** @type {AbortController | null} */
 let registration: AbortController | null = null;
+let initDone = false;
 
 export function isWebMCPEnabled(): boolean {
   const q = new URLSearchParams(location.search);
@@ -24,15 +23,8 @@ export function isWebMCPEnabled(): boolean {
   } catch {
     /* ignore */
   }
-  if (import.meta.env.DEV) return true;
-  // Production builds default on (any host); opt out via ?webmcp=0 or localStorage.
-  if (import.meta.env.PROD) {
-    try {
-      if (location.protocol !== "file:") return true;
-    } catch {
-      /* ignore */
-    }
-  }
+  // Off by default — avoids Chrome's WebMCP permission prompt on casual visits.
+  // Opt in via ?webmcp=1, Setup MCP, or localStorage laplacian-webmcp=1.
   return false;
 }
 
@@ -58,9 +50,15 @@ function injectRelayEmbed() {
   document.head.appendChild(script);
 }
 
+/** Persist opt-in and initialize WebMCP (polyfill, relay, tools). User-gesture entry point. */
+export async function enableWebMCP() {
+  setWebMCPEnabled(true);
+  await initWebMCP();
+}
+
 /** Initialize polyfill, relay embed, and tool registrations. Safe to call once. */
 export async function initWebMCP() {
-  if (!isWebMCPEnabled()) return;
+  if (!isWebMCPEnabled() || initDone) return;
 
   initializeWebMCPPolyfill();
   injectRelayEmbed();
@@ -73,5 +71,5 @@ export async function initWebMCP() {
   registration?.abort();
   registration = new AbortController();
   await registerLaplacianTools(registration.signal);
-  maybeShowWebmcpSetupPrompt();
+  initDone = true;
 }
