@@ -72,7 +72,7 @@ function flowKeyframeOpts(layerId: string, paramName: string) {
 async function waitForComplete(timeoutMs = 8000) {
   const t0 = Date.now();
   while (!allKeyframesComplete()) {
-    tickKeyframePump(8);
+    tickKeyframePump(32);
     if (Date.now() - t0 > timeoutMs) {
       throw new Error("keyframe async fill timed out");
     }
@@ -87,7 +87,7 @@ async function waitForProgress(
 ) {
   const t0 = Date.now();
   while (true) {
-    tickKeyframePump(8);
+    tickKeyframePump(32);
     const p = getKeyframeProgress(layerId);
     if (p && predicate(p)) return p;
     if (Date.now() - t0 > timeoutMs) throw new Error("waitForProgress timed out");
@@ -184,6 +184,23 @@ export async function run() {
         await waitForComplete(20000);
         assert(sawAllCoarse, "all slots reached deg 4 before advancing");
         setKeyframeProgressHandler(null);
+      },
+    },
+    {
+      name: "progressive: display blend keeps matched degrees",
+      fn: async () => {
+        clearKeyframeCaches();
+        setupAnimParam("t", 0.5);
+        const opts = { ...keyframeOpts("layer-prog-match", "t"), deg: 16, K: 3 };
+        ensureLayerKeyframes(opts);
+        await waitForComplete(20000);
+        const prog = getKeyframeProgress("layer-prog-match")!;
+        const blend = peekKeyframeBlend("layer-prog-match");
+        assert(!!blend, "blend peek");
+        assert(
+          prog.frameDeg[blend!.i0] === prog.frameDeg[blend!.i1],
+          "display pair same degree",
+        );
       },
     },
     {

@@ -13,6 +13,9 @@ import {
   lobattoLadderDegrees,
   refineLobatto3D,
   ensureLobattoDegree,
+  beginLobattoBuild,
+  stepLobattoBuild,
+  finishLobattoBuild,
 } from "../../src/math/chebLobatto.ts";
 import { idctCheb3D } from "../../src/math/idct.ts";
 import { assert } from "../helpers/assert.ts";
@@ -123,6 +126,42 @@ export async function run() {
         assert(lobattoLadderDegrees(16).join(",") === "4,8,16", "pow2");
         assert(lobattoLadderDegrees(20).join(",") === "4,8,16,20", "non-pow2");
         assert(lobattoLadderDegrees(3).join(",") === "3", "small");
+      },
+    },
+    {
+      name: "chunked Lobatto build matches full refine",
+      fn: () => {
+        const fn = compileExpr("x^2+y^2+z^2").bind({});
+        const half = 1;
+        const coarse = fitChebyshevLobatto3D(fn, half, 16, { skipL2: true }).lobatto;
+        const begun = beginLobattoBuild(coarse, half, 32);
+        assert(!!begun.job, "expected refine job");
+        assert(begun.job!.mode === "refine", "refine mode");
+        const chunked = finishLobattoBuild(begun.job!, fn);
+        const full = refineLobatto3D(coarse, fn, 32);
+        let maxDiff = 0;
+        for (let i = 0; i < chunked.cheb.length; i++) {
+          maxDiff = Math.max(maxDiff, Math.abs(chunked.cheb[i]! - full.cheb[i]!));
+        }
+        assert(maxDiff < 1e-10, `chunked refine diff ${maxDiff}`);
+      },
+    },
+    {
+      name: "stepLobattoBuild respects time budget",
+      fn: () => {
+        const fn = compileExpr(String.raw`\exp(-(x^2+y^2+z^2))`).bind({});
+        const half = 1;
+        const coarse = fitChebyshevLobatto3D(fn, half, 16, { skipL2: true }).lobatto;
+        let job = beginLobattoBuild(coarse, half, 32).job!;
+        let steps = 0;
+        while (job) {
+          const step = stepLobattoBuild(job, fn, { budgetMs: 1 });
+          job = step.job!;
+          steps++;
+          if (step.done) break;
+          assert(steps < 5000, "too many chunk steps");
+        }
+        assert(steps > 1, "expected multiple chunks for deg 16→32");
       },
     },
     {

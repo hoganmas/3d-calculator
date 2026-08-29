@@ -13,7 +13,7 @@
  */
 
 import { MAX_DEG } from "./limits.js";
-import { idctChebGrad3D } from "./idct.js";
+import { idctChebGrad3D, beginGradAxisJob, stepGradAxisJob, type GradAxisJob } from "./idct.js";
 import type { ChebFitResult, ChebFitTiming } from "../types/models.js";
 
 /** Lobatto nodes u_j = cos(π j / deg), j = 0..deg. Length deg+1. */
@@ -173,6 +173,196 @@ export function idctLobatto3D(
   return { dens, M, deg, n };
 }
 
+/** Resumable separable Lobatto IDCT → density grid. */
+export interface LobattoIdct3DJob {
+  cheb: Float32Array | Float64Array;
+  deg: number;
+  M: number;
+  n: number;
+  pass: 0 | 1 | 2;
+  cursor: number;
+  tmp1: Float64Array;
+  tmp2: Float64Array;
+  dens: Float32Array;
+  row: Float64Array;
+}
+
+export function beginLobattoIdct3D(
+  cheb: Float32Array | Float64Array,
+  deg: number,
+  gridM?: number,
+): LobattoIdct3DJob {
+  const n = deg + 1;
+  const M = Math.max(n, (gridM ?? n) | 0 || n);
+  return {
+    cheb,
+    deg,
+    M,
+    n,
+    pass: 0,
+    cursor: 0,
+    tmp1: new Float64Array(M * n * n),
+    tmp2: new Float64Array(M * M * n),
+    dens: new Float32Array(M * M * M),
+    row: new Float64Array(n),
+  };
+}
+
+export function stepLobattoIdct3D(
+  job: LobattoIdct3DJob,
+  budgetMs: number,
+): { job: LobattoIdct3DJob | null; done: boolean; dens?: Float32Array } {
+  const t0 = performance.now();
+  const { cheb, n, M } = job;
+
+  while (performance.now() - t0 < budgetMs) {
+    if (job.pass === 0) {
+      const total = n * n;
+      if (job.cursor >= total) {
+        job.pass = 1;
+        job.cursor = 0;
+        continue;
+      }
+      const j = (job.cursor / n) | 0;
+      const k = job.cursor % n;
+      for (let i = 0; i < n; i++) job.row[i] = cheb[i + j * n + k * n * n] || 0;
+      const v = lobattoIDCT1D(job.row, M);
+      for (let m = 0; m < M; m++) job.tmp1[m + j * M + k * M * n] = v[m]!;
+      job.cursor++;
+      continue;
+    }
+
+    if (job.pass === 1) {
+      const total = M * n;
+      if (job.cursor >= total) {
+        job.pass = 2;
+        job.cursor = 0;
+        continue;
+      }
+      const m = (job.cursor / n) | 0;
+      const k = job.cursor % n;
+      for (let j = 0; j < n; j++) job.row[j] = job.tmp1[m + j * M + k * M * n]!;
+      const v = lobattoIDCT1D(job.row, M);
+      for (let p = 0; p < M; p++) job.tmp2[m + p * M + k * M * M] = v[p]!;
+      job.cursor++;
+      continue;
+    }
+
+    const total = M * M;
+    if (job.cursor >= total) return { job: null, done: true, dens: job.dens };
+    const m = (job.cursor / M) | 0;
+    const p = job.cursor % M;
+    for (let k = 0; k < n; k++) job.row[k] = job.tmp2[m + p * M + k * M * M]!;
+    const v = lobattoIDCT1D(job.row, M);
+    for (let q = 0; q < M; q++) job.dens[m + p * M + q * M * M] = v[q]!;
+    job.cursor++;
+  }
+
+  return { job, done: false };
+}
+
+export type LobattoFinalizePhase =
+  | "dens_idct"
+  | "grad_x"
+  | "grad_y"
+  | "grad_z";
+
+/** Chunked IDCT (+ optional iso grad) after Lobatto sampling completes. */
+export interface LobattoFinalizeJob {
+  lob: LobattoFitState;
+  role: "cloud" | "isosurface";
+  phase: LobattoFinalizePhase;
+  densIdct: LobattoIdct3DJob | null;
+  dens?: Float32Array;
+  series?: Float32Array;
+  gradAxis: GradAxisJob | null;
+  gx?: Float32Array;
+  gy?: Float32Array;
+  gz?: Float32Array;
+}
+
+export function beginLobattoFinalize(
+  lob: LobattoFitState,
+  role: "cloud" | "isosurface",
+): LobattoFinalizeJob {
+  return {
+    lob,
+    role,
+    phase: "dens_idct",
+    densIdct: beginLobattoIdct3D(lob.cheb, lob.deg, lob.deg + 1),
+    gradAxis: null,
+  };
+}
+
+export function stepLobattoFinalize(
+  job: LobattoFinalizeJob,
+  budgetMs: number,
+): { job: LobattoFinalizeJob | null; done: boolean; result?: ScalarKeyframeBakeResult } {
+  const t0 = performance.now();
+
+  while (performance.now() - t0 < budgetMs) {
+    if (job.phase === "dens_idct" && job.densIdct) {
+      const step = stepLobattoIdct3D(job.densIdct, budgetMs - (performance.now() - t0));
+      if (!step.done) {
+        job.densIdct = step.job;
+        return { job, done: false };
+      }
+      job.dens = step.dens ?? job.densIdct.dens;
+      job.densIdct = null;
+      if (job.role === "cloud") {
+        return {
+          job: null,
+          done: true,
+          result: {
+            frame: { dens: job.dens, cheb: job.lob.cheb, fitRel: NaN },
+            lobatto: job.lob,
+            deg: job.lob.deg,
+          },
+        };
+      }
+      job.series = lobattoChebToSeries(job.lob.cheb, job.lob.deg);
+      job.phase = "grad_x";
+      continue;
+    }
+
+    const axis = job.phase === "grad_x" ? 0 : job.phase === "grad_y" ? 1 : job.phase === "grad_z" ? 2 : -1;
+    if (axis < 0) return { job, done: false };
+
+    if (!job.gradAxis) job.gradAxis = beginGradAxisJob(job.series!, job.lob.deg, axis as 0 | 1 | 2);
+    const step = stepGradAxisJob(job.gradAxis, budgetMs - (performance.now() - t0));
+    if (!step.done) {
+      job.gradAxis = step.job;
+      return { job, done: false };
+    }
+    if (axis === 0) job.gx = step.grad;
+    else if (axis === 1) job.gy = step.grad;
+    else job.gz = step.grad;
+    job.gradAxis = null;
+
+    if (job.phase === "grad_z") {
+      return {
+        job: null,
+        done: true,
+        result: {
+          frame: {
+            dens: job.dens!,
+            cheb: job.lob.cheb,
+            fitRel: NaN,
+            gx: job.gx,
+            gy: job.gy,
+            gz: job.gz,
+          },
+          lobatto: job.lob,
+          deg: job.lob.deg,
+        },
+      };
+    }
+    job.phase = job.phase === "grad_x" ? "grad_y" : "grad_z";
+  }
+
+  return { job, done: false };
+}
+
 export interface LobattoFitState {
   deg: number;
   half: number;
@@ -182,6 +372,189 @@ export interface LobattoFitState {
   uNodes: number[];
   newSamples: number;
   reusedSamples: number;
+}
+
+/** In-progress Lobatto sample fill (refine or full resample). */
+export interface LobattoBuildJob {
+  targetDeg: number;
+  half: number;
+  mode: "refine" | "full";
+  n: number;
+  vals: Float64Array;
+  pts: number[];
+  nOld: number;
+  cursor: number;
+  newSamples: number;
+  reusedSamples: number;
+}
+
+export interface LobattoBuildStepOpts {
+  budgetMs?: number;
+  maxSamples?: number;
+}
+
+export interface LobattoBuildStepResult {
+  job: LobattoBuildJob | null;
+  state: LobattoFitState | null;
+  done: boolean;
+  samples: number;
+}
+
+function lobattoStateFromVals(
+  vals: Float64Array,
+  n: number,
+  half: number,
+  newSamples: number,
+  reusedSamples: number,
+): LobattoFitState {
+  const N = n - 1;
+  const cheb = lobattoDCT3DSeparable(vals, n);
+  return {
+    deg: N,
+    half,
+    n,
+    vals,
+    cheb,
+    uNodes: lobattoNodes(N),
+    newSamples,
+    reusedSamples,
+  };
+}
+
+function lobattoBuildNeedsSample(job: LobattoBuildJob, ix: number, iy: number, iz: number): boolean {
+  if (job.mode === "full") return true;
+  return !(isNestedEvenIndex(ix) && isNestedEvenIndex(iy) && isNestedEvenIndex(iz));
+}
+
+function initRefineBuildJob(prev: LobattoFitState, newDeg: number): LobattoBuildJob {
+  const N = Math.max(0, Math.min(MAX_DEG, newDeg | 0));
+  const n = N + 1;
+  const nOld = prev.n;
+  const { pts } = lobattoWorldPoints(prev.half, N);
+  const vals = new Float64Array(n * n * n);
+  let reusedSamples = 0;
+  for (let ix = 0; ix < n; ix++) {
+    for (let iy = 0; iy < n; iy++) {
+      for (let iz = 0; iz < n; iz++) {
+        if (isNestedEvenIndex(ix) && isNestedEvenIndex(iy) && isNestedEvenIndex(iz)) {
+          const ox = ix / 2;
+          const oy = iy / 2;
+          const oz = iz / 2;
+          vals[ix + iy * n + iz * n * n] = prev.vals[ox + oy * nOld + oz * nOld * nOld]!;
+          reusedSamples++;
+        }
+      }
+    }
+  }
+  return {
+    targetDeg: N,
+    half: prev.half,
+    mode: "refine",
+    n,
+    vals,
+    pts,
+    nOld,
+    cursor: 0,
+    newSamples: 0,
+    reusedSamples,
+  };
+}
+
+function initFullBuildJob(half: number, deg: number): LobattoBuildJob {
+  const N = Math.max(0, Math.min(MAX_DEG, deg | 0));
+  const n = N + 1;
+  const { pts } = lobattoWorldPoints(half, N);
+  return {
+    targetDeg: N,
+    half,
+    mode: "full",
+    n,
+    vals: new Float64Array(n * n * n),
+    pts,
+    nOld: 0,
+    cursor: 0,
+    newSamples: 0,
+    reusedSamples: 0,
+  };
+}
+
+/**
+ * Start (or skip) chunked advancement toward targetDeg.
+ * One job covers a single ladder step: nested refine when doubling, else full resample.
+ */
+export function beginLobattoBuild(
+  cache: LobattoFitState | null,
+  half: number,
+  targetDeg: number,
+): { job: LobattoBuildJob | null; state: LobattoFitState | null } {
+  const target = Math.max(0, Math.min(MAX_DEG, targetDeg | 0));
+  if (target <= 0) return { job: null, state: cache };
+
+  let state = cache;
+  if (state && Math.abs(state.half - half) > 1e-12) state = null;
+  if (state && state.deg >= target) return { job: null, state };
+
+  if (!state) {
+    return { job: initFullBuildJob(half, Math.min(4, target)), state: null };
+  }
+
+  const doubleStep = Math.min(target, state.deg * 2);
+  if (doubleStep === state.deg * 2 && doubleStep > state.deg) {
+    return { job: initRefineBuildJob(state, doubleStep), state };
+  }
+  return { job: initFullBuildJob(half, target), state };
+}
+
+/** Sample up to budgetMs / maxSamples new grid points; finalize with DCT when complete. */
+export function stepLobattoBuild(
+  job: LobattoBuildJob,
+  fn: (x: number, y: number, z: number) => number,
+  opts: LobattoBuildStepOpts = {},
+): LobattoBuildStepResult {
+  const budgetMs = opts.budgetMs ?? 3;
+  const maxSamples = opts.maxSamples ?? Infinity;
+  const n = job.n;
+  const pts = job.pts;
+  const nCells = n * n * n;
+  const t0 = performance.now();
+  let samples = 0;
+
+  while (job.cursor < nCells && samples < maxSamples && performance.now() - t0 < budgetMs) {
+    const idx = job.cursor++;
+    const iz = (idx / (n * n)) | 0;
+    const rem = idx % (n * n);
+    const iy = (rem / n) | 0;
+    const ix = rem % n;
+    if (!lobattoBuildNeedsSample(job, ix, iy, iz)) continue;
+    const v = fn(pts[ix]!, pts[iy]!, pts[iz]!);
+    if (!Number.isFinite(v)) {
+      throw new Error(`f NaN at Lobatto sample (${pts[ix]}, ${pts[iy]}, ${pts[iz]})`);
+    }
+    job.vals[idx] = v;
+    job.newSamples++;
+    samples++;
+  }
+
+  if (job.cursor < nCells) {
+    return { job, state: null, done: false, samples };
+  }
+
+  const state = lobattoStateFromVals(job.vals, n, job.half, job.newSamples, job.reusedSamples);
+  return { job: null, state, done: true, samples };
+}
+
+/** Drain a build job synchronously (tests / sync bake). */
+export function finishLobattoBuild(
+  job: LobattoBuildJob,
+  fn: (x: number, y: number, z: number) => number,
+): LobattoFitState {
+  let live = job;
+  while (true) {
+    const step = stepLobattoBuild(live, fn, { budgetMs: Infinity, maxSamples: Infinity });
+    if (step.done && step.state) return step.state;
+    if (!step.job) throw new Error("Lobatto build stalled");
+    live = step.job;
+  }
 }
 
 function lobattoWorldPoints(half: number, deg: number): { uNodes: number[]; pts: number[] } {
@@ -607,6 +980,93 @@ export function bakeScalarKeyframeFrame(
     frame.gz = grad.gz;
   }
   return { frame, lobatto: lob, deg: lob.deg };
+}
+
+/**
+ * Chunked scalar keyframe bake: advance Lobatto sampling by budgetMs per call.
+ * Pass budgetMs=null for a synchronous full bake.
+ */
+export function bakeScalarKeyframeFrameChunked(
+  fn: (x: number, y: number, z: number) => number,
+  half: number,
+  deg: number,
+  role: "cloud" | "isosurface",
+  lobattoCache: LobattoFitState | null,
+  job: LobattoBuildJob | null,
+  stages?: { sampleMs: number; chebMs: number; idctMs: number; gradMs: number } | null,
+  budgetMs: number | null = 3,
+  finalizeJob: LobattoFinalizeJob | null = null,
+): {
+  result: ScalarKeyframeBakeResult | null;
+  job: LobattoBuildJob | null;
+  finalizeJob: LobattoFinalizeJob | null;
+  complete: boolean;
+  finalizePhase?: LobattoFinalizePhase;
+} {
+  if (budgetMs == null) {
+    const result = bakeScalarKeyframeFrame(fn, half, deg, role, lobattoCache, stages);
+    return { result, job: null, finalizeJob: null, complete: true };
+  }
+
+  if (finalizeJob) {
+    const tFin = performance.now();
+    const fin = stepLobattoFinalize(finalizeJob, budgetMs);
+    const finMs = performance.now() - tFin;
+    if (stages) {
+      if (finalizeJob.phase === "dens_idct") stages.idctMs += finMs;
+      else stages.gradMs += finMs;
+    }
+    if (!fin.done) {
+      return {
+        result: null,
+        job: null,
+        finalizeJob: fin.job,
+        complete: false,
+        finalizePhase: fin.job?.phase,
+      };
+    }
+    return {
+      result: fin.result ?? null,
+      job: null,
+      finalizeJob: null,
+      complete: true,
+    };
+  }
+
+  const tFit = performance.now();
+  let liveJob = job;
+  let lob = lobattoCache;
+
+  if (!liveJob && (lob?.deg ?? 0) < deg) {
+    const begun = beginLobattoBuild(lob, half, deg);
+    liveJob = begun.job;
+    if (!liveJob && begun.state) lob = begun.state;
+  }
+
+  if (liveJob) {
+    const stepped = stepLobattoBuild(liveJob, fn, { budgetMs });
+    liveJob = stepped.job;
+    if (!stepped.done) {
+      if (stages) stages.sampleMs += performance.now() - tFit;
+      return { result: null, job: liveJob, finalizeJob: null, complete: false };
+    }
+    lob = stepped.state!;
+  } else if ((lob?.deg ?? 0) < deg) {
+    lob = ensureLobattoDegree(lob, fn, half, deg);
+  }
+
+  if (stages) stages.sampleMs += performance.now() - tFit;
+  if (!lob || lob.deg < deg) {
+    return { result: null, job: liveJob, finalizeJob: null, complete: false };
+  }
+
+  return {
+    result: null,
+    job: null,
+    finalizeJob: beginLobattoFinalize(lob, role),
+    complete: false,
+    finalizePhase: "dens_idct",
+  };
 }
 
 /** Ladder degrees for progressive preview: 4 → 8 → … → target. */

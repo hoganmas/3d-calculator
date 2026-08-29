@@ -90,9 +90,182 @@ export function idctCheb3D(
   return { dens, M, deg, n };
 }
 
-/**
- * ∂f/∂ξ, ∂f/∂η, ∂f/∂ζ on the same Chebyshev-root grid as idctCheb3D.
- */
+/** Resumable separable Chebyshev-root IDCT (Gauss grid). */
+export interface IdctCheb3DJob {
+  cheb: Float32Array | Float64Array;
+  deg: number;
+  M: number;
+  n: number;
+  pass: 0 | 1 | 2;
+  cursor: number;
+  tmp1: Float64Array;
+  tmp2: Float64Array;
+  dens: Float32Array;
+  row: Float64Array;
+}
+
+export function beginIdctCheb3D(
+  cheb: Float32Array | Float64Array,
+  deg: number,
+  gridM?: number,
+): IdctCheb3DJob {
+  const n = deg + 1;
+  const M = Math.max(n, (gridM ?? n) | 0 || n);
+  return {
+    cheb,
+    deg,
+    M,
+    n,
+    pass: 0,
+    cursor: 0,
+    tmp1: new Float64Array(M * n * n),
+    tmp2: new Float64Array(M * M * n),
+    dens: new Float32Array(M * M * M),
+    row: new Float64Array(n),
+  };
+}
+
+export function stepIdctCheb3D(
+  job: IdctCheb3DJob,
+  budgetMs: number,
+): { job: IdctCheb3DJob | null; done: boolean; dens?: Float32Array } {
+  const t0 = performance.now();
+  const { cheb, n, M } = job;
+
+  while (performance.now() - t0 < budgetMs) {
+    if (job.pass === 0) {
+      const total = n * n;
+      if (job.cursor >= total) {
+        job.pass = 1;
+        job.cursor = 0;
+        continue;
+      }
+      const j = (job.cursor / n) | 0;
+      const k = job.cursor % n;
+      for (let i = 0; i < n; i++) job.row[i] = cheb[i + j * n + k * n * n] || 0;
+      const v = idctCheb1D(job.row, M);
+      for (let m = 0; m < M; m++) job.tmp1[m + j * M + k * M * n] = v[m]!;
+      job.cursor++;
+      continue;
+    }
+
+    if (job.pass === 1) {
+      const total = M * n;
+      if (job.cursor >= total) {
+        job.pass = 2;
+        job.cursor = 0;
+        continue;
+      }
+      const m = (job.cursor / n) | 0;
+      const k = job.cursor % n;
+      for (let j = 0; j < n; j++) job.row[j] = job.tmp1[m + j * M + k * M * n]!;
+      const v = idctCheb1D(job.row, M);
+      for (let p = 0; p < M; p++) job.tmp2[m + p * M + k * M * M] = v[p]!;
+      job.cursor++;
+      continue;
+    }
+
+    const total = M * M;
+    if (job.cursor >= total) return { job: null, done: true, dens: job.dens };
+    const m = (job.cursor / M) | 0;
+    const p = job.cursor % M;
+    for (let k = 0; k < n; k++) job.row[k] = job.tmp2[m + p * M + k * M * M]!;
+    const v = idctCheb1D(job.row, M);
+    for (let q = 0; q < M; q++) job.dens[m + p * M + q * M * M] = v[q]!;
+    job.cursor++;
+  }
+
+  return { job, done: false };
+}
+
+export function finishIdctCheb3D(job: IdctCheb3DJob): Float32Array {
+  let live = job;
+  while (true) {
+    const step = stepIdctCheb3D(live, Infinity);
+    if (step.done) return step.dens ?? live.dens;
+    if (!step.job) throw new Error("IDCT stalled");
+    live = step.job;
+  }
+}
+
+/** One axis of ∂f/∂ξ: coeff pass then separable IDCT. */
+export interface GradAxisJob {
+  series: Float32Array | Float64Array;
+  deg: number;
+  axis: ChebAxis;
+  phase: "coeff" | "idct";
+  cursor: number;
+  coeff: Float64Array;
+  row: Float64Array;
+  idct: IdctCheb3DJob | null;
+}
+
+export function beginGradAxisJob(
+  series: Float32Array | Float64Array,
+  deg: number,
+  axis: ChebAxis,
+): GradAxisJob {
+  const n = deg + 1;
+  return {
+    series,
+    deg,
+    axis,
+    phase: "coeff",
+    cursor: 0,
+    coeff: new Float64Array(n * n * n),
+    row: new Float64Array(n),
+    idct: null,
+  };
+}
+
+export function stepGradAxisJob(
+  job: GradAxisJob,
+  budgetMs: number,
+): { job: GradAxisJob | null; done: boolean; grad?: Float32Array } {
+  const t0 = performance.now();
+  const n = job.deg + 1;
+
+  if (job.phase === "coeff") {
+    while (performance.now() - t0 < budgetMs) {
+      const total = n * n;
+      if (job.cursor >= total) {
+        job.phase = "idct";
+        job.cursor = 0;
+        job.idct = beginIdctCheb3D(job.coeff, job.deg, n);
+        break;
+      }
+      const a = (job.cursor / n) | 0;
+      const b = job.cursor % n;
+      if (job.axis === 0) {
+        for (let i = 0; i < n; i++) job.row[i] = job.series[i + a * n + b * n * n] || 0;
+        const d = chebDiff1D(job.row);
+        for (let i = 0; i < n; i++) job.coeff[i + a * n + b * n * n] = d[i]!;
+      } else if (job.axis === 1) {
+        for (let j = 0; j < n; j++) job.row[j] = job.series[a + j * n + b * n * n] || 0;
+        const d = chebDiff1D(job.row);
+        for (let j = 0; j < n; j++) job.coeff[a + j * n + b * n * n] = d[j]!;
+      } else {
+        for (let k = 0; k < n; k++) job.row[k] = job.series[a + b * n + k * n * n] || 0;
+        const d = chebDiff1D(job.row);
+        for (let k = 0; k < n; k++) job.coeff[a + b * n + k * n * n] = d[k]!;
+      }
+      job.cursor++;
+    }
+    if (job.phase === "coeff") return { job, done: false };
+  }
+
+  if (!job.idct) {
+    job.idct = beginIdctCheb3D(job.coeff, job.deg, n);
+  }
+  const remaining = Math.max(0, budgetMs - (performance.now() - t0));
+  const idctJob = job.idct;
+  const idctStep = stepIdctCheb3D(idctJob, remaining);
+  if (idctStep.done) {
+    return { job: null, done: true, grad: idctStep.dens ?? idctJob.dens };
+  }
+  job.idct = idctStep.job;
+  return { job, done: false };
+}
 export function idctChebGrad3D(
   cheb: Float32Array | Float64Array,
   deg: number,
