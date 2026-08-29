@@ -2,7 +2,8 @@
 
 export type ExprRole = "auto" | "cloud" | "isosurface" | "flow";
 export type AnimMode = "pingpong" | "loop";
-export type ExprKind = "parameter" | "constraint" | "definition" | "bare";
+export type ExprKind = "parameter" | "alias" | "funcdef" | "constraint" | "definition" | "bare";
+export type DeclSymbolKind = "parameter" | "alias" | "funcdef";
 export type LayerRole = "parameter" | "cloud" | "isosurface" | "flow";
 export type VectorFieldKind = "tuple" | "gradient" | "curl" | "reference";
 export type ScalarFieldOperator = "none" | "laplacian" | "divergence";
@@ -192,6 +193,9 @@ export interface ClassifiedExpr {
   compileLatex: string;
   label: string;
   paramName?: string;
+  aliasName?: string;
+  funcName?: string;
+  funcArgs?: string[];
 }
 
 /** Field expressions (not parameter rows). */

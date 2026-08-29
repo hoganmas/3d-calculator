@@ -24,7 +24,6 @@ export interface ClipGpuProfile {
   method: string;
   gridM: number;
   timestamps: boolean;
-  isoInterp: "hermite" | "trilinear";
 }
 
 export interface RenderClipFrameGpuParams {

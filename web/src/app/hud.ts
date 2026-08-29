@@ -1,4 +1,6 @@
-import { getClipGpuProfile, getIsoInterpHermite } from "../render/webgpu/march.js";
+import { getClipGpuProfile } from "../render/webgpu/march.js";
+import { getFlowParticleMetrics } from "../render/webgpu/flowParticles.js";
+import { hasFlowGpuLayers } from "../render/webgpu/flowGpu.js";
 import { getParamValues } from "../model/params.js";
 import { getExprWarning } from "../model/expressions.js";
 import { els } from "./dom.js";
@@ -116,7 +118,7 @@ export function buildMetricsReport() {
     `js_frame_ms     ${state.cpuMsSmooth.toFixed(2)}`,
     `gpu_path        ${useGpuClipPath() ? "webgpu" : "cpu/webgl"}`,
     `gpu_method      ${p.method || "—"}`,
-    `iso_interp      ${p.isoInterp || (getIsoInterpHermite() ? "hermite" : "trilinear")}`,
+    `iso_interp      tricubic Hermite`,
     `expr_kind       ${state.lastExprMeta.kind}`,
     `shade           ${state.lastExprMeta.shade}`,
     `iso_level       ${readIsoLevel()}`,
@@ -168,6 +170,36 @@ export function buildMetricsReport() {
     lines.push(
       `params          ${pNames.map((n) => `${n}=${fmtParamNum(pv[n])}`).join(" ")}`,
     );
+  }
+  if (hasFlowGpuLayers()) {
+    const fp = getFlowParticleMetrics();
+    lines.push(
+      `flow_viz_mode     ${fp.vizMode}`,
+      `flow_layers       ${fp.layerCount}`,
+      `flow_per_layer    ${fp.perLayer}`,
+      `flow_particles    ${fp.total}`,
+      `flow_trail_steps  ${fp.trailSteps}`,
+      `flow_trail_segs   ${fp.trailSegCount}`,
+      `flow_draw_segs    ${fp.drawSegCount}${fp.segStride > 1 ? ` (stride ${fp.segStride})` : ""}`,
+      `flow_ribbon_verts ${fp.ribbonDrawVerts}`,
+      `flow_trail_buf_kb ${(fp.trailBufBytes / 1024).toFixed(1)}`,
+      `flow_trail_push   every ${fp.trailPushInterval} frames`,
+    );
+    if (fp.active) {
+      lines.push(
+        `flow_tick_ms      ${fp.tickMs.toFixed(2)}`,
+        `flow_tick_density ${fp.tickDensityMs.toFixed(2)}`,
+        `flow_tick_advect  ${fp.tickAdvectMs.toFixed(2)}`,
+        `flow_tick_redist  ${fp.tickRedistributeMs.toFixed(2)}`,
+        `flow_tick_trail   ${fp.tickTrailMs.toFixed(2)}`,
+        `flow_tick_sort    ${fp.tickSortMs.toFixed(2)}`,
+        `flow_tick_upload  ${fp.tickUploadMs.toFixed(2)}`,
+        `flow_draw_ms      ${fp.drawMs.toFixed(2)}`,
+        `flow_speed_rng_ms ${fp.speedRangeMs.toFixed(2)}`,
+        `flow_vmin         ${fp.speedMin.toFixed(4)}`,
+        `flow_vmax         ${fp.speedMax.toFixed(4)}`,
+      );
+    }
   }
   return lines.join("\n");
 }

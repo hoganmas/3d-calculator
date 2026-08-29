@@ -1,6 +1,5 @@
 import gradientWgsl from "./common/gradient.wgsl?raw";
 import isoHermiteWgsl from "./isoHermite.wgsl?raw";
-import isoTrilinearWgsl from "./isoTrilinear.wgsl?raw";
 import beerWgsl from "./beer.wgsl?raw";
 import gridWgsl from "./grid.wgsl?raw";
 import axisLabelWgsl from "./axisLabel.wgsl?raw";
@@ -21,9 +20,8 @@ function gradientBlock(maxGradStops: number): string {
   return inject(gradientWgsl, { MAX_GRAD_STOPS: maxGradStops });
 }
 
-export function getIsoShader(useHermite: boolean, maxGradStops: number): string {
-  const base = useHermite ? isoHermiteWgsl : isoTrilinearWgsl;
-  return inject(base, {
+export function getIsoShader(maxGradStops: number): string {
+  return inject(isoHermiteWgsl, {
     GRADIENT_WGSL: gradientBlock(maxGradStops),
     MAX_GRAD_STOPS: maxGradStops,
   });

@@ -7,7 +7,7 @@ import { fitChebyshev3D } from "./fit.js";
 import { idctCheb3D, idctChebCurl3D, idctChebGrad3D } from "./idct.js";
 import {
   extractTriple,
-  normalizeCalcLatex,
+  mathJsonHasError,
   scalarFromUnaryOpJson,
   tripleFromUnaryOpJson,
 } from "./calcOps.js";
@@ -17,6 +17,8 @@ import type {
   VectorFieldKind,
   VectorFitResult,
 } from "../types/models.js";
+import { expandVectorOperatorArgs, normalizeForCe } from "./fit.js";
+import type { SymbolRegistry } from "../model/symbols.js";
 
 const ce = new ComputeEngine();
 
@@ -84,6 +86,10 @@ function compileLatex(latex: string): CeCompileResult {
   } catch {
     return { success: false, unsupported: ["parse"], run: null, freeSymbols: [] };
   }
+  const j = box?.json ?? (typeof box?.toJSON === "function" ? box.toJSON() : null);
+  if (mathJsonHasError(j)) {
+    return { success: false, unsupported: ["parse"], run: null, freeSymbols: [] };
+  }
   return compile(box) as CeCompileResult;
 }
 
@@ -147,7 +153,7 @@ function bindCurlFromVector(
 
 /** Normalize vector-calculus LaTeX for CE parsing. */
 export function normalizeVectorLatex(latex: string): string {
-  return normalizeCalcLatex(latex);
+  return normalizeForCe(latex);
 }
 
 export { extractTriple } from "./calcOps.js";
@@ -239,10 +245,33 @@ function looksLikeCurl(src: string, json: unknown): string[] | null {
   return null;
 }
 
+/** Syntax-only vector-field check (before alias/funcdef expansion). */
+function looksLikeVectorFieldSyntax(raw: string): boolean {
+  const src = normalizeVectorLatex(String(raw ?? "").trim());
+  if (/\\operatorname\s*\{\s*curl\s*\}|\\curl|\\nabla\s*\\times/i.test(src)) return true;
+  if (/\\nabla\s*\^|\^2|\\laplacian|\\Delta|\\div|\\nabla\s*\\cdot/i.test(src)) return false;
+  if (/\\operatorname\s*\{\s*grad\s*\}|\\grad|\\nabla/i.test(src)) return true;
+  const m = src.match(/^\(([\s\S]+)\)$/);
+  if (m) {
+    let depth = 0;
+    let parts = 0;
+    for (let i = 0; i < m[1]!.length; i++) {
+      const c = m[1]![i];
+      if (c === "(") depth++;
+      else if (c === ")") depth--;
+      else if (c === "," && depth === 0) parts++;
+    }
+    if (parts === 2) return true;
+  }
+  return false;
+}
+
 /** Quick check for auto role inference. */
-export function isVectorFieldLatex(raw: string): boolean {
+export function isVectorFieldLatex(raw: string, registry?: SymbolRegistry): boolean {
+  if (looksLikeVectorFieldSyntax(raw)) return true;
   try {
-    classifyVectorExpr(raw);
+    const expanded = registry ? expandVectorOperatorArgs(raw, registry) : raw;
+    classifyVectorExpr(expanded);
     return true;
   } catch {
     return false;
@@ -293,8 +322,13 @@ export function classifyVectorExpr(raw: string): ClassifiedVectorExpr {
   );
 }
 
-export function compileVectorExpr(raw: string): CompiledVectorExpr {
-  const classified = classifyVectorExpr(raw);
+export function compileVectorExpr(
+  raw: string,
+  registry?: SymbolRegistry,
+  expandWarnings?: string[],
+): CompiledVectorExpr {
+  const expandedRaw = registry ? expandVectorOperatorArgs(raw, registry, expandWarnings) : raw;
+  const classified = classifyVectorExpr(expandedRaw);
 
   if (classified.kind === "gradient") {
     const scalarLatex = classified.compileParts[0]!;
@@ -872,34 +906,32 @@ export function sampleVelGridAt(
   const xi = Math.max(-1, Math.min(1, px / half));
   const yi = Math.max(-1, Math.min(1, py / half));
   const zi = Math.max(-1, Math.min(1, pz / half));
-  const sample = (field: Float32Array) => {
-    const fx_ = chebIndexWorld(xi, M);
-    const fy_ = chebIndexWorld(yi, M);
-    const fz_ = chebIndexWorld(zi, M);
-    const x0 = Math.floor(fx_);
-    const y0 = Math.floor(fy_);
-    const z0 = Math.floor(fz_);
-    const tx = Math.max(0, Math.min(1, fx_ - x0));
-    const ty = Math.max(0, Math.min(1, fy_ - y0));
-    const tz = Math.max(0, Math.min(1, fz_ - z0));
-    const mi = M - 1;
-    const idx = (x: number, y: number, z: number) =>
-      Math.max(0, Math.min(mi, x)) + Math.max(0, Math.min(mi, y)) * M + Math.max(0, Math.min(mi, z)) * M * M;
-    const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
-    const c000 = field[idx(x0, y0, z0)]!;
-    const c100 = field[idx(x0 + 1, y0, z0)]!;
-    const c010 = field[idx(x0, y0 + 1, z0)]!;
-    const c110 = field[idx(x0 + 1, y0 + 1, z0)]!;
-    const c001 = field[idx(x0, y0, z0 + 1)]!;
-    const c101 = field[idx(x0 + 1, y0, z0 + 1)]!;
-    const c011 = field[idx(x0, y0 + 1, z0 + 1)]!;
-    const c111 = field[idx(x0 + 1, y0 + 1, z0 + 1)]!;
-    return lerp(
-      lerp(lerp(c000, c100, tx), lerp(c010, c110, tx), ty),
-      lerp(lerp(c001, c101, tx), lerp(c011, c111, tx), ty),
-      tz,
-    );
-  };
+  const fx_ = chebIndexWorld(xi, M);
+  const fy_ = chebIndexWorld(yi, M);
+  const fz_ = chebIndexWorld(zi, M);
+  const x0 = Math.floor(fx_);
+  const y0 = Math.floor(fy_);
+  const z0 = Math.floor(fz_);
+  const tx = Math.max(0, Math.min(1, fx_ - x0));
+  const ty = Math.max(0, Math.min(1, fy_ - y0));
+  const tz = Math.max(0, Math.min(1, fz_ - z0));
+  const mi = M - 1;
+  const idx = (x: number, y: number, z: number) =>
+    Math.max(0, Math.min(mi, x)) + Math.max(0, Math.min(mi, y)) * M + Math.max(0, Math.min(mi, z)) * M * M;
+  const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+  const i000 = idx(x0, y0, z0);
+  const i100 = idx(x0 + 1, y0, z0);
+  const i010 = idx(x0, y0 + 1, z0);
+  const i110 = idx(x0 + 1, y0 + 1, z0);
+  const i001 = idx(x0, y0, z0 + 1);
+  const i101 = idx(x0 + 1, y0, z0 + 1);
+  const i011 = idx(x0, y0 + 1, z0 + 1);
+  const i111 = idx(x0 + 1, y0 + 1, z0 + 1);
+  const sample = (field: Float32Array) => lerp(
+    lerp(lerp(field[i000]!, field[i100]!, tx), lerp(field[i010]!, field[i110]!, tx), ty),
+    lerp(lerp(field[i001]!, field[i101]!, tx), lerp(field[i011]!, field[i111]!, tx), ty),
+    tz,
+  );
   return [sample(fx), sample(fy), sample(fz)];
 }
 
@@ -1344,26 +1376,93 @@ export function advectFlowParticles(
   }
 }
 
+/** Min/max head speed among live particles (cheap color-range probe). */
+export function flowHeadSpeedMinMax(
+  posAge: Float32Array,
+  count: number,
+): [min: number, max: number] | null {
+  let vmin = Infinity;
+  let vmax = 0;
+  let samples = 0;
+  for (let i = 0; i < count; i++) {
+    const s = posAge[i * FLOW_PARTICLE_STRIDE + 4]!;
+    if (s <= 1e-8) continue;
+    samples++;
+    if (s < vmin) vmin = s;
+    if (s > vmax) vmax = s;
+  }
+  if (samples < 2 || !Number.isFinite(vmin)) return null;
+  if (vmax <= vmin) {
+    const s = Math.max(vmax, 1e-8);
+    return [Math.max(0, s * 0.55), s * 1.05];
+  }
+  return [vmin, vmax];
+}
+
+/** Particle color range from head speeds + cached field percentiles (no trail scan). */
+export function resolveFlowParticleColorRangeFast(
+  posAge: Float32Array,
+  count: number,
+  vRef: number,
+  fieldRange: [number, number] | null = null,
+): [min: number, max: number] {
+  const head = flowHeadSpeedMinMax(posAge, count);
+  if (head && head[1] > 1e-8) {
+    let [lo, hi] = head;
+    const span = hi - lo;
+    const minSpan = flowColorSpeedSpan(hi);
+    if (span < minSpan * 0.35 && fieldRange && fieldRange[1] > fieldRange[0] + 1e-8) {
+      lo = fieldRange[0];
+      hi = fieldRange[1];
+    } else if (span < minSpan) {
+      lo = Math.max(0, hi - minSpan);
+    }
+    return [lo, hi];
+  }
+  if (fieldRange && fieldRange[1] > 1e-8) return fieldRange;
+  return [0, Math.max(vRef, 1e-6)];
+}
+
 /** Sort particle indices back-to-front for alpha compositing. */
 export function sortFlowParticlesByDepth(
   posAge: Float32Array,
   sortOrder: Uint32Array,
   ro: [number, number, number],
   viewDir: [number, number, number],
+  depthKeys?: Float32Array,
 ): void {
   const n = sortOrder.length;
-  for (let i = 0; i < n; i++) sortOrder[i] = i;
+  const v0 = viewDir[0];
+  const v1 = viewDir[1];
+  const v2 = viewDir[2];
+  const r0 = ro[0];
+  const r1 = ro[1];
+  const r2 = ro[2];
+  for (let i = 0; i < n; i++) {
+    sortOrder[i] = i;
+    if (depthKeys) {
+      const o = i * FLOW_PARTICLE_STRIDE;
+      depthKeys[i] =
+        (posAge[o]! - r0) * v0 +
+        (posAge[o + 1]! - r1) * v1 +
+        (posAge[o + 2]! - r2) * v2;
+    }
+  }
+  if (depthKeys) {
+    sortOrder.sort((a, b) => depthKeys[b]! - depthKeys[a]!);
+    return;
+  }
   sortOrder.sort((a, b) => {
     const oa = a * FLOW_PARTICLE_STRIDE;
     const ob = b * FLOW_PARTICLE_STRIDE;
     const da =
-      (posAge[oa]! - ro[0]) * viewDir[0] +
-      (posAge[oa + 1]! - ro[1]) * viewDir[1] +
-      (posAge[oa + 2]! - ro[2]) * viewDir[2];
+      (posAge[oa]! - r0) * v0 +
+      (posAge[oa + 1]! - r1) * v1 +
+      (posAge[oa + 2]! - r2) * v2;
     const db =
-      (posAge[ob]! - ro[0]) * viewDir[0] +
-      (posAge[ob + 1]! - ro[1]) * viewDir[1] +
-      (posAge[ob + 2]! - ro[2]) * viewDir[2];
+      (posAge[ob]! - r0) * v0 +
+      (posAge[ob + 1]! - r1) * v1 +
+      (posAge[ob + 2]! - r2) * v2;
     return db - da;
   });
 }

@@ -7,13 +7,13 @@ import {
   DEFAULT_FLOW_TRAIL_STEPS,
   FLOW_PARTICLE_STRIDE,
   FLOW_TRAIL_SLOT_STRIDE,
-  flowTrailBaseIndex,
   buildFlowParticleDensityGrids,
   FLOW_PARTICLE_DENSITY_GRID,
   MAX_FLOW_TRAIL_STEPS,
   pushFlowTrailHist,
   redistributeOvercrowdedFlowParticles,
   flowSpeedPercentileMinMax,
+  flowTrailBaseIndex,
   resolveFlowParticleColorRange,
   sampleVelGridAt,
   seedFlowParticles,
@@ -28,15 +28,106 @@ import { getFlowParticlesShader } from "./shaders/compose.js";
 export const DEFAULT_FLOW_PARTICLE_COUNT = 1000;
 export const MAX_FLOW_PARTICLE_COUNT = 32000;
 /** Shift trail ring buffer every N frames to stretch visible history in time. */
-const TRAIL_PUSH_INTERVAL = 3;
+export const TRAIL_PUSH_INTERVAL = 3;
+/** When count × trailSegs exceeds this, draw every Nth segment (GPU LOD). */
+const DRAW_LOD_INSTANCE_THRESHOLD = 25000;
+const PROFILE_SMOOTH = 0.12;
+
+export type FlowParticleMetrics = {
+  active: boolean;
+  vizMode: string;
+  layerCount: number;
+  perLayer: number;
+  total: number;
+  trailSteps: number;
+  trailSegCount: number;
+  drawSegCount: number;
+  segStride: number;
+  ribbonDrawVerts: number;
+  trailBufBytes: number;
+  tickMs: number;
+  tickDensityMs: number;
+  tickAdvectMs: number;
+  tickRedistributeMs: number;
+  tickTrailMs: number;
+  tickSortMs: number;
+  tickUploadMs: number;
+  drawMs: number;
+  speedRangeMs: number;
+  speedMin: number;
+  speedMax: number;
+  trailPushInterval: number;
+};
+
+const profile: FlowParticleMetrics = {
+  active: false,
+  vizMode: "particles",
+  layerCount: 0,
+  perLayer: 0,
+  total: 0,
+  trailSteps: 0,
+  trailSegCount: 0,
+  drawSegCount: 0,
+  segStride: 1,
+  ribbonDrawVerts: 0,
+  trailBufBytes: 0,
+  tickMs: 0,
+  tickDensityMs: 0,
+  tickAdvectMs: 0,
+  tickRedistributeMs: 0,
+  tickTrailMs: 0,
+  tickSortMs: 0,
+  tickUploadMs: 0,
+  drawMs: 0,
+  speedRangeMs: 0,
+  speedMin: 0,
+  speedMax: 0,
+  trailPushInterval: TRAIL_PUSH_INTERVAL,
+};
 
 let posAge: Float32Array | null = null;
 let layerIds: Uint32Array | null = null;
 let trailHist: Float32Array | null = null;
 let sortScratch: Uint32Array | null = null;
+let sortDepthKeys: Float32Array | null = null;
 let flowParticleFrameIdx = 0;
 let trailPushCounter = 0;
 let flowParticlesBuiltEpoch = -1;
+let cachedFieldSpeedRange: [number, number] | null = null;
+let cachedFieldSpeedEpoch = -1;
+
+function smoothMs(prev: number, next: number): number {
+  if (!(prev > 0)) return next;
+  return prev * (1 - PROFILE_SMOOTH) + next * PROFILE_SMOOTH;
+}
+
+function invalidateSpeedRangeCache(): void {
+  cachedFieldSpeedRange = null;
+  cachedFieldSpeedEpoch = -1;
+}
+
+function fullTrailSegCount(steps: number): number {
+  return Math.max(1, steps - 1);
+}
+
+/** Reduce ribbon segment count when instance load is high (GPU LOD). */
+function drawTrailLod(
+  count: number,
+  steps: number,
+): { drawSegCount: number; segStride: number; fullSegCount: number } {
+  const fullSegCount = fullTrailSegCount(steps);
+  const instances = count * fullSegCount;
+  if (instances <= DRAW_LOD_INSTANCE_THRESHOLD) {
+    return { drawSegCount: fullSegCount, segStride: 1, fullSegCount };
+  }
+  const segStride = instances > DRAW_LOD_INSTANCE_THRESHOLD * 2 ? 3 : 2;
+  const drawSegCount = Math.max(1, Math.floor(fullSegCount / segStride));
+  return { drawSegCount, segStride, fullSegCount };
+}
+
+export function getFlowParticleMetrics(): FlowParticleMetrics {
+  return { ...profile };
+}
 
 function trailSteps(): number {
   return Math.max(2, Math.min(MAX_FLOW_TRAIL_STEPS, state.flowTrailSteps | 0 || DEFAULT_FLOW_TRAIL_STEPS));
@@ -80,9 +171,11 @@ export function flowParticleBudget(layerCount: number): { perLayer: number; tota
 export function destroyFlowParticleBuffers(): void {
   destroyBuffer(gpu.flowParticleBuf);
   destroyBuffer(gpu.flowParticleLayerBuf);
+  destroyBuffer(gpu.flowParticleSortBuf);
   destroyBuffer(gpu.flowTrailBuf);
   gpu.flowParticleBuf = null;
   gpu.flowParticleLayerBuf = null;
+  gpu.flowParticleSortBuf = null;
   gpu.flowTrailBuf = null;
   gpu.flowParticleCount = 0;
   gpu.flowParticlesPerLayer = 0;
@@ -90,8 +183,11 @@ export function destroyFlowParticleBuffers(): void {
   layerIds = null;
   trailHist = null;
   sortScratch = null;
+  sortDepthKeys = null;
   flowParticleFrameIdx = 0;
   trailPushCounter = 0;
+  invalidateSpeedRangeCache();
+  profile.active = false;
 }
 
 export function ensureFlowParticleBuffers(layerCount: number, half: number): void {
@@ -106,11 +202,13 @@ export function ensureFlowParticleBuffers(layerCount: number, half: number): voi
   const posBytes = Math.max(256, Math.ceil((count * FLOW_PARTICLE_STRIDE * 4) / 256) * 256);
   const trailFloats = count * MAX_FLOW_TRAIL_STEPS * FLOW_TRAIL_SLOT_STRIDE;
   const trailBytes = Math.max(256, Math.ceil((trailFloats * 4) / 256) * 256);
+  const sortBytes = Math.max(256, Math.ceil((count * 4) / 256) * 256);
   gpu.flowLayerCount = layerCount;
   gpu.flowHalf = half;
   const resize =
     !gpu.flowParticleBuf ||
     !gpu.flowParticleLayerBuf ||
+    !gpu.flowParticleSortBuf ||
     !gpu.flowTrailBuf ||
     gpu.flowParticleCount !== count ||
     gpu.flowParticlesPerLayer !== perLayer ||
@@ -127,6 +225,10 @@ export function ensureFlowParticleBuffers(layerCount: number, half: number): voi
     });
     gpu.flowParticleLayerBuf = device.createBuffer({
       size: layerBytes,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    gpu.flowParticleSortBuf = device.createBuffer({
+      size: sortBytes,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
     gpu.flowTrailBuf = device.createBuffer({
@@ -147,9 +249,9 @@ export function ensureFlowParticleBuffers(layerCount: number, half: number): voi
     trailHist = new Float32Array(count * MAX_FLOW_TRAIL_STEPS * FLOW_TRAIL_SLOT_STRIDE);
     seedFlowTrailHist(posAge, trailHist, steps, count);
     sortScratch = new Uint32Array(count);
+    sortDepthKeys = new Float32Array(count);
     const layers = extractFlowLayers();
-    if (layers.length) refreshTrailSpeeds(layers, gpu.sceneM, half, count, steps);
-    device.queue.writeBuffer(gpu.flowParticleBuf, 0, posAge);
+    if (layers.length) refreshAllTrailSpeeds(layers, gpu.sceneM, half, count, steps);
     device.queue.writeBuffer(gpu.flowParticleLayerBuf, 0, layerIds);
     device.queue.writeBuffer(gpu.flowTrailBuf, 0, trailHist);
   }
@@ -165,6 +267,7 @@ export function reseedFlowParticles(): void {
   if (
     !gpu.flowParticleBuf ||
     !gpu.flowParticleLayerBuf ||
+    !gpu.flowParticleSortBuf ||
     !gpu.flowTrailBuf ||
     gpu.flowParticleCount !== count ||
     gpu.flowParticlesPerLayer !== perLayer
@@ -187,8 +290,8 @@ export function reseedFlowParticles(): void {
   }
   seedFlowTrailHist(posAge, trailHist, steps, count);
   const layers = extractFlowLayers();
-  if (layers.length) refreshTrailSpeeds(layers, gpu.sceneM, gpu.flowHalf, count, steps);
-  device.queue.writeBuffer(gpu.flowParticleBuf, 0, posAge);
+  if (layers.length) refreshAllTrailSpeeds(layers, gpu.sceneM, gpu.flowHalf, count, steps);
+  invalidateSpeedRangeCache();
   device.queue.writeBuffer(gpu.flowParticleLayerBuf, 0, layerIds);
   if (gpu.flowTrailBuf) device.queue.writeBuffer(gpu.flowTrailBuf, 0, trailHist);
   flowParticleFrameIdx = 0;
@@ -213,48 +316,45 @@ function extractFlowLayers(): FlowParticleLayerVel[] {
   return layers;
 }
 
-function reorderBySortOrder(): void {
-  if (!posAge || !layerIds || !sortScratch) return;
-  const n = sortScratch.length;
-  const sortedPos = new Float32Array(posAge.length);
-  const sortedLayers = new Uint32Array(layerIds.length);
-  const sortedTrail = trailHist ? new Float32Array(n * MAX_FLOW_TRAIL_STEPS * FLOW_TRAIL_SLOT_STRIDE) : null;
-  for (let i = 0; i < n; i++) {
-    const src = sortScratch[i]!;
-    const so = src * FLOW_PARTICLE_STRIDE;
-    const do_ = i * FLOW_PARTICLE_STRIDE;
-    sortedPos[do_] = posAge[so]!;
-    sortedPos[do_ + 1] = posAge[so + 1]!;
-    sortedPos[do_ + 2] = posAge[so + 2]!;
-    sortedPos[do_ + 3] = posAge[so + 3]!;
-    sortedPos[do_ + 4] = posAge[so + 4]!;
-    sortedLayers[i] = layerIds[src]!;
-    if (sortedTrail && trailHist) {
-      const ss = flowTrailBaseIndex(src);
-      const ds = flowTrailBaseIndex(i);
-      sortedTrail.set(
-        trailHist.subarray(ss, ss + MAX_FLOW_TRAIL_STEPS * FLOW_TRAIL_SLOT_STRIDE),
-        ds,
-      );
-    }
-  }
-  posAge.set(sortedPos);
-  layerIds.set(sortedLayers);
-  if (sortedTrail && trailHist) trailHist.set(sortedTrail);
+function syncProfileStatic(): void {
+  const steps = trailSteps();
+  const lod = drawTrailLod(Math.max(0, gpu.flowParticleCount), steps);
+  profile.active = hasFlowGpuLayers() && state.flowVizMode === "particles";
+  profile.vizMode = state.flowVizMode;
+  profile.layerCount = gpu.flowLayerCount;
+  profile.perLayer = gpu.flowParticlesPerLayer;
+  profile.total = gpu.flowParticleCount;
+  profile.trailSteps = steps;
+  profile.trailSegCount = lod.fullSegCount;
+  profile.drawSegCount = lod.drawSegCount;
+  profile.segStride = lod.segStride;
+  profile.ribbonDrawVerts = lod.drawSegCount * 6 * Math.max(0, gpu.flowParticleCount);
+  profile.trailBufBytes = gpu.flowTrailBuf?.size ?? 0;
+  profile.trailPushInterval = TRAIL_PUSH_INTERVAL;
 }
 
 export function tickFlowParticles(
   ro: [number, number, number],
   viewDir: [number, number, number],
 ): void {
-  if (!hasFlowGpuLayers() || state.flowVizMode !== "particles") return;
-  if (!posAge || !layerIds || !sortScratch || !gpu.device) return;
-  if (!gpu.flowParticleBuf || !gpu.flowParticleLayerBuf) return;
+  if (!hasFlowGpuLayers() || state.flowVizMode !== "particles") {
+    profile.active = false;
+    return;
+  }
+  if (!posAge || !layerIds || !sortScratch || !sortDepthKeys || !gpu.device) return;
+  if (!gpu.flowParticleLayerBuf || !gpu.flowParticleSortBuf) return;
+
+  const tickStart = performance.now();
+  syncProfileStatic();
 
   const layers = extractFlowLayers();
-  if (!layers.length) return;
+  if (!layers.length) {
+    profile.active = false;
+    return;
+  }
 
   const steps = trailSteps();
+  let t0 = performance.now();
   const densityGrids = buildFlowParticleDensityGrids(
     posAge,
     layerIds,
@@ -262,6 +362,9 @@ export function tickFlowParticles(
     gpu.flowHalf,
     gpu.flowLayerCount,
   );
+  const densityMs = performance.now() - t0;
+
+  t0 = performance.now();
   advectFlowParticles(
     posAge,
     layerIds,
@@ -282,6 +385,9 @@ export function tickFlowParticles(
     densityGrids,
     FLOW_PARTICLE_DENSITY_GRID,
   );
+  const advectMs = performance.now() - t0;
+
+  t0 = performance.now();
   redistributeOvercrowdedFlowParticles(
     posAge,
     layerIds,
@@ -297,7 +403,9 @@ export function tickFlowParticles(
     gpu.sceneM,
     densityGrids,
   );
-  refreshTrailSpeeds(layers, gpu.sceneM, gpu.flowHalf, gpu.flowParticleCount, steps);
+  const redistributeMs = performance.now() - t0;
+
+  t0 = performance.now();
   if (trailHist && gpu.flowTrailBuf) {
     updateFlowTrailHead(posAge, trailHist, gpu.flowParticleCount);
     trailPushCounter++;
@@ -306,15 +414,30 @@ export function tickFlowParticles(
       trailPushCounter = 0;
     }
   }
-  sortFlowParticlesByDepth(posAge, sortScratch, ro, viewDir);
-  reorderBySortOrder();
+  const trailMs = performance.now() - t0;
 
+  t0 = performance.now();
+  sortFlowParticlesByDepth(posAge, sortScratch, ro, viewDir, sortDepthKeys);
+  const sortMs = performance.now() - t0;
+
+  t0 = performance.now();
   const { device } = gpu;
-  device.queue.writeBuffer(gpu.flowParticleBuf, 0, posAge);
+  device.queue.writeBuffer(gpu.flowParticleSortBuf, 0, sortScratch);
   device.queue.writeBuffer(gpu.flowParticleLayerBuf, 0, layerIds);
   if (trailHist && gpu.flowTrailBuf) {
     device.queue.writeBuffer(gpu.flowTrailBuf, 0, trailHist);
   }
+  const uploadMs = performance.now() - t0;
+
+  const tickMs = performance.now() - tickStart;
+  profile.tickMs = smoothMs(profile.tickMs, tickMs);
+  profile.tickDensityMs = smoothMs(profile.tickDensityMs, densityMs);
+  profile.tickAdvectMs = smoothMs(profile.tickAdvectMs, advectMs);
+  profile.tickRedistributeMs = smoothMs(profile.tickRedistributeMs, redistributeMs);
+  profile.tickTrailMs = smoothMs(profile.tickTrailMs, trailMs);
+  profile.tickSortMs = smoothMs(profile.tickSortMs, sortMs);
+  profile.tickUploadMs = smoothMs(profile.tickUploadMs, uploadMs);
+
   flowParticleFrameIdx++;
 }
 
@@ -366,6 +489,9 @@ export async function ensureFlowParticlesPipeline(): Promise<boolean> {
 }
 
 function flowFieldSpeedRange(): [number, number] | null {
+  if (cachedFieldSpeedEpoch === gpu.sceneEpoch && cachedFieldSpeedRange) {
+    return cachedFieldSpeedRange;
+  }
   const layers = extractFlowLayers();
   if (!layers.length) return null;
   let lo = Infinity;
@@ -375,26 +501,39 @@ function flowFieldSpeedRange(): [number, number] | null {
     if (l < lo) lo = l;
     if (h > hi) hi = h;
   }
-  if (!Number.isFinite(lo) || !(hi > lo + 1e-8)) return null;
-  return [lo, hi];
+  if (!Number.isFinite(lo) || !(hi > lo + 1e-8)) {
+    cachedFieldSpeedRange = null;
+    cachedFieldSpeedEpoch = gpu.sceneEpoch;
+    return null;
+  }
+  cachedFieldSpeedRange = [lo, hi];
+  cachedFieldSpeedEpoch = gpu.sceneEpoch;
+  return cachedFieldSpeedRange;
 }
 
 function resolveFlowSpeedRange(): [number, number] {
-  return resolveFlowParticleColorRange(
+  const t0 = performance.now();
+  // Shader tints by trail slot speeds — normalize using trail min/max (not head-only).
+  const range = resolveFlowParticleColorRange(
     trailHist,
     gpu.flowParticleCount,
     trailSteps(),
     effectiveVMax(),
     flowFieldSpeedRange(),
   );
+  profile.speedRangeMs = smoothMs(profile.speedRangeMs, performance.now() - t0);
+  profile.speedMin = range[0];
+  profile.speedMax = range[1];
+  return range;
 }
 
-function refreshTrailSpeeds(
+/** Sample |V| at every trail slot (seed/reseed only — advection keeps head speeds live). */
+function refreshAllTrailSpeeds(
   layers: FlowParticleLayerVel[],
   M: number,
   half: number,
   count: number,
-  trailSteps: number,
+  trailStepCount: number,
 ): void {
   if (!posAge || !layerIds) return;
   for (let i = 0; i < count; i++) {
@@ -407,9 +546,9 @@ function refreshTrailSpeeds(
       posAge[o]!, posAge[o + 1]!, posAge[o + 2]!,
     );
     posAge[o + 4] = Math.hypot(vx, vy, vz);
-    if (!trailHist || trailSteps < 2) continue;
+    if (!trailHist || trailStepCount < 2) continue;
     const ho = flowTrailBaseIndex(i);
-    for (let j = 0; j < trailSteps; j++) {
+    for (let j = 0; j < trailStepCount; j++) {
       const to = ho + j * FLOW_TRAIL_SLOT_STRIDE;
       const [tvx, tvy, tvz] = sampleVelGridAt(
         vel.fx, vel.fy, vel.fz, M, half,
@@ -429,9 +568,10 @@ function packFlowParticleParams(
   fbH: number,
   cameraFovDeg: number,
   speedRange: [number, number],
+  drawSegCount: number,
+  segStride: number,
 ): Float32Array {
   const steps = trailSteps();
-  const segCount = Math.max(1, steps - 1);
   const f = new Float32Array(64);
   const u = new Uint32Array(f.buffer);
   f.set(viewProj, 0);
@@ -446,8 +586,8 @@ function packFlowParticleParams(
   f[37] = 0;
   u[38] = gpu.flowParticleCount >>> 0;
   u[39] = steps >>> 0;
-  u[40] = segCount >>> 0;
-  u[41] = 0;
+  u[40] = drawSegCount >>> 0;
+  u[41] = segStride >>> 0;
   f[42] = state.flowTrailWidth;
   f[43] = speedRange[0];
   f[44] = speedRange[1];
@@ -473,6 +613,8 @@ function recordRibbonDraw(
   fbH: number,
   cameraFovDeg: number,
   speedRange: [number, number],
+  drawSegCount: number,
+  segStride: number,
   vertexCount: number,
   instanceCount: number,
 ): void {
@@ -480,7 +622,9 @@ function recordRibbonDraw(
   device.queue.writeBuffer(
     gpu.flowParticlesParamBuf!,
     0,
-    packFlowParticleParams(viewProj, ro, half, dirMatrix, fbW, fbH, cameraFovDeg, speedRange),
+    packFlowParticleParams(
+      viewProj, ro, half, dirMatrix, fbW, fbH, cameraFovDeg, speedRange, drawSegCount, segStride,
+    ),
   );
   const bg = device.createBindGroup({
     layout: gpu.flowParticlesPipeline!.getBindGroupLayout(0),
@@ -490,6 +634,7 @@ function recordRibbonDraw(
       { binding: 3, resource: { buffer: gpu.colorBuf! } },
       { binding: 4, resource: occlIsoView },
       { binding: 5, resource: { buffer: gpu.flowTrailBuf! } },
+      { binding: 6, resource: { buffer: gpu.flowParticleSortBuf! } },
     ],
   });
   const enc = device.createCommandEncoder();
@@ -515,11 +660,15 @@ export function drawFlowParticlesPass(
 ): void {
   if (state.flowVizMode !== "particles") return;
   if (!gpu.flowParticlesPipeline || !gpu.flowParticlesParamBuf) return;
-  if (!gpu.flowParticleBuf || !gpu.flowParticleLayerBuf || !gpu.flowTrailBuf || !gpu.colorBuf) return;
+  if (!gpu.flowParticleLayerBuf || !gpu.flowParticleSortBuf || !gpu.flowTrailBuf || !gpu.colorBuf) return;
   if (gpu.flowParticleCount <= 0) return;
 
   const { device } = gpu;
   if (!device) return;
+
+  const drawStart = performance.now();
+  syncProfileStatic();
+
   camera.updateMatrixWorld(true);
   const viewProj = new Float32Array(16);
   const e = camera.projectionMatrix.elements;
@@ -535,7 +684,7 @@ export function drawFlowParticlesPass(
   }
 
   const steps = trailSteps();
-  const segCount = Math.max(1, steps - 1);
+  const lod = drawTrailLod(gpu.flowParticleCount, steps);
   const speedRange = resolveFlowSpeedRange();
   recordRibbonDraw(
     device,
@@ -549,9 +698,12 @@ export function drawFlowParticlesPass(
     fbH,
     camera.fov,
     speedRange,
-    segCount * 6,
+    lod.drawSegCount,
+    lod.segStride,
+    lod.drawSegCount * 6,
     gpu.flowParticleCount,
   );
+  profile.drawMs = smoothMs(profile.drawMs, performance.now() - drawStart);
 }
 
 export function resetFlowParticlesPipeline(): void {

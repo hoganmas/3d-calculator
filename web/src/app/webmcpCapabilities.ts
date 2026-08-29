@@ -41,7 +41,7 @@ const TOOL_CATALOG = [
   {
     name: "laplacian_get_render_settings",
     readOnly: true,
-    summary: "Read deg, scale, steps, boxSize, marchDownscale, isoInterp, preset key.",
+    summary: "Read deg, scale, steps, boxSize, marchDownscale, preset key.",
   },
   {
     name: "laplacian_set_expression",
@@ -81,7 +81,7 @@ const TOOL_CATALOG = [
   },
   {
     name: "laplacian_set_render_settings",
-    summary: "Patch deg/scale/steps/boxSize/marchDownscale/isoInterp; deg/box refit.",
+    summary: "Patch deg/scale/steps/boxSize/marchDownscale; deg/box refit.",
   },
   {
     name: "laplacian_reset_camera",
@@ -179,7 +179,6 @@ export function buildCapabilities() {
       steps: { min: 8, max: 96, description: "Ray-march step count." },
       boxSize: { description: "World cube half-extent multiplier; triggers refit." },
       marchDownscale: { enum: [1, 2, 4, 8, 16], description: "March framebuffer resolution divisor." },
-      isoInterp: { enum: ["trilinear", "hermite"], description: "Isosurface / density interpolation." },
       preset: { enum: PRESET_KEYS, description: "Last loaded preset key (informational)." },
     },
     presets,
@@ -189,7 +188,7 @@ export function buildCapabilities() {
       tool: "laplacian_setup_lava_lamp",
       description:
         "Three Gaussian density blobs on separate layers; each blob's vertical position (params u, v, w) animates in loop mode for rising/falling lava-lamp motion. One animating param per layer enables GPU keyframe blending. Param names must be simple identifiers (a, u, v) — not y1-style subscripts.",
-      suggestedRender: { deg: 20, scale: 2.8, steps: 20, isoInterp: "hermite" },
+      suggestedRender: { deg: 20, scale: 2.8, steps: 20 },
     },
     tools: TOOL_CATALOG,
     webmcp: {

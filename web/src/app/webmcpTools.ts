@@ -33,11 +33,6 @@ import {
 import { syncMarchSlider } from "./presentation.js";
 import { camera, controls } from "./scene.js";
 import { state } from "./state.js";
-import {
-  setIsoInterpHermite,
-  resetClipGpuProfile,
-} from "../render/webgpu/march.js";
-import { prepareClipGpuForDegree } from "./webglFallback.js";
 import { buildCapabilities } from "./webmcpCapabilities.js";
 
 const PRESET_KEYS = Object.keys(PRESETS);
@@ -70,21 +65,12 @@ function refreshAfterParamChange(fromAnim = false): boolean {
   return compileOk;
 }
 
-async function applyIsoInterp(hermite: boolean) {
-  if (!setIsoInterpHermite(hermite)) return;
-  resetClipGpuProfile();
-  state.clipDirty = true;
-  await prepareClipGpuForDegree(state.fitDeg || Number(els.deg.value) || 23);
-  refreshMetricsDump();
-}
-
 export async function setRenderSettings(patch: {
   deg?: number;
   scale?: number;
   steps?: number;
   boxSize?: number;
   marchDownscale?: number;
-  isoInterp?: string;
 }) {
   let refit = false;
   if (patch.deg != null && Number.isFinite(patch.deg)) {
@@ -107,11 +93,6 @@ export async function setRenderSettings(patch: {
     els.marchDownscale.value = String(Math.round(patch.marchDownscale));
     syncMarchSlider();
     state.clipDirty = true;
-  }
-  if (patch.isoInterp != null) {
-    const v = patch.isoInterp === "hermite" ? "hermite" : "trilinear";
-    if (els.isoInterp) els.isoInterp.value = v;
-    await applyIsoInterp(v === "hermite");
   }
   if (refit) {
     const compileOk = syncExprCompileState();
@@ -148,7 +129,6 @@ export async function setupLavaLamp(opts: { tuneRender?: boolean } = {}) {
       steps: 24,
       boxSize: 6,
       marchDownscale: 1,
-      isoInterp: "hermite",
     });
     if (!tune.ok) return tune;
   }
@@ -386,7 +366,7 @@ function tools(): ToolDef[] {
         properties: {
           tuneRender: {
             type: "boolean",
-            description: "When true (default), set deg=20, scale=2.8, steps=20, isoInterp=hermite.",
+            description: "When true (default), set deg=20, scale=3.2, steps=24, marchDownscale=1.",
             default: true,
           },
         },
@@ -501,7 +481,7 @@ function tools(): ToolDef[] {
     {
       name: "laplacian_set_render_settings",
       description:
-        "Update render/fit settings (deg, scale, steps, box size, march downscale, iso interp). deg/box trigger refit.",
+        "Update render/fit settings (deg, scale, steps, box size, march downscale). deg/box trigger refit.",
       inputSchema: {
         type: "object",
         properties: {
@@ -510,7 +490,6 @@ function tools(): ToolDef[] {
           steps: { type: "number" },
           boxSize: { type: "number" },
           marchDownscale: { type: "number" },
-          isoInterp: { type: "string", enum: ["trilinear", "hermite"] },
         },
       },
       execute: async (input) => setRenderSettings(input),

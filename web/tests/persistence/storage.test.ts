@@ -24,7 +24,6 @@ function sampleJson(revision: number, latex = "\\sin(x)") {
       steps: 16,
       boxSize: 5,
       marchDownscale: 2,
-      isoInterp: "hermite",
       preset: "sincos",
     },
     flow: {

@@ -7,6 +7,7 @@
     selectExpr,
     commitAutoParams,
   } from "../../model/expressions.js";
+  import { clearAllExprs } from "../../app/compile.js";
   import ExprRow from "./ExprRow.svelte";
   import { DragReorderController } from "./dragReorder.ts";
   import { closeAllPopovers } from "./popovers.ts";
@@ -149,6 +150,15 @@
     dragCtrl.beginPointer(row, id, ev);
   }
 
+  function handleClear() {
+    commitAutoParams();
+    clearAllExprs();
+    items = listExpressions();
+    selectedId = getSelectedId();
+    onExprChange();
+    onStructuralChange();
+  }
+
   onMount(() => {
     items = listExpressions();
     selectedId = getSelectedId();
@@ -178,7 +188,17 @@
   });
 </script>
 
-<div class="expr-list" bind:this={listRoot} aria-label="Expressions">
+<div class="expr-sidebar">
+  <div class="expr-sidebar-toolbar">
+    <button
+      type="button"
+      class="secondary expr-clear-btn"
+      onclick={handleClear}
+    >
+      Clear
+    </button>
+  </div>
+  <div class="expr-list" bind:this={listRoot} aria-label="Expressions">
   {#each items as item (item.id)}
     <ExprRow
       bind:this={rowRefs[item.id]}
@@ -204,4 +224,5 @@
       onScheduleCommit={scheduleCommitIfLeftExpr}
     />
   {/each}
+  </div>
 </div>

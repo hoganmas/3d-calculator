@@ -190,6 +190,17 @@ export function fmtAnimSpeed(speed: number): string {
   return Number.isInteger(s) ? String(s) : s.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 }
 
+/** True for parameter declaration rows (`a=1`) — no layer gradient or visibility chrome. */
+export function isParameterRow(latex: string): boolean {
+  const classified = classifyKind(latex);
+  return classified?.kind === "parameter";
+}
+
+/** @deprecated Use {@link isParameterRow} — alias/funcdef rows are graphable layers. */
+export function isDeclarationRow(latex: string): boolean {
+  return isParameterRow(latex);
+}
+
 /** Params needed under a row: owning `a=…` declaration only. */
 export function neededParamForItem(item: ExprItem): string | null {
   const classified = String(item.latex || "").trim() ? classifyKind(item.latex) : null;

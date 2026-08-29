@@ -35,7 +35,7 @@ export async function ensurePipelinesForDegree(_deg: number): Promise<PipelineBu
   }
 
   gpu.canvasFormat = navigator.gpu.getPreferredCanvasFormat();
-  const isoMod = await compileChecked("iso", getIsoShader(gpu.isoInterpHermite, MAX_GRAD_STOPS));
+  const isoMod = await compileChecked("iso", getIsoShader(MAX_GRAD_STOPS));
   const beerMod = await compileChecked("beer", getBeerShader(MAX_GRAD_STOPS, MAX_DENS_LAYERS));
   const gridMod = await compileChecked("grid", getGridShader());
   const labelMod = await compileChecked("axisLabel", getAxisLabelShader());

@@ -28,6 +28,7 @@ import {
   initAutosave,
   restoreAutosave,
   scheduleAutosave,
+  setAutosaveError,
 } from "./app/persistence/autosave.js";
 import {
   downloadDocument,
@@ -147,10 +148,7 @@ function initProjectActions() {
       uploadFit();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (els.autosaveStatus) {
-        els.autosaveStatus.textContent = msg;
-        els.autosaveStatus.dataset.state = "error";
-      }
+      setAutosaveError(msg);
     }
   });
 

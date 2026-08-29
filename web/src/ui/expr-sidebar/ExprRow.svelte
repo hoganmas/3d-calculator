@@ -26,6 +26,7 @@ import {
     isSuggestionUiActive,
     classifyKind,
     neededParamForItem,
+    isParameterRow,
     isMathFieldFocused,
     ICON_EYE,
     ICON_EYE_OFF,
@@ -72,7 +73,7 @@ import {
 
   const warn = $derived(getExprWarning(item.id));
   const paramName = $derived(neededParamForItem(item));
-  const isParamDef = $derived(!!paramName || !!warn);
+  const isParamDef = $derived(isParameterRow(item.latex || "") || !!warn);
   const grad = $derived(resolveExprGradient(item));
   const gradCss = $derived(cssGradientFromColors(grad.colors));
   const swatchDisabled = $derived(isParamDef);

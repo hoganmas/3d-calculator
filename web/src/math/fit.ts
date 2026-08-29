@@ -2,7 +2,16 @@
 
 import { compile, ComputeEngine } from "@cortex-js/compute-engine";
 import { MAX_DEG } from "./limits.js";
-import { extractTriple, normalizeCalcLatex, scalarFromUnaryOpJson, tripleFromUnaryOpJson } from "./calcOps.js";
+import {
+  extractTriple,
+  extractOperatornameArg,
+  mathJsonHasError,
+  normalizeCalcLatex,
+  normalizeLatexAliases,
+  scalarFromUnaryOpJson,
+  tripleFromUnaryOpJson,
+  unwrapLatexSymbolTokens,
+} from "./calcOps.js";
 import { idctCheb3D, idctChebDivergence3D, idctChebLaplacian3D } from "./idct.js";
 import type {
   ChebFitResult,
@@ -14,6 +23,7 @@ import type {
   ScalarFitResult,
   ChebFitTiming,
 } from "../types/models.js";
+import type { SymbolRegistry } from "../model/symbols.js";
 
 type MathJsonArray = unknown[];
 type CeRun = (scope: Record<string, unknown>) => unknown;
@@ -64,6 +74,8 @@ const KNOWN_FUNCTION_NAMES = new Set([
   "sqrt", "cbrt", "abs", "sign", "floor", "ceil", "round",
   "max", "min", "hypot", "pow",
   "sinc", "erf", "gamma",
+  // Vector calculus operators (CE may leave these as free symbols when unparsed).
+  "curl", "div", "grad", "laplacian", "nabla", "del",
 ]);
 
 /** Longest-first so `arccos` wins over `cos`. */
@@ -89,13 +101,18 @@ function normalizeLatexFunctions(latex: string) {
   return s;
 }
 
+/** LaTeX normalization applied before every CE parse in this module. */
+export function normalizeForCe(latex: string): string {
+  return normalizeCalcLatex(normalizeLatexFunctions(String(latex ?? "").trim()));
+}
+
 /**
  * Compile LaTeX via parse→box. Never pass raw strings to `compile()` — that path
  * treats `cos` as a JS identifier (`_.cos`) instead of letter juxtaposition.
  * @param {string} latex
  */
 function compileLatex(latex: string): CeCompileResult {
-  const src = normalizeLatexFunctions(String(latex ?? "").trim());
+  const src = normalizeForCe(latex);
   if (!src) {
     return { success: false, unsupported: ["empty"], run: null, freeSymbols: [] };
   }
@@ -103,6 +120,10 @@ function compileLatex(latex: string): CeCompileResult {
   try {
     box = ce.parse(src);
   } catch {
+    return { success: false, unsupported: ["parse"], run: null, freeSymbols: [] };
+  }
+  const j = box?.json ?? (typeof box?.toJSON === "function" ? box.toJSON() : null);
+  if (mathJsonHasError(j)) {
     return { success: false, unsupported: ["parse"], run: null, freeSymbols: [] };
   }
   return compile(box) as CeCompileResult;
@@ -149,7 +170,10 @@ function collectFreeParams(
 
 /** @param {unknown} json MathJSON node */
 function symbolId(json: unknown): string | null {
-  if (typeof json === "string" && /^[A-Za-z][A-Za-z0-9_]*$/.test(json)) return json;
+  if (typeof json === "string") {
+    const m = json.match(/^([A-Za-z][A-Za-z0-9_]*?)(?:_(?:bold|italic))?$/);
+    return m ? m[1]! : null;
+  }
   if (Array.isArray(json) && json[0] === "Symbol" && typeof json[1] === "string") return json[1];
   return null;
 }
@@ -228,12 +252,339 @@ function isUserFunctionCall(json: unknown) {
   return json.length >= 2;
 }
 
+/** Parse `f(x,y)=` left-hand side into name and formal args. */
+function parseFuncDefLhs(src: string, lhs: unknown) {
+  if (isUserFunctionCall(lhs)) {
+    const ja = jsonArr(lhs);
+    const funcName = String(ja[0]);
+    const funcArgs = ja
+      .slice(1)
+      .map((a) => symbolId(a))
+      .filter((a): a is string => !!a);
+    return { funcName, funcArgs };
+  }
+
+  const eq = String(src).search(/=/);
+  if (eq < 0) throw new Error("Invalid function definition");
+  const left = String(src).slice(0, eq).trim();
+  const m = left.match(
+    /^([A-Za-z][A-Za-z0-9]*)\s*(?:\\left\s*)?\(([\s\S]*?)\)(?:\\right\s*)?\s*$/,
+  );
+  if (!m) throw new Error("Invalid function definition");
+  const funcName = m[1]!;
+  const argSrc = m[2]!.trim();
+  const funcArgs = argSrc
+    ? argSrc
+        .split(",")
+        .map((s) => s.trim())
+        .map((s) => symbolId(s) ?? (/^[A-Za-z][A-Za-z0-9_]*$/.test(s) ? s : null))
+        .filter((a): a is string => !!a)
+    : [];
+  return { funcName, funcArgs };
+}
+
+function substituteFuncBody(body: unknown, formals: string[], actuals: unknown[]): unknown {
+  const binding = new Map<string, unknown>();
+  for (let i = 0; i < formals.length; i++) {
+    binding.set(formals[i]!, actuals[i] ?? formals[i]);
+  }
+
+  function walk(node: unknown): unknown {
+    const id = symbolId(node);
+    if (id && binding.has(id)) return binding.get(id);
+
+    if (Array.isArray(node)) {
+      if (isUserFunctionCall(node)) {
+        const ja = node as unknown[];
+        return [ja[0], ...ja.slice(1).map(walk)];
+      }
+      return node.map((n, i) => (i === 0 && typeof n === "string" ? n : walk(n)));
+    }
+    return node;
+  }
+
+  return walk(body);
+}
+
+function isMultiplyFuncCall(json: unknown, registry: SymbolRegistry): { fn: string; args: unknown[] } | null {
+  if (!Array.isArray(json) || json[0] !== "Multiply" || json.length < 3) return null;
+  const fn = symbolId(json[1]);
+  if (fn && registry.getFuncdef(fn)) return { fn, args: json.slice(2) };
+  if (json.length === 3) {
+    const fnRev = symbolId(json[2]);
+    if (fnRev && registry.getFuncdef(fnRev)) return { fn: fnRev, args: [json[1]] };
+  }
+  return null;
+}
+
+function isAtFuncCall(json: unknown, registry: SymbolRegistry): { fn: string; args: unknown[] } | null {
+  if (!Array.isArray(json) || json[0] !== "At" || json.length < 3) return null;
+  const fn = symbolId(json[1]);
+  if (!fn || !registry.getFuncdef(fn)) return null;
+  return { fn, args: json.slice(2) };
+}
+
+/**
+ * CE parses `f(1)` as `f` and `f(a)` as `Multiply(a,f)`. Bracket form `f[1]` → At(f,1).
+ */
+function rewriteUserFuncCallParens(latex: string, registry: SymbolRegistry): string {
+  const names = registry.listFuncdefNames().sort((a, b) => b.length - a.length);
+  if (!names.length) return latex;
+
+  const out: string[] = [];
+  let i = 0;
+  while (i < latex.length) {
+    let matched = false;
+    for (const name of names) {
+      if (!latex.startsWith(name, i)) continue;
+      if (i > 0 && /[A-Za-z0-9_]/.test(latex[i - 1]!)) continue;
+      const after = i + name.length;
+      if (after < latex.length && /[A-Za-z0-9_]/.test(latex[after]!)) continue;
+
+      let j = after;
+      while (j < latex.length && /\s/.test(latex[j]!)) j++;
+      if (latex.startsWith("\\left", j)) {
+        j += 5;
+        while (j < latex.length && /\s/.test(latex[j]!)) j++;
+      }
+      if (latex[j] !== "(") continue;
+
+      const close = findMatchingParen(latex, j, "(", ")");
+      if (close < 0) continue;
+
+      const args = latex.slice(j + 1, close);
+      out.push(name, "[", args, "]");
+      i = close + 1;
+      while (i < latex.length && /\s/.test(latex[i]!)) i++;
+      if (latex.startsWith("\\right", i)) {
+        i += 6;
+        while (i < latex.length && /\s/.test(latex[i]!)) i++;
+      }
+      matched = true;
+      break;
+    }
+    if (!matched) {
+      out.push(latex[i]!);
+      i++;
+    }
+  }
+  return out.join("");
+}
+
+function findMatchingParen(src: string, openIdx: number, open: string, close: string): number {
+  let depth = 0;
+  for (let i = openIdx; i < src.length; i++) {
+    if (src.startsWith("\\left", i)) {
+      const after = i + 5;
+      if (after < src.length && /\s/.test(src[after]!)) {
+        const ch = src[after + 1];
+        if (ch === open) {
+          depth++;
+          i = after + 1;
+          continue;
+        }
+      } else if (src[after] === open) {
+        depth++;
+        i = after;
+        continue;
+      }
+    }
+    if (src.startsWith("\\right", i)) {
+      const after = i + 6;
+      if (after < src.length && /\s/.test(src[after]!)) {
+        const ch = src[after + 1];
+        if (ch === close) {
+          depth--;
+          if (depth === 0) return after + 1;
+          i = after + 1;
+          continue;
+        }
+      } else if (src[after] === close) {
+        depth--;
+        if (depth === 0) return after;
+        i = after;
+        continue;
+      }
+    }
+    const ch = src[i]!;
+    if (ch === open) depth++;
+    else if (ch === close) {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function expandFuncCall(
+  fn: string,
+  actuals: unknown[],
+  registry: SymbolRegistry,
+  warnings?: string[],
+): unknown | null {
+  const fd = registry.getFuncdef(fn);
+  if (!fd?.funcArgs?.length) return null;
+  if (actuals.length !== fd.funcArgs.length) {
+    warnings?.push(
+      `Function “${fn}” expects ${fd.funcArgs.length} argument(s), got ${actuals.length}`,
+    );
+    return null;
+  }
+  let body: unknown;
+  try {
+    body = ce.parse(normalizeLatexFunctions(fd.rhsLatex)).json;
+  } catch {
+    return null;
+  }
+  return substituteFuncBody(body, fd.funcArgs, actuals);
+}
+
+function expandJson(json: unknown, registry: SymbolRegistry, warnings?: string[]): unknown {
+  const vecOp = isVectorOpMultiply(json);
+  if (vecOp) {
+    const ja = jsonArr(json);
+    const expandedArg = expandJson(ja[vecOp.argIndex], registry, warnings);
+    return [vecOp.op, expandedArg];
+  }
+
+  const mulCall = isMultiplyFuncCall(json, registry);
+  if (mulCall) {
+    const actuals = mulCall.args.map((a) => expandJson(a, registry, warnings));
+    const substituted = expandFuncCall(mulCall.fn, actuals, registry, warnings);
+    if (substituted != null) {
+      return expandJson(substituted, registry, warnings);
+    }
+  }
+
+  const atCall = isAtFuncCall(json, registry);
+  if (atCall) {
+    const actuals = atCall.args.map((a) => expandJson(a, registry, warnings));
+    const substituted = expandFuncCall(atCall.fn, actuals, registry, warnings);
+    if (substituted != null) {
+      return expandJson(substituted, registry, warnings);
+    }
+  }
+
+  if (isUserFunctionCall(json)) {
+    const ja = jsonArr(json);
+    const fn = String(ja[0]);
+    const fd = registry.getFuncdef(fn);
+    if (fd?.funcArgs?.length) {
+      const actuals = ja.slice(1).map((a) => expandJson(a, registry, warnings));
+      const substituted = expandFuncCall(fn, actuals, registry, warnings);
+      if (substituted != null) {
+        return expandJson(substituted, registry, warnings);
+      }
+    }
+    return [ja[0], ...ja.slice(1).map((a) => expandJson(a, registry, warnings))];
+  }
+
+  const id = symbolId(json);
+  if (id) {
+    const alias = registry.getAlias(id);
+    if (alias) {
+      try {
+        const body = ce.parse(normalizeLatexFunctions(alias.rhsLatex)).json;
+        return expandJson(body, registry, warnings);
+      } catch {
+        return json;
+      }
+    }
+    return json;
+  }
+
+  if (Array.isArray(json)) {
+    return json.map((n, i) =>
+      i === 0 && typeof n === "string" ? n : expandJson(n, registry, warnings),
+    );
+  }
+  return json;
+}
+
+const VECTOR_CALC_OPS = new Set(["div", "curl", "grad", "laplacian"]);
+
+function isVectorOpMultiply(json: unknown): { op: string; argIndex: number } | null {
+  if (!Array.isArray(json) || json[0] !== "Multiply" || json.length !== 3) return null;
+  const a1 = typeof json[1] === "string" ? json[1].toLowerCase() : null;
+  const a2 = typeof json[2] === "string" ? json[2].toLowerCase() : null;
+  if (a1 && VECTOR_CALC_OPS.has(a1)) return { op: a1, argIndex: 2 };
+  if (a2 && VECTOR_CALC_OPS.has(a2)) return { op: a2, argIndex: 1 };
+  return null;
+}
+
+function resolveVectorOpInner(inner: string, registry: SymbolRegistry, warnings?: string[]): string {
+  const trimmed = unwrapLatexSymbolTokens(String(inner ?? "").trim());
+  if (!trimmed) return trimmed;
+  const bare = trimmed.match(/^([A-Za-z][A-Za-z0-9_]*)$/);
+  if (bare) {
+    const name = bare[1]!;
+    if (registry.getAlias(name)) {
+      return expandDefinitions(name, registry, warnings);
+    }
+    const fd = registry.getFuncdef(name);
+    if (fd?.funcArgs?.length) {
+      return expandDefinitions(`${name}(${fd.funcArgs.join(",")})`, registry, warnings);
+    }
+  }
+  return expandDefinitions(trimmed, registry, warnings);
+}
+
+/**
+ * Expand aliases / function calls inside vector-calculus operators before the
+ * general expandDefinitions pass (CE parses \\div(V) as V×div, which breaks substitution).
+ */
+export function expandVectorOperatorArgs(
+  raw: string,
+  registry: SymbolRegistry,
+  warnings?: string[],
+): string {
+  const src = normalizeForCe(raw);
+  if (!src) return src;
+
+  for (const op of ["div", "curl", "grad", "laplacian"] as const) {
+    const inner = extractOperatornameArg(src, op);
+    if (inner == null) continue;
+    const expanded = resolveVectorOpInner(inner, registry, warnings);
+    return `\\operatorname{${op}}(${expanded})`;
+  }
+
+  return expandDefinitions(raw, registry, warnings);
+}
+
+/** Expand alias names and user function calls using a declaration registry. */
+export function expandDefinitions(
+  raw: string,
+  registry: SymbolRegistry,
+  warnings?: string[],
+): string {
+  const src = normalizeForCe(raw);
+  if (!src) return src;
+
+  let latex = rewriteUserFuncCallParens(src, registry);
+  for (let iter = 0; iter < 32; iter++) {
+    let box;
+    try {
+      box = ce.parse(latex);
+    } catch {
+      return latex;
+    }
+    const j = box?.json ?? (typeof box?.toJSON === "function" ? box.toJSON() : null);
+    if (mathJsonHasError(j)) return latex;
+    const next = expandJson(j, registry, warnings);
+    if (JSON.stringify(next) === JSON.stringify(j)) break;
+    const nextBox = ce.box(next as never);
+    latex = nextBox.latex || latex;
+  }
+  return latex;
+}
+
 /**
  * Classify input and rewrite to a numeric field for fitting.
  *
- * - parameter `a = E`      → named slider / eqn (LHS free symbol)
+ * - parameter `a = E`      → named slider (RHS has no spatial deps)
+ * - alias `T = E`          → named spatial expression (not a slider)
+ * - funcdef `f(…) = E`     → reusable function (expanded at call sites)
  * - constraint `A = B`     → field A−B, isosurface at 0
- * - definition `f(…) = E`  → field E, volume (Beer)
  * - bare expression `E`    → field E, volume (Beer)
  *
  * @returns {{
@@ -246,7 +597,7 @@ function isUserFunctionCall(json: unknown) {
  * }}
  */
 export function classifyExpr(raw: string): ClassifiedExpr {
-  const src = normalizeLatexFunctions(String(raw ?? "").trim());
+  const src = normalizeForCe(raw);
   if (!src) throw new Error("Empty expression");
 
   let box;
@@ -274,19 +625,22 @@ export function classifyExpr(raw: string): ClassifiedExpr {
       latexLooksLikeFunctionDef(src) || isUserFunctionCall(lhs);
 
     if (asDef) {
+      const { funcName, funcArgs } = parseFuncDefLhs(src, lhs);
       const rhsBox = ce.box(rhs as never);
-      const compileLatex = rhsBox.latex || src.split("=").slice(1).join("=").trim();
-      if (!compileLatex) throw new Error("Empty right-hand side");
+      const rhsLatex = rhsBox.latex || src.split("=").slice(1).join("=").trim();
+      if (!rhsLatex) throw new Error("Empty right-hand side");
       return {
-        kind: "definition",
-        shade: "volume",
+        kind: "funcdef",
+        shade: "none",
         isoLevel: 0,
-        compileLatex,
-        label: "definition → volume",
+        compileLatex: rhsLatex,
+        label: `function ${funcName}`,
+        funcName,
+        funcArgs,
       };
     }
 
-    // Bare free symbol on LHS → named parameter (not a manifold constraint).
+    // Bare free symbol on LHS → parameter or spatial alias.
     const lhsName = symbolId(lhs);
     if (
       lhsName &&
@@ -294,26 +648,40 @@ export function classifyExpr(raw: string): ClassifiedExpr {
       /^[A-Za-z][A-Za-z0-9_]*$/.test(lhsName)
     ) {
       const rhsBox = ce.box(rhs as never);
-      const compileLatex = rhsBox.latex || src.split("=").slice(1).join("=").trim();
-      if (!compileLatex) throw new Error("Empty parameter right-hand side");
+      const rhsLatex = rhsBox.latex || src.split("=").slice(1).join("=").trim();
+      if (!rhsLatex) throw new Error("Empty right-hand side");
+      const rhsResult = compileLatex(rhsLatex);
+      const { usesSpace } = collectFreeParams(rhsResult.freeSymbols, rhsLatex, {
+        skipName: lhsName,
+      });
+      if (usesSpace) {
+        return {
+          kind: "alias",
+          shade: "none",
+          isoLevel: 0,
+          compileLatex: rhsLatex,
+          label: `alias ${lhsName}`,
+          aliasName: lhsName,
+        };
+      }
       return {
         kind: "parameter",
         shade: "none",
         isoLevel: 0,
-        compileLatex,
+        compileLatex: rhsLatex,
         label: `parameter ${lhsName}`,
         paramName: lhsName,
       };
     }
 
     const diff = ce.box(["Subtract", lhs, rhs] as never);
-    const compileLatex = diff.latex;
-    if (!compileLatex) throw new Error("Could not form constraint residual");
+    const constraintLatex = diff.latex;
+    if (!constraintLatex) throw new Error("Could not form constraint residual");
     return {
       kind: "constraint",
       shade: "iso",
       isoLevel: 0,
-      compileLatex,
+      compileLatex: constraintLatex,
       label: "constraint → isosurface",
     };
   }
@@ -343,7 +711,7 @@ export function classifyExpr(raw: string): ClassifiedExpr {
  * }}
  */
 export function compileParamLatex(raw: string, expectedName: string): CompiledParam {
-  const src = normalizeLatexFunctions(String(raw ?? "").trim());
+  const src = normalizeForCe(raw);
   if (!src) throw new Error("Empty parameter");
 
   let name = expectedName;
@@ -636,10 +1004,10 @@ function compileDivergenceExpr(
  * Cheap pre-check avoids CE "Tuple + \\grad" console noise.
  */
 function isLikelyFlowLatex(raw: string): boolean {
-  const s = String(raw ?? "").trim();
-  if (/\\curl|\\nabla\s*\\times/i.test(s)) return true;
+  const s = normalizeLatexAliases(String(raw ?? "").trim());
+  if (/\\curl|\\operatorname\s*\{\s*curl\s*\}|\\nabla\s*\\times/i.test(s)) return true;
   if (/\\nabla\s*\^|\^2|\\laplacian|\\Delta|\\div|\\nabla\s*\\cdot/i.test(s)) return false;
-  if (/\\grad|\\nabla/i.test(s)) return true;
+  if (/\\grad|\\operatorname\s*\{\s*grad\s*\}|\\nabla/i.test(s)) return true;
   const m = s.match(/^\(([\s\S]+)\)$/);
   if (m) {
     let depth = 0;
@@ -655,12 +1023,18 @@ function isLikelyFlowLatex(raw: string): boolean {
   return false;
 }
 
-export function compileExpr(raw: string): CompiledExpr {
-  if (isLikelyFlowLatex(raw)) {
+export function compileExpr(
+  raw: string,
+  registry?: SymbolRegistry,
+  expandWarnings?: string[],
+): CompiledExpr {
+  const expandedRaw = registry ? expandVectorOperatorArgs(raw, registry, expandWarnings) : raw;
+
+  if (isLikelyFlowLatex(expandedRaw)) {
     throw new Error("Vector field — use flow role (tuple, \\grad, or \\curl)");
   }
 
-  const normalized = normalizeCalcLatex(normalizeLatexFunctions(String(raw ?? "").trim()));
+  const normalized = normalizeForCe(expandedRaw);
   if (normalized) {
     let box;
     try {
@@ -671,17 +1045,17 @@ export function compileExpr(raw: string): CompiledExpr {
     const j = box?.json ?? (typeof box?.toJSON === "function" ? box.toJSON() : null);
     const lapInner = looksLikeLaplacian(normalized, j);
     if (lapInner) {
-      const classified = classifyExpr(raw);
-      return compileLaplacianExpr(raw, lapInner, classified);
+      const classified = classifyExpr(expandedRaw);
+      return compileLaplacianExpr(expandedRaw, lapInner, classified);
     }
     const divParts = looksLikeDivergence(normalized, j);
     if (divParts?.length === 3) {
-      const classified = classifyExpr(raw);
-      return compileDivergenceExpr(raw, divParts as [string, string, string], classified);
+      const classified = classifyExpr(expandedRaw);
+      return compileDivergenceExpr(expandedRaw, divParts as [string, string, string], classified);
     }
   }
 
-  const classified = classifyExpr(raw);
+  const classified = classifyExpr(expandedRaw);
   const src = classified.compileLatex;
 
   const result = compileLatex(src);

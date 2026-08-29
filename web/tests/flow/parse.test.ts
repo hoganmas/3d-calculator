@@ -4,6 +4,7 @@ import {
   compileVectorExpr,
   isVectorFieldLatex,
 } from "../../src/math/fitVector.ts";
+import { SymbolRegistry } from "../../src/model/symbols.ts";
 import { assert, assertNear } from "../helpers/assert.ts";
 import { runSuite } from "../helpers/runner.ts";
 
@@ -65,6 +66,25 @@ export async function run() {
         const compiled = compileExpr(latex);
         assert(compiled.operator === "divergence", "expected divergence");
         assertNear(compiled.bind({})(0.1, 0.2, 0.3), 3, 0.05, "nabla dot with left/right");
+      },
+    },
+    {
+      name: "del cross funcdef is vector syntax",
+      fn: () => {
+        const registry = new SymbolRegistry();
+        registry.tryAdd({
+          kind: "funcdef",
+          name: "f",
+          rhsLatex: String.raw`(-y,x,0)`,
+          latex: String.raw`f(x,y,z)=(-y,x,0)`,
+          exprId: "e1",
+          funcArgs: ["x", "y", "z"],
+        });
+        assert(
+          isVectorFieldLatex(String.raw`\del \times f`, registry),
+          "del cross f is vector field",
+        );
+        compileVectorExpr(String.raw`\del \times f`, registry);
       },
     },
     {

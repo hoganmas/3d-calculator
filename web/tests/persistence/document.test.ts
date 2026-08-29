@@ -21,7 +21,6 @@ function sampleDoc(revision = 1): LaplacianDocument {
       steps: 16,
       boxSize: 5,
       marchDownscale: 2,
-      isoInterp: "hermite",
       preset: "sincos",
     },
     flow: {

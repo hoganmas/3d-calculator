@@ -16,7 +16,6 @@ export interface LaplacianRenderSnapshot {
   steps: number;
   boxSize: number;
   marchDownscale: number;
-  isoInterp: string;
   preset: string;
 }
 
@@ -114,7 +113,6 @@ function validateRender(v: unknown): LaplacianRenderSnapshot {
   const steps = v.steps;
   const boxSize = v.boxSize;
   const marchDownscale = v.marchDownscale;
-  const isoInterp = v.isoInterp;
   const preset = v.preset;
   if (!isFiniteNum(deg)) throw new Error("render.deg: out of range");
   if (deg < 1 || deg > 128) throw new Error("render.deg: out of range");
@@ -128,9 +126,6 @@ function validateRender(v: unknown): LaplacianRenderSnapshot {
   if (marchDownscale < 1 || marchDownscale > 16) {
     throw new Error("render.marchDownscale: out of range");
   }
-  if (isoInterp !== "trilinear" && isoInterp !== "hermite") {
-    throw new Error("render.isoInterp: invalid");
-  }
   if (typeof preset !== "string") throw new Error("render.preset: expected string");
   return {
     deg: deg as number,
@@ -138,7 +133,6 @@ function validateRender(v: unknown): LaplacianRenderSnapshot {
     steps: steps as number,
     boxSize: boxSize as number,
     marchDownscale: marchDownscale as number,
-    isoInterp: String(isoInterp),
     preset,
   };
 }
