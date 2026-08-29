@@ -24,6 +24,7 @@ import { state } from "./app/state.js";
 import { initWebMCP } from "./app/webmcp.js";
 import { initWebmcpSetupDialog } from "./app/webmcpSetupDialog.js";
 import { initSplash, markSplashSidebarReady, forceSplashDismiss } from "./app/splash.js";
+import { initTearDebug } from "./app/tearDebug.js";
 import {
   initAutosave,
   restoreAutosave,
@@ -39,6 +40,7 @@ import {
 } from "./app/persistence/files.js";
 
 initSplash();
+initTearDebug();
 initTheme();
 initDom();
 initWebglFallback();

@@ -13,6 +13,7 @@ import {
   type LobattoFitState,
 } from "../math/chebLobatto.js";
 import { getParam } from "./params.js";
+import { gridMFromDens, tearLog, tearLogOnce } from "../app/tearDebug.js";
 import type { CompiledExpr, CompiledVectorExpr, KeyframeFrame } from "../types/models.js";
 
 export const DEFAULT_KEYFRAME_K = 8;
@@ -180,12 +181,21 @@ export function allKeyframesComplete() {
   return true;
 }
 
+/** Coarse blend pair ready for every cached layer (splash / first frame). */
+export function keyframesSplashReady(): boolean {
+  if (!caches.size) return true;
+  for (const cache of caches.values()) {
+    if (peekKeyframeBlend(cache.bakeOpts.layerId) == null) return false;
+  }
+  return true;
+}
+
 /** Test / debug: per-slot degree progress for a cached layer. */
 export function getKeyframeProgress(layerId: string) {
   const cache = caches.get(layerId);
   if (!cache) return null;
   return {
-    frameDeg: cache.frameDeg.slice(),
+    frameDeg: cache.frameDeg.map((_, k) => bakedDegAt(cache, k)),
     targetDeg: cache.targetDeg,
     readyCount: cache.readyCount,
     K: cache.K,
@@ -220,10 +230,24 @@ export function keyframeAnimParam(freeParams: string[], dirty: Set<string>) {
  * @param {Float32Array} out
  */
 function lerpFloat32(a: Float32Array, b: Float32Array, t: number, out: Float32Array) {
-  const n = out.length;
+  if (a.length !== b.length) {
+    const src = t < 0.5 ? a : b;
+    const n = Math.min(src.length, out.length);
+    out.fill(0);
+    if (n > 0) out.set(src.subarray(0, n));
+    return out;
+  }
+  const n = Math.min(a.length, b.length, out.length);
   const u = 1 - t;
   for (let i = 0; i < n; i++) out[i] = u * a[i]! + t * b[i]!;
   return out;
+}
+
+function ensureScratchVolume(cache: LayerKeyframeCache, n: number) {
+  if (n <= 0) return;
+  if (frameVolumeN(cache.scratch) !== n) {
+    cache.scratch = allocScratch(cache.role, n);
+  }
 }
 
 function frameVolumeN(frame: KeyframeFrame): number {
@@ -407,8 +431,50 @@ function bakeFrameAtDeg(
   return { frame, complete: true };
 }
 
+function stageOffBlendFrame(
+  cache: LayerKeyframeCache,
+  k: number,
+  frame: KeyframeFrame,
+  deg: number,
+) {
+  const prev = bakedDegAt(cache, k);
+  cache.stagingFrames[k] = frame;
+  cache.stagingDeg[k] = deg;
+  if (prev === cache.targetDeg && deg !== cache.targetDeg) cache.readyCount--;
+  if (prev !== cache.targetDeg && deg === cache.targetDeg) cache.readyCount++;
+}
+
+/** Promote staged refinement when a slot enters the active blend pair. */
+function ensureBlendSlotDisplay(cache: LayerKeyframeCache, k: number) {
+  const sd = cache.stagingDeg[k] ?? 0;
+  const dd = cache.frameDeg[k] ?? 0;
+  if (sd > 0 && sd >= dd && cache.stagingFrames[k]) {
+    applyDisplayFrame(cache, k, cache.stagingFrames[k]!, sd);
+  }
+}
+
+function blendFramesAt(
+  cache: LayerKeyframeCache,
+  k: number,
+): { frame: KeyframeFrame | null; deg: number } {
+  ensureBlendSlotDisplay(cache, k);
+  return { frame: cache.frames[k] ?? null, deg: cache.frameDeg[k] ?? 0 };
+}
+
 function bakedDegAt(cache: LayerKeyframeCache, k: number): number {
   return Math.max(cache.frameDeg[k] ?? 0, cache.stagingDeg[k] ?? 0);
+}
+
+function slotSummary(cache: LayerKeyframeCache, k: number) {
+  const fr = cache.frames[k];
+  const st = cache.stagingFrames[k];
+  return {
+    k,
+    displayDeg: cache.frameDeg[k] ?? 0,
+    stagingDeg: cache.stagingDeg[k] ?? 0,
+    displayM: gridMFromDens(fr?.dens),
+    stagingM: gridMFromDens(st?.dens),
+  };
 }
 
 function applyDisplayFrame(
@@ -420,8 +486,16 @@ function applyDisplayFrame(
   const prevDeg = cache.frameDeg[k] ?? 0;
   cache.frames[k] = frame;
   cache.frameDeg[k] = deg;
+  cache.stagingFrames[k] = null;
+  cache.stagingDeg[k] = 0;
   if (prevDeg === cache.targetDeg && deg !== cache.targetDeg) cache.readyCount--;
   if (prevDeg !== cache.targetDeg && deg === cache.targetDeg) cache.readyCount++;
+  tearLog("display-frame", {
+    layerId: cache.bakeOpts.layerId,
+    ...slotSummary(cache, k),
+    deg,
+    prevDeg,
+  });
 }
 
 /** Commit a baked frame; blend-pair slots promote to display only when both match degree. */
@@ -436,8 +510,15 @@ function commitFrame(
   const { i0, i1 } = segmentForValue(cache, value);
 
   if (k !== i0 && k !== i1) {
-    applyDisplayFrame(cache, k, frame, deg);
-    return [k];
+    stageOffBlendFrame(cache, k, frame, deg);
+    tearLog("commit-off-blend-staged", {
+      layerId: cache.bakeOpts.layerId,
+      k,
+      deg,
+      blend: { i0, i1 },
+      M: gridMFromDens(frame.dens),
+    });
+    return [];
   }
 
   cache.stagingFrames[k] = frame;
@@ -451,8 +532,23 @@ function commitFrame(
       cache.stagingDeg[slot] = 0;
       promoted.push(slot);
     }
+    tearLog("commit-promote", {
+      layerId: cache.bakeOpts.layerId,
+      k,
+      deg,
+      promoted,
+      slots: [i0, i1].map((s) => slotSummary(cache, s)),
+    });
     return promoted;
   }
+  tearLog("commit-staged", {
+    layerId: cache.bakeOpts.layerId,
+    k,
+    deg,
+    partner,
+    partnerStagingDeg: cache.stagingDeg[partner] ?? 0,
+    slots: [i0, i1].map((s) => slotSummary(cache, s)),
+  });
   return [];
 }
 
@@ -463,22 +559,59 @@ function commitFrame(
 function displayBlendForValue(cache: LayerKeyframeCache, value: number) {
   const seg = segmentForValue(cache, value);
   const { i0, i1, t } = seg;
-  const d0 = cache.frameDeg[i0] ?? 0;
-  const d1 = cache.frameDeg[i1] ?? 0;
-  const a = cache.frames[i0];
-  const b = cache.frames[i1];
+  ensureBlendSlotDisplay(cache, i0);
+  ensureBlendSlotDisplay(cache, i1);
+  const { frame: a, deg: d0 } = blendFramesAt(cache, i0);
+  const { frame: b, deg: d1 } = blendFramesAt(cache, i1);
   if (d0 !== d1 || !a || !b) {
-    if (d0 > 0 && d1 <= 0) return { i0, i1, t: 0 };
-    if (d1 > 0 && d0 <= 0) return { i0, i1, t: 1 };
-    if (d0 > d1) return { i0, i1, t: 0 };
-    if (d1 > d0) return { i0, i1, t: 1 };
-    return seg;
+    const snap =
+      d0 > 0 && d1 <= 0 ? { i0, i1, t: 0 } :
+      d1 > 0 && d0 <= 0 ? { i0, i1, t: 1 } :
+      d0 > d1 ? { i0, i1, t: 0 } :
+      d1 > d0 ? { i0, i1, t: 1 } :
+      seg;
+    tearLogOnce(
+      `blend-snap-deg-${cache.bakeOpts.layerId}-${d0}-${d1}`,
+      "blend-snap",
+      {
+        layerId: cache.bakeOpts.layerId,
+        reason: "deg-or-missing",
+        d0,
+        d1,
+        M0: gridMFromDens(a?.dens),
+        M1: gridMFromDens(b?.dens),
+        segT: t,
+        snapT: snap.t,
+      },
+    );
+    return snap;
   }
   if (a.dens && b.dens && a.dens.length !== b.dens.length) {
-    return t < 0.5 ? { i0, i1, t: 0 } : { i0, i1, t: 1 };
+    const snap = t < 0.5 ? { i0, i1, t: 0 } : { i0, i1, t: 1 };
+    tearLogOnce(
+      `blend-snap-len-${cache.bakeOpts.layerId}-${a.dens.length}-${b.dens.length}`,
+      "blend-snap",
+      {
+        layerId: cache.bakeOpts.layerId,
+        reason: "dens-length",
+        d0,
+        d1,
+        M0: gridMFromDens(a.dens),
+        M1: gridMFromDens(b.dens),
+        segT: t,
+        snapT: snap.t,
+      },
+    );
+    return snap;
   }
   if (a.fx && b.fx && a.fx.length !== b.fx.length) {
-    return t < 0.5 ? { i0, i1, t: 0 } : { i0, i1, t: 1 };
+    const snap = t < 0.5 ? { i0, i1, t: 0 } : { i0, i1, t: 1 };
+    tearLogOnce(
+      `blend-snap-fx-${cache.bakeOpts.layerId}`,
+      "blend-snap",
+      { layerId: cache.bakeOpts.layerId, reason: "fx-length", segT: t, snapT: snap.t },
+    );
+    return snap;
   }
   return seg;
 }
@@ -678,6 +811,15 @@ function runOneKeyframeWork(): boolean {
         const d = cache.frameDeg[blend.i0] ?? deg;
         maybeLogBlendPairReady(cache, layerId, blend.i0, blend.i1, d, bakeMs, "async", k);
       }
+    } else if (complete && frame) {
+      onKeyframeProgress?.({
+        layerId,
+        index: k,
+        frame,
+        readyCount: cache.readyCount,
+        K: cache.K,
+        done: keyframesFullyReady(cache),
+      });
     } else if (!complete) {
       if (cache.lobattoFinalizeByK.has(k)) {
         const fin = cache.lobattoFinalizeByK.get(k)!;
@@ -921,20 +1063,36 @@ export function sampleLayerKeyframes(opts: EnsureKeyframesOpts) {
   const st = getParam(cache.paramName);
   const tLerp = performance.now();
   const { i0, i1, t } = displayBlendForValue(cache, st?.value ?? cache.min);
-  const a = cache.frames[i0];
-  const b = cache.frames[i1];
+  const { frame: a } = blendFramesAt(cache, i0);
+  const { frame: b } = blendFramesAt(cache, i1);
   if (!a || !b) throw new Error("sync keyframe pair missing");
   if (!a.dens || !b.dens) throw new Error("scalar keyframe pair missing dens");
+  const d0 = cache.frameDeg[i0] ?? 0;
+  const d1 = cache.frameDeg[i1] ?? 0;
+  const canLerp =
+    d0 === d1 &&
+    d0 > 0 &&
+    a.dens.length === b.dens.length &&
+    t > 0 &&
+    t < 1;
+  const src = t < 0.5 ? a.dens : b.dens;
+  ensureScratchVolume(cache, src.length);
   const out = cache.scratch;
-  lerpFloat32(a.dens, b.dens, t, out.dens!);
+  if (canLerp) {
+    lerpFloat32(a.dens, b.dens, t, out.dens!);
+  } else {
+    out.dens!.fill(0);
+    out.dens!.set(src);
+  }
   lerpMsAcc += performance.now() - tLerp;
   lastLerpMs = lerpMsAcc;
 
+  const M = gridMFromFrame({ dens: out.dens! });
   return {
     dens: out.dens!,
     cheb: ensured.cheb,
     fitRel: ensured.fitRel,
-    M: ensured.M,
+    M,
     baked: ensured.baked,
     readyCount: ensured.readyCount,
     complete: ensured.complete,
@@ -950,26 +1108,49 @@ export function sampleFlowLayerKeyframes(opts: EnsureKeyframesOpts) {
   if (!cache) throw new Error("keyframe cache missing after ensure");
   const tLerp = performance.now();
   const { i0, i1, t } = displayBlendForValue(cache, getParam(cache.paramName)?.value ?? cache.min);
-  const a = cache.frames[i0];
-  const b = cache.frames[i1];
+  const { frame: a } = blendFramesAt(cache, i0);
+  const { frame: b } = blendFramesAt(cache, i1);
   if (!a || !b) throw new Error("sync keyframe pair missing");
   if (!a.fx || !a.fy || !a.fz || !b.fx || !b.fy || !b.fz) {
     throw new Error("flow keyframe pair missing velocity grids");
   }
+  const d0 = cache.frameDeg[i0] ?? 0;
+  const d1 = cache.frameDeg[i1] ?? 0;
+  const canLerp =
+    d0 === d1 &&
+    d0 > 0 &&
+    a.fx.length === b.fx.length &&
+    t > 0 &&
+    t < 1;
+  const pickA = t < 0.5;
+  ensureScratchVolume(cache, (pickA ? a.fx : b.fx).length);
   const out = cache.scratch;
-  lerpFloat32(a.fx, b.fx, t, out.fx!);
-  lerpFloat32(a.fy, b.fy, t, out.fy!);
-  lerpFloat32(a.fz, b.fz, t, out.fz!);
+  if (canLerp) {
+    lerpFloat32(a.fx, b.fx, t, out.fx!);
+    lerpFloat32(a.fy, b.fy, t, out.fy!);
+    lerpFloat32(a.fz, b.fz, t, out.fz!);
+  } else {
+    const sx = pickA ? a.fx : b.fx;
+    const sy = pickA ? a.fy : b.fy;
+    const sz = pickA ? a.fz : b.fz;
+    out.fx!.fill(0);
+    out.fy!.fill(0);
+    out.fz!.fill(0);
+    out.fx!.set(sx);
+    out.fy!.set(sy);
+    out.fz!.set(sz);
+  }
   lerpMsAcc += performance.now() - tLerp;
   lastLerpMs = lerpMsAcc;
 
+  const M = gridMFromFrame({ fx: out.fx! });
   return {
     fx: out.fx!.slice(),
     fy: out.fy!.slice(),
     fz: out.fz!.slice(),
     cheb: ensured.cheb,
     fitRel: ensured.fitRel,
-    M: ensured.M,
+    M,
     baked: ensured.baked,
     readyCount: ensured.readyCount,
     complete: ensured.complete,
@@ -1025,7 +1206,29 @@ export function peekKeyframeBlend(layerId: string) {
   const st = getParam(cache.paramName);
   if (!st) return null;
   const blend = displayBlendForValue(cache, st.value);
-  if (!cache.frames[blend.i0] || !cache.frames[blend.i1]) return null;
-  if ((cache.frameDeg[blend.i0] ?? 0) !== (cache.frameDeg[blend.i1] ?? 0)) return null;
+  if (!cache.frames[blend.i0] || !cache.frames[blend.i1]) {
+    tearLogOnce(`peek-null-frames-${layerId}`, "peek-null", {
+      layerId,
+      reason: "missing-frame",
+      i0: blend.i0,
+      i1: blend.i1,
+      d0: cache.frameDeg[blend.i0] ?? 0,
+      d1: cache.frameDeg[blend.i1] ?? 0,
+    });
+    return null;
+  }
+  if ((cache.frameDeg[blend.i0] ?? 0) !== (cache.frameDeg[blend.i1] ?? 0)) {
+    tearLogOnce(`peek-null-deg-${layerId}`, "peek-null", {
+      layerId,
+      reason: "deg-mismatch",
+      i0: blend.i0,
+      i1: blend.i1,
+      d0: cache.frameDeg[blend.i0] ?? 0,
+      d1: cache.frameDeg[blend.i1] ?? 0,
+      M0: gridMFromDens(cache.frames[blend.i0]?.dens),
+      M1: gridMFromDens(cache.frames[blend.i1]?.dens),
+    });
+    return null;
+  }
   return { id: layerId, i0: blend.i0, i1: blend.i1, t: blend.t };
 }

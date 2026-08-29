@@ -29,6 +29,7 @@ import {
   syncClipCpuVolume,
   drawClipGpuFrame,
   prepareClipGpuForDegree,
+  isVolumePresented,
 } from "./webglFallback.js";
 import { uploadFit, tickGpuKeyframeBlends } from "./pipeline.js";
 import { tickKeyframePump } from "../model/keyframes.js";
@@ -41,7 +42,7 @@ let splashFrameReported = false;
 function reportSplashFrameReady() {
   if (splashFrameReported) return;
   if (!isSplashContentReady()) return;
-  // Do not block splash on first GPU volume present — async uploadFit/GPU init may lag or fail.
+  if (!isVolumePresented()) return;
   splashFrameReported = true;
   markSplashFrameReady();
 }

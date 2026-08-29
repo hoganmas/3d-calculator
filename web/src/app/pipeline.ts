@@ -72,7 +72,10 @@ import {
 } from "./hud.js";
 import { scheduleAutosave } from "./persistence/autosave.js";
 import { tryMarkSplashBakeReady } from "./splash.js";
-import { allKeyframesComplete } from "../model/keyframes.js";
+import { allKeyframesComplete, hasActiveKeyframeCaches, keyframesSplashReady } from "../model/keyframes.js";
+import { anyParamAnimating } from "../model/params.js";
+import { gridMFromDens, tearLog, tearLogBlendChange } from "./tearDebug.js";
+import { gpu } from "../render/webgpu/gpuState.js";
 
 interface CachedLayer {
   kind: "cloud" | "isosurface" | "flow";
@@ -90,6 +93,11 @@ interface CachedLayer {
   isoLevel?: number;
 }
 
+const lastGpuBlendByLayer = new Map<
+  string,
+  { i0: number; i1: number; t: number; d0?: number; d1?: number; M0?: number; M1?: number }
+>();
+
 export function tickGpuKeyframeBlends() {
   const isoLayers = state.lastSceneBake?.isosurfaceLayers;
   if (!isoLayers?.length || !isClipBakeGpuReady()) return false;
@@ -99,6 +107,17 @@ export function tickGpuKeyframeBlends() {
     if (!c?.id || !Array.isArray(c.keyframes) || !c.keyframes.length) continue;
     const b = peekKeyframeBlend(c.id);
     if (!b) continue;
+    const a0 = c.keyframes[b.i0];
+    const a1 = c.keyframes[b.i1];
+    const next = {
+      i0: b.i0,
+      i1: b.i1,
+      t: b.t,
+      M0: gridMFromDens(a0?.dens),
+      M1: gridMFromDens(a1?.dens),
+    };
+    tearLogBlendChange(c.id, lastGpuBlendByLayer.get(c.id) ?? null, next);
+    lastGpuBlendByLayer.set(c.id, next);
     c.blend = { i0: b.i0, i1: b.i1, t: b.t };
     blends.push(b);
   }
@@ -535,6 +554,20 @@ export function uploadFit(
     // Warm anim ticks only update blend uniforms.
     const needUpload =
       fittedCount > 0 || keyframeBaked || densKeyframedCpu || !fromAnim;
+    tearLog("uploadFit", {
+      fromAnim,
+      progressive,
+      progressiveFinal: !!opts.progressiveFinal,
+      fitDeg: deg,
+      targetDeg: uiDeg,
+      needUpload,
+      fittedCount,
+      keyframedCount,
+      keyframeBaked,
+      densKeyframedCpu,
+      sceneM: M,
+      gpuM: gpu.sceneM,
+    });
     if (needUpload) {
       bakeChebVolume();
     } else if (keyframedCount > 0) {
@@ -613,17 +646,29 @@ export function initKeyframeHandler() {
       const c = state.lastSceneBake.isosurfaceLayers.find((x) => x.id === layerId);
       if (c && Array.isArray(c.keyframes) && index < c.keyframes.length) {
         c.keyframes[index] = frame;
-      }
-      if (isClipBakeGpuReady()) {
-        patchConstraintKeyframeFrame(layerId, index, frame);
-        state.clipDirty = true;
+        if (isClipBakeGpuReady()) {
+          const patched = patchConstraintKeyframeFrame(layerId, index, frame);
+          if (!patched) {
+            tearLog("patch-fallback-upload", {
+              layerId,
+              index,
+              frameM: gridMFromDens(frame.dens),
+              gpuM: gpu.sceneM,
+            });
+            bakeChebVolume();
+          }
+          state.clipDirty = true;
+        }
       }
     }
     if (done) {
       console.log(`[keyframes] async complete · ${layerId} · ${readyCount}/${K}`);
-      if (allKeyframesComplete()) {
-        tryMarkSplashBakeReady(true);
-      }
+    }
+    if (
+      hasActiveKeyframeCaches() &&
+      (allKeyframesComplete() || (anyParamAnimating() && keyframesSplashReady()))
+    ) {
+      tryMarkSplashBakeReady(true);
     }
   });
 }

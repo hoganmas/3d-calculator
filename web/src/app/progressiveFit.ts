@@ -10,6 +10,7 @@ import {
 import { els } from "./dom.js";
 import { state, FIT_DEBOUNCE_MS } from "./state.js";
 import { syncExprCompileState } from "./hud.js";
+import { tearLog } from "./tearDebug.js";
 
 let generation = 0;
 let stepTimer = 0;
@@ -102,6 +103,14 @@ function startProgressiveLadder(
     if (runGen !== generation) return;
     const fitDeg = steps[stepIdx]!;
     const isFinal = stepIdx >= steps.length - 1;
+    tearLog("progressive-step", {
+      fitDeg,
+      targetDeg,
+      stepIdx,
+      stepCount: steps.length,
+      isFinal,
+      sceneM: fitDeg + 1,
+    });
     uploadFit({
       ...baseOpts,
       fitDeg,

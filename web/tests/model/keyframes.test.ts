@@ -11,6 +11,7 @@ import {
   getKeyframeMetrics,
   hasActiveKeyframeCaches,
   keyframeAnimParam,
+  keyframesSplashReady,
   logKeyframeBake,
   noteKeyframeLayer,
   peekKeyframeBlend,
@@ -302,6 +303,16 @@ export async function run() {
         assert(progress.length >= 1, "progress callbacks");
         assert(done, "done progress");
         setKeyframeProgressHandler(null);
+      },
+    },
+    {
+      name: "keyframesSplashReady after sync blend pair",
+      fn: () => {
+        clearKeyframeCaches();
+        setupAnimParam("t", 0.5);
+        ensureLayerKeyframes(keyframeOpts("layer-splash", "t"));
+        assert(!allKeyframesComplete(), "async fill remains");
+        assert(keyframesSplashReady(), "coarse blend enough for splash");
       },
     },
     {
