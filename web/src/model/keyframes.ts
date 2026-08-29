@@ -252,6 +252,76 @@ export function getKeyframeProgress(layerId: string) {
   };
 }
 
+export interface KeyframeLoadSummary {
+  /** 0–1 aggregate load across all cached layers and K slots. */
+  fraction: number;
+  complete: boolean;
+  /** True when keyframe caches exist and fill is not finished. */
+  active: boolean;
+  slotsAtTarget: number;
+  slotsTotal: number;
+  layerCount: number;
+  label: string;
+}
+
+function slotLoadFraction(cache: LayerKeyframeCache, k: number): number {
+  const target = cache.targetDeg;
+  if (target <= 0) return 1;
+  const d = bakedDegAt(cache, k);
+  if (d >= target) return 1;
+  if (d <= 0) return 0;
+  const ladder = lobattoLadderDegrees(target);
+  if (ladder.length <= 1) return d / target;
+  let rung = 0;
+  for (let i = 0; i < ladder.length; i++) {
+    if (d >= ladder[i]!) rung = i;
+  }
+  const span = Math.max(1, ladder.length - 1);
+  const inFlight = cache.lobattoJobByK.has(k) || cache.lobattoFinalizeByK.has(k);
+  let frac = rung / span;
+  if (inFlight && rung < ladder.length - 1) frac += 0.45 / span;
+  else if (rung < ladder.length - 1) frac += 1 / ladder.length;
+  return Math.min(1, frac);
+}
+
+/** Aggregate animation keyframe load for UI progress bars. */
+export function getKeyframeLoadSummary(): KeyframeLoadSummary {
+  if (!caches.size) {
+    return {
+      fraction: 1,
+      complete: true,
+      active: false,
+      slotsAtTarget: 0,
+      slotsTotal: 0,
+      layerCount: 0,
+      label: "",
+    };
+  }
+  let sum = 0;
+  let slotsTotal = 0;
+  let slotsAtTarget = 0;
+  for (const cache of caches.values()) {
+    slotsTotal += cache.K;
+    slotsAtTarget += cache.readyCount;
+    for (let k = 0; k < cache.K; k++) sum += slotLoadFraction(cache, k);
+  }
+  const fraction = slotsTotal > 0 ? sum / slotsTotal : 1;
+  const complete = allKeyframesComplete();
+  const pct = Math.min(100, Math.max(0, Math.round(fraction * 100)));
+  const label = complete
+    ? ""
+    : `Loading animation · ${pct}% (${slotsAtTarget}/${slotsTotal} at full quality)`;
+  return {
+    fraction,
+    complete,
+    active: !complete,
+    slotsAtTarget,
+    slotsTotal,
+    layerCount: caches.size,
+    label,
+  };
+}
+
 /**
  * Eligible when dirty free-params collapse to exactly one animated slider
  * (not driven by another equation).

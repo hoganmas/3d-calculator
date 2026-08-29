@@ -34,6 +34,19 @@
           width="160"
           height="160"
         ></object>
+        <div id="splashKfLoad" class="splash-kf-load" hidden>
+          <div
+            id="splashKfTrack"
+            class="kf-load-track"
+            role="progressbar"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuetext="Loading animation"
+          >
+            <div id="splashKfFill" class="kf-load-fill"></div>
+          </div>
+          <span id="splashKfLabel" class="kf-load-label">Loading animation</span>
+        </div>
       </div>
     </div>
     <div id="app">
@@ -135,6 +148,19 @@
               <path stroke-linecap="round" d="M8 4v16M16 4v16" />
             </svg>
           </button>
+        </div>
+        <div id="kfLoadBar" class="kf-load-bar" hidden aria-hidden="true">
+          <div
+            id="kfLoadTrack"
+            class="kf-load-track"
+            role="progressbar"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuetext="Loading animation"
+          >
+            <div id="kfLoadFill" class="kf-load-fill"></div>
+          </div>
+          <span id="kfLoadLabel" class="kf-load-label">Loading animation</span>
         </div>
         <div id="hud">Laplacian</div>
       </main>

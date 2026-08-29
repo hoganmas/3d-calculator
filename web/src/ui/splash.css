@@ -39,6 +39,19 @@ html:not([data-booting]) #splash {
   pointer-events: none;
 }
 
+.splash-kf-load {
+  width: min(240px, 72vw);
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.splash-kf-load[hidden] {
+  display: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   #splash {
     transition: none;

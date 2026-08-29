@@ -36,6 +36,7 @@ import { tickKeyframePump } from "../model/keyframes.js";
 import { hudText, refreshMetricsDump } from "./hud.js";
 import { syncClipPresentation } from "./presentation.js";
 import { isSplashContentReady, markSplashFrameReady } from "./splash.js";
+import { syncKeyframeLoadBar } from "./keyframeLoadBar.js";
 
 let splashFrameReported = false;
 
@@ -134,6 +135,7 @@ function frame(rafNow: number) {
 
   // Keyframe progressive fill runs after draw so animation stays smooth.
   tickKeyframePump();
+  syncKeyframeLoadBar();
 
   requestAnimationFrame(frame);
 }

@@ -7,6 +7,7 @@ import {
   clearKeyframeCaches,
   DEFAULT_KEYFRAME_K,
   ensureLayerKeyframes,
+  getKeyframeLoadSummary,
   getKeyframeProgress,
   getKeyframeMetrics,
   hasActiveKeyframeCaches,
@@ -303,6 +304,25 @@ export async function run() {
         assert(progress.length >= 1, "progress callbacks");
         assert(done, "done progress");
         setKeyframeProgressHandler(null);
+      },
+    },
+    {
+      name: "getKeyframeLoadSummary tracks coarse then full fill",
+      fn: async () => {
+        clearKeyframeCaches();
+        setupAnimParam("t", 0.5);
+        const idle = getKeyframeLoadSummary();
+        assert(idle.complete, "idle complete");
+        ensureLayerKeyframes({ ...keyframeOpts("layer-load-bar", "t"), deg: 16, K: 3 });
+        const coarse = getKeyframeLoadSummary();
+        assert(coarse.active, "loading after sync");
+        assert(coarse.fraction > 0 && coarse.fraction < 1, "partial after coarse");
+        assert(coarse.slotsTotal === 3, "K slots");
+        await waitForComplete(20000);
+        const done = getKeyframeLoadSummary();
+        assert(done.complete, "done loading");
+        assert(done.fraction >= 0.99, "full fraction");
+        assert(done.slotsAtTarget === 3, "all at target");
       },
     },
     {
