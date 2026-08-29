@@ -307,6 +307,28 @@ export async function run() {
       },
     },
     {
+      name: "getKeyframeLoadSummary fraction is monotonic during async fill",
+      fn: async () => {
+        clearKeyframeCaches();
+        setupAnimParam("t", 0.5);
+        ensureLayerKeyframes({ ...keyframeOpts("layer-mono", "t"), deg: 16, K: 5 });
+        let hi = 0;
+        const t0 = Date.now();
+        while (!allKeyframesComplete()) {
+          tickKeyframePump(32);
+          const { fraction } = getKeyframeLoadSummary();
+          assert(
+            fraction + 1e-9 >= hi,
+            `load fraction regressed ${hi.toFixed(4)} → ${fraction.toFixed(4)}`,
+          );
+          hi = fraction;
+          if (Date.now() - t0 > 20000) throw new Error("monotonic fill timed out");
+          await new Promise((r) => setTimeout(r, 0));
+        }
+        assert(hi >= 0.99, "reaches full");
+      },
+    },
+    {
       name: "getKeyframeLoadSummary tracks coarse then full fill",
       fn: async () => {
         clearKeyframeCaches();

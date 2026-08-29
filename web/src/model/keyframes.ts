@@ -267,21 +267,16 @@ export interface KeyframeLoadSummary {
 function slotLoadFraction(cache: LayerKeyframeCache, k: number): number {
   const target = cache.targetDeg;
   if (target <= 0) return 1;
-  const d = bakedDegAt(cache, k);
+  const d = cache.frameDeg[k] ?? 0;
   if (d >= target) return 1;
   if (d <= 0) return 0;
   const ladder = lobattoLadderDegrees(target);
-  if (ladder.length <= 1) return d / target;
-  let rung = 0;
+  let rung = -1;
   for (let i = 0; i < ladder.length; i++) {
     if (d >= ladder[i]!) rung = i;
   }
-  const span = Math.max(1, ladder.length - 1);
-  const inFlight = cache.lobattoJobByK.has(k) || cache.lobattoFinalizeByK.has(k);
-  let frac = rung / span;
-  if (inFlight && rung < ladder.length - 1) frac += 0.45 / span;
-  else if (rung < ladder.length - 1) frac += 1 / ladder.length;
-  return Math.min(1, frac);
+  if (rung < 0) return 0;
+  return (rung + 1) / ladder.length;
 }
 
 /** Aggregate animation keyframe load for UI progress bars. */
@@ -559,11 +554,7 @@ function stageOffBlendFrame(
 ) {
   const displayDeg = cache.frameDeg[k] ?? 0;
   if (deg <= displayDeg) return;
-  const prev = bakedDegAt(cache, k);
-  cache.stagingFrames[k] = frame;
-  cache.stagingDeg[k] = deg;
-  if (prev === cache.targetDeg && deg !== cache.targetDeg) cache.readyCount--;
-  if (prev !== cache.targetDeg && deg === cache.targetDeg) cache.readyCount++;
+  applyDisplayFrame(cache, k, frame, deg);
 }
 
 function clearCoarseStaging(cache: LayerKeyframeCache, k: number) {
@@ -643,11 +634,20 @@ function applyDisplayFrame(
   deg: number,
 ) {
   const prevDeg = cache.frameDeg[k] ?? 0;
+  if (deg < prevDeg) {
+    tearLog("display-regression-blocked", {
+      layerId: cache.bakeOpts.layerId,
+      k,
+      deg,
+      prevDeg,
+    });
+    return;
+  }
+  if (deg === prevDeg) return;
   cache.frames[k] = frame;
   cache.frameDeg[k] = deg;
   cache.stagingFrames[k] = null;
   cache.stagingDeg[k] = 0;
-  if (prevDeg === cache.targetDeg && deg !== cache.targetDeg) cache.readyCount--;
   if (prevDeg !== cache.targetDeg && deg === cache.targetDeg) cache.readyCount++;
   tearLog("display-frame", {
     layerId: cache.bakeOpts.layerId,
@@ -679,7 +679,7 @@ function commitFrame(
       return [];
     }
     stageOffBlendFrame(cache, k, frame, deg);
-    tearLog("commit-off-blend-staged", {
+    tearLog("commit-off-blend-display", {
       layerId: cache.bakeOpts.layerId,
       k,
       deg,
@@ -707,6 +707,8 @@ function commitFrame(
   const maxDisplay = Math.max(cache.frameDeg[i0] ?? 0, cache.frameDeg[i1] ?? 0);
   if (cache.stagingDeg[partner] === deg && cache.stagingFrames[partner]) {
     if (deg < maxDisplay) {
+      cache.stagingFrames[k] = null;
+      cache.stagingDeg[k] = 0;
       tearLog("commit-promote-blocked", {
         layerId: cache.bakeOpts.layerId,
         k,
@@ -761,8 +763,6 @@ function commitFrame(
 function displayBlendForValue(cache: LayerKeyframeCache, value: number) {
   const seg = segmentForValue(cache, value);
   const { i0, i1, t } = seg;
-  clearCoarseStaging(cache, i0);
-  clearCoarseStaging(cache, i1);
   const d0 = cache.frameDeg[i0] ?? 0;
   const d1 = cache.frameDeg[i1] ?? 0;
   const a = cache.frames[i0];
@@ -828,7 +828,9 @@ function pickNextKeyframeWork(cache: LayerKeyframeCache): KeyframeWork[] {
   const ladder = lobattoLadderDegrees(target);
   const start = ladder[0] ?? startLadderDeg(target);
   const order = bakeOrder(cache.K, i0, i1);
-  const degAt = (k: number) => bakedDegAt(cache, k);
+  /** Display degree drives UI; staging counts for blend-pair scheduling only. */
+  const schedDegAt = (k: number) =>
+    Math.max(cache.frameDeg[k] ?? 0, cache.stagingDeg[k] ?? 0);
 
   for (const k of order) {
     if (cache.lobattoFinalizeByK.has(k)) {
@@ -842,7 +844,7 @@ function pickNextKeyframeWork(cache: LayerKeyframeCache): KeyframeWork[] {
   }
 
   const workForSlot = (k: number, phaseDeg: number): KeyframeWork | null => {
-    const d = degAt(k);
+    const d = schedDegAt(k);
     if (d === 0) {
       if (phaseDeg !== start) return null;
       return { kind: "coarse", k };
@@ -851,17 +853,9 @@ function pickNextKeyframeWork(cache: LayerKeyframeCache): KeyframeWork[] {
     return null;
   };
 
-  // Outer loop: degree ladder. Inner loop: K slots (blend pair first via bakeOrder).
+  // Degree-first globally: every slot reaches phaseDeg before any slot advances further.
   for (const phaseDeg of ladder) {
-    const blendWorks: KeyframeWork[] = [];
-    for (const k of [i0, i1]) {
-      const w = workForSlot(k, phaseDeg);
-      if (w) blendWorks.push(w);
-    }
-    if (blendWorks.length) return [blendWorks[0]!];
-
     for (const k of order) {
-      if (k === i0 || k === i1) continue;
       const w = workForSlot(k, phaseDeg);
       if (w) return [w];
     }
