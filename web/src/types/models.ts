@@ -5,8 +5,15 @@ export type AnimMode = "pingpong" | "loop";
 export type ExprKind = "parameter" | "alias" | "funcdef" | "constraint" | "definition" | "bare";
 export type DeclSymbolKind = "parameter" | "alias" | "funcdef";
 export type LayerRole = "parameter" | "cloud" | "isosurface" | "flow";
-export type VectorFieldKind = "tuple" | "gradient" | "curl" | "reference";
-export type ScalarFieldOperator = "none" | "laplacian" | "divergence" | "partial" | "definite_integral";
+export type VectorFieldKind = "tuple" | "gradient" | "curl" | "cross" | "reference";
+export type ScalarFieldOperator =
+  | "none"
+  | "laplacian"
+  | "divergence"
+  | "partial"
+  | "definite_integral"
+  | "dot_product"
+  | "grad_dot";
 
 export interface IntegralAxisSpec {
   axis: 0 | 1 | 2;
@@ -152,8 +159,10 @@ export interface CompiledLayer {
 export interface ClassifiedVectorExpr {
   kind: VectorFieldKind;
   label: string;
-  /** Tuple: three component LaTeX strings. Gradient: scalar LaTeX. */
+  /** Tuple/cross: component LaTeX. Gradient: scalar LaTeX. Cross: six (a,b,c,d,e,f). */
   compileParts: string[];
+  /** Scalar multiplier on tuple components (e.g. 0.5(x,y,z)). */
+  scale?: number;
 }
 
 export interface CompiledVectorExpr {

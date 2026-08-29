@@ -12,6 +12,10 @@
   import { DragReorderController } from "./dragReorder.ts";
   import { closeAllPopovers } from "./popovers.ts";
   import { getCaretPos, isMathFieldFocused } from "./helpers.ts";
+  import {
+    createSuppressAutoCommitCounter,
+    scheduleCommitIfLeftExpr as scheduleAutoCommitIfLeftExpr,
+  } from "./autoCommit.ts";
 
   interface Props {
     onExprChange: () => void;
@@ -31,7 +35,7 @@
   let items: ExprItem[] = $state([]);
   let selectedId: string | null = $state(null);
   let paramTick = $state(0);
-  let suppressAutoCommit = 0;
+  const suppressCtrl = createSuppressAutoCommitCounter();
   let focusEpoch = 0;
   let pendingFocus: { id: string; pos: number } | null = null;
 
@@ -39,21 +43,15 @@
   let dragCtrl: DragReorderController | null = null;
 
   function beginSuppressAutoCommit() {
-    suppressAutoCommit++;
+    suppressCtrl.begin();
   }
 
   function endSuppressAutoCommit() {
-    queueMicrotask(() => {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          suppressAutoCommit = Math.max(0, suppressAutoCommit - 1);
-        });
-      });
-    });
+    suppressCtrl.end();
   }
 
   function isSuppressingAutoCommit() {
-    return suppressAutoCommit > 0;
+    return suppressCtrl.isActive();
   }
 
   function captureFocus(): { id: string; pos: number } | null {
@@ -82,16 +80,11 @@
   }
 
   function scheduleCommitIfLeftExpr(fromExprId: string) {
-    queueMicrotask(() => {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (suppressAutoCommit) return;
-          const snap = captureFocus();
-          if (snap?.id === fromExprId) return;
-          commitAutoParams();
-          onExprChange();
-        });
-      });
+    scheduleAutoCommitIfLeftExpr(fromExprId, {
+      isSuppressingAutoCommit: () => suppressCtrl.isActive(),
+      getFocusedExprId: () => captureFocus()?.id ?? null,
+      commitAutoParams,
+      onExprChange,
     });
   }
 

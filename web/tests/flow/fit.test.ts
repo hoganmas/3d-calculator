@@ -60,5 +60,52 @@ export async function run() {
         assert(maxErr < 0.25, `max tuple fit error ${maxErr}`);
       },
     },
+    {
+      name: "grad field fit with L2 metric enabled",
+      fn: () => {
+        const compiled = compileVectorExpr(String.raw`\grad(x^2+y^2+z^2)`);
+        const vectorFn = compiled.bind({});
+        const result = fitVectorField(compiled, vectorFn, 1, 6, { skipL2: false });
+        assert(result.source === "gradient", "gradient source");
+        assert(Number.isFinite(result.fitRel), "fitRel computed");
+      },
+    },
+    {
+      name: "grad field with param a scales with slider value",
+      fn: () => {
+        const compiled = compileVectorExpr(String.raw`\nabla\left(ar\right)`);
+        const half = 2.5;
+        const deg = 10;
+        const fitLo = fitVectorField(
+          compiled,
+          compiled.bind({ a: 1 }),
+          half,
+          deg,
+          { params: { a: 1 } },
+        );
+        const fitHi = fitVectorField(
+          compiled,
+          compiled.bind({ a: 5 }),
+          half,
+          deg,
+          { params: { a: 5 } },
+        );
+        const maxLo = Math.max(...fitLo.fx);
+        const maxHi = Math.max(...fitHi.fx);
+        assert(maxHi > maxLo * 3, `expected scale with a: maxLo=${maxLo} maxHi=${maxHi}`);
+        const ratio = maxHi / maxLo;
+        assert(Math.abs(ratio - 5) < 0.6, `expected ~5× scale, got ${ratio}`);
+      },
+    },
+    {
+      name: "tuple field fit with L2 metric enabled",
+      fn: () => {
+        const compiled = compileVectorExpr(String.raw`(-y,x,0)`);
+        const vectorFn = compiled.bind({});
+        const result = fitVectorField(compiled, vectorFn, 1, 6, { skipL2: false });
+        assert(result.source === "tuple", "tuple source");
+        assert(Number.isFinite(result.fitRel), "fitRel");
+      },
+    },
   ]);
 }

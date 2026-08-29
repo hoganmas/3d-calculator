@@ -4,6 +4,7 @@ import {
   buildFlowParticleDensityGrids,
   FLOW_PARTICLE_DENSITY_GRID,
   FLOW_PARTICLE_STRIDE,
+  flowHeadSpeedMinMax,
   flowParticleSpeedMinMax,
   flowSpeedMinMax,
   flowSpeedPercentileMinMax,
@@ -12,6 +13,10 @@ import {
   pushFlowTrailHist,
   redistributeOvercrowdedFlowParticles,
   resolveFlowParticleColorRange,
+  resolveFlowParticleColorRangeFast,
+  resetFlowTrailHistSlot,
+  seedFlowTrailHist,
+  updateFlowTrailHead,
   sampleVelGridAt,
   seedFlowParticles,
   seedFlowTrailHist,
@@ -106,9 +111,11 @@ export async function run() {
           0, 0, 2, 0, 0,
         ]);
         const order = new Uint32Array(2);
-        sortFlowParticlesByDepth(posAge, order, [0, 0, -5], [0, 0, 1]);
+        const depthKeys = new Float32Array(2);
+        sortFlowParticlesByDepth(posAge, order, [0, 0, -5], [0, 0, 1], depthKeys);
         assert(order[0] === 1, "far particle first");
         assert(order[1] === 0, "near particle second");
+        assert(depthKeys[1]! > depthKeys[0]!, "depth keys ordered");
       },
     },
     {
@@ -298,6 +305,140 @@ export async function run() {
         const after = buildFlowParticleDensityGrid(posAge, count, 1);
         const peakAfter = Math.max(...after);
         assert(peakAfter <= peakBefore, "peak density did not increase");
+      },
+    },
+    {
+      name: "sortFlowParticlesByDepth without depthKeys array",
+      fn: () => {
+        const posAge = new Float32Array([
+          0, 0, 0, 0, 0,
+          0, 0, 2, 0, 0,
+        ]);
+        const order = new Uint32Array(2);
+        sortFlowParticlesByDepth(posAge, order, [0, 0, -5], [0, 0, 1]);
+        assert(order[0] === 1, "far particle first without depth buffer");
+      },
+    },
+    {
+      name: "advectFlowParticles respawns stuck particles",
+      fn: () => {
+        const M = 4;
+        const n = M * M * M;
+        const fx = new Float32Array(n).fill(0);
+        const fy = new Float32Array(n).fill(0);
+        const fz = new Float32Array(n).fill(0);
+        const layers = [{ fx, fy, fz }];
+        const posAge = new Float32Array(5);
+        posAge[0] = 0.1;
+        posAge[1] = 0.1;
+        posAge[2] = 0.1;
+        posAge[3] = 2;
+        posAge[4] = 0;
+        const layerIds = new Uint32Array([0]);
+        advectFlowParticles(posAge, layerIds, layers, M, {
+          dt: 0.1,
+          vMax: 10,
+          half: 1,
+          alpha: 0,
+          gridSpacing: 0.5,
+          gridPoints: false,
+          ageMax: 1,
+          frameIdx: 0,
+        });
+        assert(posAge[3]! < 0.5, "stuck particle respawned with fresh age");
+      },
+    },
+    {
+      name: "advectFlowParticles alpha injection can respawn",
+      fn: () => {
+        const M = 4;
+        const n = M * M * M;
+        const fx = new Float32Array(n).fill(1);
+        const fy = new Float32Array(n).fill(0);
+        const fz = new Float32Array(n).fill(0);
+        const layers = [{ fx, fy, fz }];
+        const posAge = new Float32Array(5);
+        posAge[0] = 0;
+        posAge[1] = 0;
+        posAge[2] = 0;
+        posAge[3] = 0.1;
+        posAge[4] = 1;
+        const layerIds = new Uint32Array([0]);
+        advectFlowParticles(posAge, layerIds, layers, M, {
+          dt: 0.05,
+          vMax: 10,
+          half: 1,
+          alpha: 1,
+          gridSpacing: 0.5,
+          gridPoints: false,
+          ageMax: 10,
+          frameIdx: 0,
+        });
+        assert(posAge[3]! < 0.2, "alpha respawn resets age");
+      },
+    },
+    {
+      name: "flowHeadSpeedMinMax and resolveFlowParticleColorRangeFast",
+      fn: () => {
+        const posAge = new Float32Array([
+          0, 0, 0, 0, 1,
+          0, 0, 0, 0, 4,
+        ]);
+        const head = flowHeadSpeedMinMax(posAge, 2);
+        assert(head !== null && head[0] === 1 && head[1] === 4, "head range");
+        const uniform = new Float32Array([0, 0, 0, 0, 2, 0, 0, 0, 0, 2]);
+        const uniHead = flowHeadSpeedMinMax(uniform, 2);
+        assert(uniHead !== null && uniHead[0]! < 2, "uniform widened");
+        const [lo, hi] = resolveFlowParticleColorRangeFast(posAge, 2, 1, [0.5, 5]);
+        assert(lo < hi, "fast color range");
+        const fallback = resolveFlowParticleColorRangeFast(new Float32Array(5), 1, 2, null);
+        assert(fallback[1] >= 2, "vRef fallback");
+        const narrow = new Float32Array([0, 0, 0, 0, 2, 0, 0, 0, 0, 2.01]);
+        const [nLo, nHi] = resolveFlowParticleColorRangeFast(narrow, 2, 1, null);
+        const field = resolveFlowParticleColorRangeFast(narrow, 2, 1, [0.5, 4]);
+        assert(field[0] === 0.5 && field[1] === 4, "field range when span narrow");
+        assert(nHi - nLo > 0.01, "widened narrow span");
+      },
+    },
+    {
+      name: "seedFlowTrailHist and updateFlowTrailHead",
+      fn: () => {
+        const posAge = new Float32Array([1, 2, 3, 0.5, 2]);
+        const trailHist = new Float32Array(MAX_FLOW_TRAIL_STEPS * FLOW_PARTICLE_STRIDE);
+        seedFlowTrailHist(posAge, trailHist, 3, 1);
+        assert(Math.abs(trailHist[0]! - 1) < 1e-6, "seed x");
+        assert(Math.abs(trailHist[10]! - 1) < 1e-6, "seed last slot");
+        posAge[0] = 9;
+        updateFlowTrailHead(posAge, trailHist, 1);
+        assert(Math.abs(trailHist[0]! - 9) < 1e-6, "head updated");
+        resetFlowTrailHistSlot(trailHist, 2, 0, 4, 5, 6, 0.1, 1.5);
+        assert(Math.abs(trailHist[0]! - 4) < 1e-6, "reset slot");
+      },
+    },
+    {
+      name: "advectFlowParticles respawn uses density grid when provided",
+      fn: () => {
+        const M = 4;
+        const n = M * M * M;
+        const fx = new Float32Array(n).fill(0);
+        const fy = new Float32Array(n).fill(0);
+        const fz = new Float32Array(n).fill(0);
+        const layers = [{ fx, fy, fz }];
+        const posAge = new Float32Array(5);
+        posAge[3] = 5;
+        const layerIds = new Uint32Array([0]);
+        const density = new Uint16Array(FLOW_PARTICLE_DENSITY_GRID ** 3);
+        advectFlowParticles(posAge, layerIds, layers, M, {
+          dt: 0.1,
+          vMax: 10,
+          half: 1,
+          alpha: 0,
+          gridSpacing: 0.5,
+          gridPoints: false,
+          ageMax: 1,
+          frameIdx: 2,
+        }, null, 0, density, FLOW_PARTICLE_DENSITY_GRID);
+        assert(posAge[3]! < 1, "respawned via density-aware spawn");
       },
     },
   ]);

@@ -7,7 +7,11 @@ import { fitChebyshev3D } from "./fit.js";
 import { idctCheb3D, idctChebCurl3D, idctChebGrad3D } from "./idct.js";
 import {
   extractTriple,
+  extractScaledTriple,
   mathJsonHasError,
+  parseGradDotMatch,
+  parseTupleCrossMatch,
+  parseTupleDotMatch,
   scalarFromUnaryOpJson,
   tripleFromUnaryOpJson,
 } from "./calcOps.js";
@@ -80,9 +84,10 @@ function collectFreeParams(freeSymbols: Iterable<unknown> | null | undefined, la
 }
 
 function compileLatex(latex: string): CeCompileResult {
+  const normalized = normalizeForCe(latex);
   let box;
   try {
-    box = ce.parse(latex);
+    box = ce.parse(normalized);
   } catch {
     return { success: false, unsupported: ["parse"], run: null, freeSymbols: [] };
   }
@@ -111,6 +116,75 @@ function bindScalar(latex: string, freeParams: string[]) {
         scope[name] = Number.isFinite(v) ? v : 1;
       }
       return coerceNumber(run(scope));
+    };
+}
+
+function bindCrossFromTuples(
+  leftParts: [string, string, string],
+  rightParts: [string, string, string],
+) {
+  const leftCompiled = leftParts.map((latex) => compileLatex(latex));
+  const rightCompiled = rightParts.map((latex) => compileLatex(latex));
+  for (let i = 0; i < 3; i++) {
+    if (!leftCompiled[i]?.success || typeof leftCompiled[i]!.run !== "function") {
+      throw new Error(`Could not compile cross left component: ${leftParts[i]}`);
+    }
+    if (!rightCompiled[i]?.success || typeof rightCompiled[i]!.run !== "function") {
+      throw new Error(`Could not compile cross right component: ${rightParts[i]}`);
+    }
+  }
+  return (params: Record<string, number> = {}) =>
+    (x: number, y: number, z: number): [number, number, number] => {
+      const evalPart = (
+        latex: string,
+        compiled: CeCompileResult,
+        xi: number,
+        yi: number,
+        zi: number,
+      ) => {
+        const { r, theta, phi, rho } = polarFromCartesian(xi, yi, zi);
+        const scope: Record<string, number> = { x: xi, y: yi, z: zi, r, theta, phi, rho };
+        const fp = collectFreeParams(compiled.freeSymbols, latex).freeParams;
+        for (const name of fp) {
+          const v = params[name];
+          scope[name] = Number.isFinite(v) ? v : 1;
+        }
+        return coerceNumber(compiled.run!(scope));
+      };
+      const ax = evalPart(leftParts[0]!, leftCompiled[0]!, x, y, z);
+      const ay = evalPart(leftParts[1]!, leftCompiled[1]!, x, y, z);
+      const az = evalPart(leftParts[2]!, leftCompiled[2]!, x, y, z);
+      const bx = evalPart(rightParts[0]!, rightCompiled[0]!, x, y, z);
+      const by = evalPart(rightParts[1]!, rightCompiled[1]!, x, y, z);
+      const bz = evalPart(rightParts[2]!, rightCompiled[2]!, x, y, z);
+      return [ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx];
+    };
+}
+
+function bindScaledTuple(
+  parts: [string, string, string],
+  scale: number,
+) {
+  const compiled = parts.map((latex) => compileLatex(latex));
+  for (let i = 0; i < 3; i++) {
+    if (!compiled[i]?.success || typeof compiled[i]!.run !== "function") {
+      throw new Error(`Could not compile vector component: ${parts[i]}`);
+    }
+  }
+  return (params: Record<string, number> = {}) =>
+    (x: number, y: number, z: number): [number, number, number] => {
+      const { r, theta, phi, rho } = polarFromCartesian(x, y, z);
+      const out: [number, number, number] = [0, 0, 0];
+      for (let i = 0; i < 3; i++) {
+        const fp = collectFreeParams(compiled[i]!.freeSymbols, parts[i]!).freeParams;
+        const scope: Record<string, number> = { x, y, z, r, theta, phi, rho };
+        for (const name of fp) {
+          const v = params[name];
+          scope[name] = Number.isFinite(v) ? v : 1;
+        }
+        out[i] = scale * coerceNumber(compiled[i]!.run!(scope));
+      }
+      return out;
     };
 }
 
@@ -192,6 +266,9 @@ function scalarFromGradJson(json: unknown): string | null {
 }
 
 function looksLikeGrad(src: string, json: unknown): string | null {
+  if (parseGradDotMatch(src)) return null;
+  if (parseTupleDotMatch(src)) return null;
+
   const fromJson = scalarFromGradJson(json);
   if (fromJson) return fromJson.trim();
 
@@ -254,9 +331,12 @@ function looksLikeCurl(src: string, json: unknown): string[] | null {
 /** Syntax-only vector-field check (before alias/funcdef expansion). */
 function looksLikeVectorFieldSyntax(raw: string): boolean {
   const src = normalizeVectorLatex(String(raw ?? "").trim());
+  if (parseGradDotMatch(src)) return false;
+  if (parseTupleDotMatch(src)) return false;
   if (/\\operatorname\s*\{\s*curl\s*\}|\\curl|\\nabla\s*\\times/i.test(src)) return true;
   if (/\\nabla\s*\^|\^2|\\laplacian|\\Delta|\\div|\\nabla\s*\\cdot/i.test(src)) return false;
   if (/\\operatorname\s*\{\s*grad\s*\}|\\grad|\\nabla/i.test(src)) return true;
+  if (parseTupleCrossMatch(src)) return true;
   const m = src.match(/^\(([\s\S]+)\)$/);
   if (m) {
     let depth = 0;
@@ -269,11 +349,15 @@ function looksLikeVectorFieldSyntax(raw: string): boolean {
     }
     if (parts === 2) return true;
   }
+  if (/^[\d.]+\s*\(/.test(src)) return true;
   return false;
 }
 
 /** Quick check for auto role inference. */
 export function isVectorFieldLatex(raw: string, registry?: SymbolRegistry): boolean {
+  const src = normalizeVectorLatex(String(raw ?? "").trim());
+  if (parseGradDotMatch(src)) return false;
+  if (parseTupleDotMatch(src)) return false;
   if (looksLikeVectorFieldSyntax(raw)) return true;
   try {
     const expanded = registry ? expandVectorOperatorArgs(raw, registry) : raw;
@@ -287,6 +371,19 @@ export function isVectorFieldLatex(raw: string, registry?: SymbolRegistry): bool
 export function classifyVectorExpr(raw: string): ClassifiedVectorExpr {
   const src = normalizeVectorLatex(String(raw ?? "").trim());
   if (!src) throw new Error("Empty vector expression");
+
+  if (parseTupleDotMatch(src) || parseGradDotMatch(src)) {
+    throw new Error("Dot product is a scalar field — use cloud or isosurface role");
+  }
+
+  const crossMatch = parseTupleCrossMatch(src);
+  if (crossMatch) {
+    return {
+      kind: "cross",
+      label: "cross product",
+      compileParts: [...crossMatch.left, ...crossMatch.right],
+    };
+  }
 
   let box;
   try {
@@ -314,6 +411,16 @@ export function classifyVectorExpr(raw: string): ClassifiedVectorExpr {
     };
   }
 
+  const scaled = extractScaledTriple(j);
+  if (scaled) {
+    return {
+      kind: "tuple",
+      label: scaled.scale === 1 ? "vector tuple" : "scaled vector tuple",
+      compileParts: scaled.parts,
+      scale: scaled.scale === 1 ? undefined : scaled.scale,
+    };
+  }
+
   const triple = extractTriple(j);
   if (triple?.length === 3) {
     return {
@@ -324,7 +431,7 @@ export function classifyVectorExpr(raw: string): ClassifiedVectorExpr {
   }
 
   throw new Error(
-    "Flow fields need a 3-component tuple like (Fx, Fy, Fz), \\grad f, or \\curl(Fx,Fy,Fz)",
+    "Flow fields need a 3-component tuple like (Fx, Fy, Fz), \\grad f, \\curl(Fx,Fy,Fz), or (a,b,c)\\times(d,e,f)",
   );
 }
 
@@ -357,6 +464,38 @@ export function compileVectorExpr(
       },
       bindScalar(params: Record<string, number> = {}) {
         return bindScalar(scalarLatex, freeParams)(params);
+      },
+    };
+  }
+
+  if (classified.kind === "cross") {
+    const left = classified.compileParts.slice(0, 3) as [string, string, string];
+    const right = classified.compileParts.slice(3, 6) as [string, string, string];
+    const leftCompiled = left.map((latex) => compileLatex(latex));
+    const rightCompiled = right.map((latex) => compileLatex(latex));
+    const freeSet = new Set<string>();
+    let usesSpace = false;
+    for (let side = 0; side < 2; side++) {
+      const parts = side === 0 ? left : right;
+      const compiled = side === 0 ? leftCompiled : rightCompiled;
+      for (let i = 0; i < 3; i++) {
+        const { freeParams, usesSpace: us } = collectFreeParams(
+          compiled[i]!.freeSymbols,
+          parts[i]!,
+        );
+        for (const p of freeParams) freeSet.add(p);
+        if (us) usesSpace = true;
+      }
+    }
+    const freeParams = [...freeSet].sort();
+    if (!usesSpace) throw new Error("Cross product field must depend on x, y, or z");
+    return {
+      freeParams,
+      usesSpace,
+      kind: "cross",
+      classifyLabel: classified.label,
+      bind(params: Record<string, number> = {}) {
+        return bindCrossFromTuples(left, right)(params);
       },
     };
   }
@@ -422,6 +561,7 @@ export function compileVectorExpr(
   }
 
   const compLatex = classified.compileParts;
+  const scale = classified.scale ?? 1;
   const compiled = compLatex.map((latex) => {
     const r = compileLatex(latex);
     if (!r?.success || typeof r.run !== "function") {
@@ -442,6 +582,18 @@ export function compileVectorExpr(
   }
   const freeParams = [...freeSet].sort();
   if (!usesSpace) throw new Error("Vector field must depend on x, y, or z");
+
+  if (scale !== 1) {
+    return {
+      freeParams,
+      usesSpace,
+      kind: "tuple",
+      classifyLabel: classified.label,
+      bind(params: Record<string, number> = {}) {
+        return bindScaledTuple(compLatex as [string, string, string], scale)(params);
+      },
+    };
+  }
 
   return {
     freeParams,
@@ -1482,10 +1634,11 @@ export function fitVectorField(
   vectorFn: (x: number, y: number, z: number) => [number, number, number],
   half: number,
   deg: number,
-  opts: { skipL2?: boolean } = {},
+  opts: { skipL2?: boolean; params?: Record<string, number> } = {},
 ): VectorFitResult {
+  const bindParams = opts.params ?? {};
   if (compiled.kind === "curl" && compiled.bindTuple) {
-    const tupleFn = compiled.bindTuple();
+    const tupleFn = compiled.bindTuple(bindParams);
     const fitX = fitChebyshev3D((x, y, z) => tupleFn(x, y, z)[0]!, half, deg, {
       skipL2: opts.skipL2 ?? true,
       skipMono: true,
@@ -1519,7 +1672,7 @@ export function fitVectorField(
   }
 
   if (compiled.kind === "gradient" && compiled.bindScalar) {
-    const scalarFn = compiled.bindScalar();
+    const scalarFn = compiled.bindScalar(bindParams);
     const fit = fitChebyshev3D(scalarFn, half, deg, {
       skipL2: opts.skipL2 ?? true,
       skipMono: true,

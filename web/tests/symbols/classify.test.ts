@@ -1,7 +1,7 @@
 import { classifyExpr, compileExpr, expandDefinitions } from "../../src/math/fit.ts";
 import { compileVectorExpr, isVectorFieldLatex } from "../../src/math/fitVector.ts";
 import { resolveExprRole } from "../../src/model/expressions.ts";
-import { SymbolRegistry } from "../../src/model/symbols.ts";
+import { SymbolRegistry, isDeclSymbolKind } from "../../src/model/symbols.ts";
 import { assert, assertNear } from "../helpers/assert.ts";
 import { runSuite } from "../helpers/runner.ts";
 
@@ -456,6 +456,15 @@ export async function run() {
         assert(compiled.kind === "gradient", "gradient operator");
         const [gx] = compiled.bind({})(1, 2, 0);
         assertNear(gx, 2, 0.05, "grad mathrm fx");
+      },
+    },
+    {
+      name: "isDeclSymbolKind recognizes declaration kinds",
+      fn: () => {
+        assert(isDeclSymbolKind("parameter"), "parameter");
+        assert(isDeclSymbolKind("alias"), "alias");
+        assert(isDeclSymbolKind("funcdef"), "funcdef");
+        assert(!isDeclSymbolKind("field"), "not field");
       },
     },
   ]);

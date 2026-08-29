@@ -93,5 +93,17 @@ export async function run() {
         assert(!isVectorFieldLatex("sin(x)"), "sin(x) wrongly detected as vector");
       },
     },
+    {
+      name: "compileExpr rejects tuple flow syntax",
+      fn: () => {
+        let rejected = false;
+        try {
+          compileExpr(String.raw`(-y,x,0)`);
+        } catch (e) {
+          rejected = e instanceof Error && /Vector field|flow role/i.test(e.message);
+        }
+        assert(rejected, "scalar compile rejects tuple");
+      },
+    },
   ]);
 }

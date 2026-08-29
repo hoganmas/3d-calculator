@@ -119,6 +119,24 @@ export function resolveExprGradient(item: {
   };
 }
 
+/** Apply gradient patch without letting stale `row.colors` override new endpoints. */
+function gradientFromPatch(row: ExprItem, patch: Partial<ExprItem>) {
+  if (patch.colors != null) {
+    return resolveExprGradient({
+      colors: patch.colors,
+      color: patch.color ?? row.color,
+      color2: patch.color2 ?? row.color2,
+    });
+  }
+  if (patch.color != null || patch.color2 != null) {
+    return resolveExprGradient({
+      color: patch.color ?? row.color,
+      color2: patch.color2 ?? row.color2,
+    });
+  }
+  return resolveExprGradient(row);
+}
+
 /** Secondary endpoint when the user edits the primary swatch only. */
 export function color2ForPrimary(primary: string) {
   const hit = EXPR_GRADIENTS.find(
@@ -440,12 +458,8 @@ export function updateExpr(id: string, patch: Partial<ExprItem>) {
   if (!row) return null;
   if (patch.role != null) patch.role = normalizeExprRole(patch.role as string);
   Object.assign(row, patch);
-  if (patch.colors || patch.color != null || patch.color2 != null) {
-    const g = resolveExprGradient({
-      colors: patch.colors ?? row.colors,
-      color: patch.color ?? row.color,
-      color2: patch.color2 ?? row.color2,
-    });
+  if (patch.colors != null || patch.color != null || patch.color2 != null) {
+    const g = gradientFromPatch(row, patch);
     row.colors = g.colors;
     row.color = g.color;
     row.color2 = g.color2;
@@ -459,12 +473,8 @@ export function updateExprSilent(id: string, patch: Partial<ExprItem>) {
   const row = items.find((e) => e.id === id);
   if (!row) return null;
   Object.assign(row, patch);
-  if (patch.colors || patch.color != null || patch.color2 != null) {
-    const g = resolveExprGradient({
-      colors: patch.colors ?? row.colors,
-      color: patch.color ?? row.color,
-      color2: patch.color2 ?? row.color2,
-    });
+  if (patch.colors != null || patch.color != null || patch.color2 != null) {
+    const g = gradientFromPatch(row, patch);
     row.colors = g.colors;
     row.color = g.color;
     row.color2 = g.color2;

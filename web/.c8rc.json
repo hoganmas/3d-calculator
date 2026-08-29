@@ -1,0 +1,18 @@
+{
+  "include": [
+    "src/math/**",
+    "src/model/**",
+    "src/app/compile.ts",
+    "src/app/exprErrors.ts"
+  ],
+  "exclude": [
+    "src/render/**",
+    "src/ui/**",
+    "src/main.ts",
+    "**/*.d.ts",
+    "dist/**"
+  ],
+  "reporter": ["text", "html"],
+  "reports-dir": "coverage",
+  "all": true
+}

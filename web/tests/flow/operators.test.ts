@@ -209,5 +209,36 @@ export async function run() {
         assert(maxErr < 0.25, `max partial fit error ${maxErr}`);
       },
     },
+    {
+      name: "spectral divergence of (x,y,z) on Cheb grid",
+      fn: () => {
+        const compiled = compileExpr(String.raw`\nabla\cdot(x,y,z)`);
+        const half = 1;
+        const deg = 8;
+        const fit = fitScalarField(compiled, compiled.bind({}), half, deg, { skipMono: true });
+        let maxErr = 0;
+        for (let ix = 0; ix < fit.M; ix++) {
+          for (let iy = 0; iy < fit.M; iy++) {
+            for (let iz = 0; iz < fit.M; iz++) {
+              const idx = densIndex(ix, iy, iz, fit.M);
+              maxErr = Math.max(maxErr, Math.abs(fit.dens[idx]! - 3));
+            }
+          }
+        }
+        assert(maxErr < 0.3, `max divergence fit error ${maxErr}`);
+      },
+    },
+    {
+      name: "constant (\\div r)^2 spectral bake",
+      fn: () => {
+        const compiled = compileExpr(String.raw`(\div r)^2`);
+        const fit = fitScalarField(compiled, compiled.bind({}), 1, 4, { skipMono: true });
+        let maxErr = 0;
+        for (let i = 0; i < fit.dens.length; i++) {
+          maxErr = Math.max(maxErr, Math.abs(fit.dens[i]! - 9));
+        }
+        assert(maxErr < 0.5, `constant div power fit ${maxErr}`);
+      },
+    },
   ]);
 }
