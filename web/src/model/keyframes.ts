@@ -151,10 +151,15 @@ export function syncIsoKeyframesToSceneBake(
   const blend = displayBlendForValue(cache, value);
   layer.blend = { i0: blend.i0, i1: blend.i1, t: blend.t };
   const blendM = isoBlendSceneM(cache, blend.i0, blend.i1, blend.t);
-  const M = uploadM ?? Math.max(sceneBake.M, blendM);
+  if (blendM <= 0) return sceneBake.M;
+  // Only force a shared uploadM when this layer actually has frames at that M.
+  const M =
+    uploadM && uploadM > 0 && cache.frames.some((fr) => frameAtGridM(fr, uploadM))
+      ? uploadM
+      : blendM;
   layer.keyframes = materializeKeyframeFramesAtM(cache.frames, M);
-  sceneBake.M = M;
-  return blendM;
+  sceneBake.M = Math.max(sceneBake.M, M);
+  return M;
 }
 
 /** Grid M for the current iso blend pair (matches displayBlendForValue snap semantics). */
@@ -235,6 +240,7 @@ export function clearKeyframeCaches() {
   pendingPumpLayers.clear();
   caches.clear();
   parkedKeyframeLayers.clear();
+  pumpLayerCursor = 0;
   lastBakeMs = 0;
   lastLerpMs = 0;
   lastKfLayers = 0;
@@ -715,10 +721,10 @@ function isoBlendSceneM(
   const M0 = gridMFromFrame(cache.frames[i0] ?? {});
   const M1 = gridMFromFrame(cache.frames[i1] ?? {});
   if (d0 === d1 && M0 > 0 && M0 === M1) return M0;
-  if (d0 > d1 || (d0 > 0 && d1 <= 0)) return M0 || M1 || 2;
-  if (d1 > d0 || (d1 > 0 && d0 <= 0)) return M1 || M0 || 2;
+  if (d0 > d1 || (d0 > 0 && d1 <= 0)) return M0 || M1 || 0;
+  if (d1 > d0 || (d1 > 0 && d0 <= 0)) return M1 || M0 || 0;
   if (M0 > 0 && M0 === M1) return M0;
-  return t < 0.5 ? M0 || M1 || 2 : M1 || M0 || 2;
+  return t < 0.5 ? M0 || M1 || 0 : M1 || M0 || 0;
 }
 
 /** Promote when both blend slots share the same staging degree. */
@@ -997,49 +1003,108 @@ function displayBlendForValue(cache: LayerKeyframeCache, value: number) {
   return seg;
 }
 
-function pickNextKeyframeWork(cache: LayerKeyframeCache): KeyframeWork[] {
+function bakeOrderForCache(cache: LayerKeyframeCache): number[] {
   const st = getParam(cache.paramName);
   const value = st?.value ?? cache.min;
   const { i0, i1 } = segmentForValue(cache, value);
   reconcileStaging(cache, i0, i1);
-  const target = cache.targetDeg;
-  const ladder = lobattoLadderDegrees(target);
-  const start = ladder[0] ?? startLadderDeg(target);
-  const order = bakeOrder(cache.K, i0, i1);
-  /** Display degree drives UI; staging counts for blend-pair scheduling only. */
-  const schedDegAt = (k: number) =>
-    Math.max(cache.frameDeg[k] ?? 0, cache.stagingDeg[k] ?? 0);
+  return bakeOrder(cache.K, i0, i1);
+}
 
+function schedDegAt(cache: LayerKeyframeCache, k: number): number {
+  return Math.max(cache.frameDeg[k] ?? 0, cache.stagingDeg[k] ?? 0);
+}
+
+/** In-flight Lobatto work targeting exactly phaseDeg, if any. */
+function inFlightWorkAtPhase(cache: LayerKeyframeCache, phaseDeg: number): KeyframeWork | null {
+  const order = bakeOrderForCache(cache);
   for (const k of order) {
     if (cache.lobattoFinalizeByK.has(k)) {
       const fin = cache.lobattoFinalizeByK.get(k)!;
-      return [{ kind: "refine", k, nextDeg: fin.lob.deg }];
+      if (fin.lob.deg === phaseDeg) return { kind: "refine", k, nextDeg: fin.lob.deg };
     }
     if (cache.lobattoJobByK.has(k)) {
       const job = cache.lobattoJobByK.get(k)!;
-      return [{ kind: "refine", k, nextDeg: job.targetDeg }];
+      if (job.targetDeg === phaseDeg) return { kind: "refine", k, nextDeg: job.targetDeg };
     }
   }
+  return null;
+}
 
-  const workForSlot = (k: number, phaseDeg: number): KeyframeWork | null => {
-    const d = schedDegAt(k);
+function newWorkAtPhase(cache: LayerKeyframeCache, phaseDeg: number): KeyframeWork | null {
+  const target = cache.targetDeg;
+  const ladder = lobattoLadderDegrees(target);
+  const start = ladder[0] ?? startLadderDeg(target);
+  if (!ladder.includes(phaseDeg) && phaseDeg !== start) return null;
+  const order = bakeOrderForCache(cache);
+  for (const k of order) {
+    // Don't start a new slot while another is mid-chunk on this layer.
+    if (cache.lobattoFinalizeByK.has(k) || cache.lobattoJobByK.has(k)) continue;
+    const d = schedDegAt(cache, k);
     if (d === 0) {
-      if (phaseDeg !== start) return null;
+      if (phaseDeg !== start) continue;
       return { kind: "coarse", k };
     }
-    if (d < phaseDeg) return { kind: "refine", k, nextDeg: phaseDeg };
-    return null;
-  };
+    if (d < phaseDeg && phaseDeg <= target) return { kind: "refine", k, nextDeg: phaseDeg };
+  }
+  return null;
+}
 
-  // Degree-first globally: every slot reaches phaseDeg before any slot advances further.
+/** Work for one layer at a single ladder rung (in-flight first, then new slots). */
+function pickWorkAtPhase(cache: LayerKeyframeCache, phaseDeg: number): KeyframeWork | null {
+  return inFlightWorkAtPhase(cache, phaseDeg) ?? newWorkAtPhase(cache, phaseDeg);
+}
+
+function pickNextKeyframeWork(cache: LayerKeyframeCache): KeyframeWork[] {
+  const ladder = lobattoLadderDegrees(cache.targetDeg);
   for (const phaseDeg of ladder) {
-    for (const k of order) {
-      const w = workForSlot(k, phaseDeg);
-      if (w) return [w];
+    const w = pickWorkAtPhase(cache, phaseDeg);
+    if (w) return [w];
+  }
+  return [];
+}
+
+/** Round-robin cursor across pending layers at the current global ladder rung. */
+let pumpLayerCursor = 0;
+
+function pendingPumpLayerIds(): string[] {
+  const ids: string[] = [];
+  for (const layerId of pendingPumpLayers) {
+    if (isParkedKeyframeLayer(layerId)) continue;
+    const cache = caches.get(layerId);
+    const job = asyncJobs.get(layerId);
+    if (!cache || !job || job.cancelled || job.gen !== cache.gen) continue;
+    ids.push(layerId);
+  }
+  ids.sort(); // stable, deterministic across Set iteration order
+  return ids;
+}
+
+/**
+ * Round-robin across expressions; each climbs its own degree ladder independently.
+ * One dirty/regenerating expression must not block or reset another's rung.
+ */
+function pickNextGlobalKeyframeWork(): {
+  layerId: string;
+  cache: LayerKeyframeCache;
+  work: KeyframeWork;
+} | null {
+  const layerIds = pendingPumpLayerIds();
+  if (!layerIds.length) return null;
+
+  const n = layerIds.length;
+  const start = ((pumpLayerCursor % n) + n) % n;
+  for (let i = 0; i < n; i++) {
+    const idx = (start + i) % n;
+    const layerId = layerIds[idx]!;
+    const cache = caches.get(layerId)!;
+    const works = pickNextKeyframeWork(cache);
+    if (works[0]) {
+      pumpLayerCursor = idx + 1;
+      return { layerId, cache, work: works[0] };
     }
   }
-
-  return [];
+  return null;
 }
 
 function executeKeyframeWork(
@@ -1092,12 +1157,16 @@ function buildLayerKeyframeResult(
   syncPromoted: number[] = [],
 ): EnsureKeyframesResult {
   const displayBlend = displayBlendForValue(cache, value);
+  const blendM = isoBlendSceneM(cache, displayBlend.i0, displayBlend.i1, displayBlend.t);
+  if (blendM <= 0 || !cache.frames[displayBlend.i0] || !cache.frames[displayBlend.i1]) {
+    throw new Error(
+      `keyframe blend pair not ready · ${opts.layerId} · ` +
+        `(${displayBlend.i0},${displayBlend.i1}) M=${blendM}`,
+    );
+  }
   const frames =
     cache.role === "isosurface"
-      ? materializeKeyframeFramesAtM(
-          cache.frames,
-          isoBlendSceneM(cache, displayBlend.i0, displayBlend.i1, displayBlend.t),
-        )
+      ? materializeKeyframeFramesAtM(cache.frames, blendM)
       : materializeKeyframeFrames(cache.frames);
   const a = frames[displayBlend.i0]!;
   const b = frames[displayBlend.i1]!;
@@ -1154,12 +1223,13 @@ function materializeKeyframeFrames(frames: (KeyframeFrame | null)[]): KeyframeFr
     }
   }
   if (!last) throw new Error("no keyframes ready");
-  const sceneM = gridMFromFrame(last) || 2;
+  const sceneM = gridMFromFrame(last);
+  if (sceneM <= 0) throw new Error("no keyframes ready");
   return materializeKeyframeFramesAtM(frames, sceneM);
 }
 
 function frameAtGridM(fr: KeyframeFrame | null | undefined, sceneM: number): boolean {
-  if (!fr) return false;
+  if (!fr || sceneM <= 0) return false;
   return gridMFromFrame(fr) === sceneM;
 }
 
@@ -1168,6 +1238,7 @@ function materializeKeyframeFramesAtM(
   frames: (KeyframeFrame | null)[],
   sceneM: number,
 ): KeyframeFrame[] {
+  if (sceneM <= 0) throw new Error("no keyframes ready");
   let fallback: KeyframeFrame | null = null;
   for (const fr of frames) {
     if (frameAtGridM(fr, sceneM)) {
@@ -1175,7 +1246,22 @@ function materializeKeyframeFramesAtM(
       break;
     }
   }
-  if (!fallback) throw new Error(`no keyframes at grid M=${sceneM}`);
+  if (!fallback) {
+    // Wrong target M (e.g. stale scene M=2) — use this layer's own available grid.
+    let anyM = 0;
+    for (const fr of frames) {
+      const m = gridMFromFrame(fr ?? {});
+      if (m > 0) {
+        anyM = m;
+        break;
+      }
+    }
+    if (anyM > 0 && anyM !== sceneM) {
+      tearLog("materialize-m-fallback", { requestedM: sceneM, usedM: anyM });
+      return materializeKeyframeFramesAtM(frames, anyM);
+    }
+    throw new Error(`no keyframes at grid M=${sceneM}`);
+  }
   const out: KeyframeFrame[] = new Array(frames.length);
   let lastAtM: KeyframeFrame = fallback;
   for (let i = 0; i < frames.length; i++) {
@@ -1197,7 +1283,8 @@ function materializeKeyframeFramesAtM(
 }
 
 function runOneKeyframeWork(): boolean {
-  for (const layerId of pendingPumpLayers) {
+  // Drop stale / parked entries so the global ladder only sees live layers.
+  for (const layerId of [...pendingPumpLayers]) {
     if (isParkedKeyframeLayer(layerId)) {
       pendingPumpLayers.delete(layerId);
       continue;
@@ -1207,118 +1294,128 @@ function runOneKeyframeWork(): boolean {
     if (!cache || !job || job.cancelled || job.gen !== cache.gen) {
       pendingPumpLayers.delete(layerId);
       asyncJobs.delete(layerId);
-      continue;
     }
+  }
 
-    const works = pickNextKeyframeWork(cache);
-    if (!works.length) {
-      if (!keyframesFullyReady(cache)) {
+  const picked = pickNextGlobalKeyframeWork();
+  if (!picked) {
+    for (const layerId of [...pendingPumpLayers]) {
+      const cache = caches.get(layerId);
+      if (!cache) {
+        pendingPumpLayers.delete(layerId);
+        asyncJobs.delete(layerId);
+        continue;
+      }
+      if (keyframesFullyReady(cache)) {
+        pendingPumpLayers.delete(layerId);
+        asyncJobs.delete(layerId);
+        const frame = cache.frames.find(Boolean) ?? cache.frames[0];
+        if (frame) {
+          onKeyframeProgress?.({
+            layerId,
+            index: -1,
+            frame,
+            readyCount: cache.readyCount,
+            K: cache.K,
+            done: true,
+          });
+        }
+        continue;
+      }
+      if (!pickNextKeyframeWork(cache).length) {
         tearLog("keyframe-pump-stall", {
           layerId,
           diag: diagnoseKeyframeCaches().find((d) => d.layerId === layerId),
         });
-        // Stay pending: segment/param changes + reconcile may unlock work.
-        continue;
       }
-      pendingPumpLayers.delete(layerId);
-      asyncJobs.delete(layerId);
-      onKeyframeProgress?.({
-        layerId,
-        index: -1,
-        frame: cache.frames.find(Boolean) ?? cache.frames[0]!,
-        readyCount: cache.readyCount,
-        K: cache.K,
-        done: true,
-      });
-      continue;
     }
+    return false;
+  }
 
-    const work = works[0]!;
-    const t0 = performance.now();
-    const stages: BakeStages = { sampleMs: 0, chebMs: 0, idctMs: 0, gradMs: 0 };
-    const { frame, k, deg, complete, promoted } = executeKeyframeWork(cache, work, stages);
-    const bakeMs = performance.now() - t0;
-    bakeMsAcc += bakeMs;
-    lastBakeMs = bakeMsAcc;
-    if (complete && frame && promoted?.length) {
-      const first = promoted[0]!;
-      const shown = cache.frames[first];
-      if (shown) {
-        onKeyframeProgress?.({
-          layerId,
-          index: first,
-          frame: shown,
-          promoted,
-          readyCount: cache.readyCount,
-          K: cache.K,
-          done: keyframesFullyReady(cache),
-        });
-      }
-      for (const idx of promoted) {
-        lastBakeDetails.push({
-          ...stages,
-          frames: 1,
-          deg: cache.frameDeg[idx] ?? deg,
-          M: Math.round(Math.cbrt(frameVolumeN(cache.frames[idx]!))),
-          role: cache.role,
-          layerId,
-          paramName: cache.paramName,
-          bakeMs: bakeMs / promoted.length,
-          async: true,
-          index: idx,
-        });
-      }
-      const blend = segmentForValue(cache, getParam(cache.paramName)?.value ?? cache.min);
-      if (
-        promoted.includes(blend.i0) &&
-        promoted.includes(blend.i1) &&
-        cache.frameDeg[blend.i0] === cache.frameDeg[blend.i1]
-      ) {
-        const d = cache.frameDeg[blend.i0] ?? deg;
-        maybeLogBlendPairReady(cache, layerId, blend.i0, blend.i1, d, bakeMs, "async", k);
-      }
-    } else if (complete && frame) {
+  const { layerId, cache, work } = picked;
+  const t0 = performance.now();
+  const stages: BakeStages = { sampleMs: 0, chebMs: 0, idctMs: 0, gradMs: 0 };
+  const { frame, k, deg, complete, promoted } = executeKeyframeWork(cache, work, stages);
+  const bakeMs = performance.now() - t0;
+  bakeMsAcc += bakeMs;
+  lastBakeMs = bakeMsAcc;
+  if (complete && frame && promoted?.length) {
+    const first = promoted[0]!;
+    const shown = cache.frames[first];
+    if (shown) {
       onKeyframeProgress?.({
         layerId,
-        index: k,
-        frame,
+        index: first,
+        frame: shown,
+        promoted,
         readyCount: cache.readyCount,
         K: cache.K,
         done: keyframesFullyReady(cache),
       });
-    } else if (!complete) {
-      if (cache.lobattoFinalizeByK.has(k)) {
-        const fin = cache.lobattoFinalizeByK.get(k)!;
-        console.log(
-          `[keyframes] finalize chunk · ${layerId} · slot ${k} · ${fin.phase} · ${bakeMs.toFixed(1)}ms`,
-        );
-      } else if (cache.lobattoJobByK.has(k)) {
-        const job = cache.lobattoJobByK.get(k)!;
-        const cur = bakedDegAt(cache, k);
-        console.log(
-          `[keyframes] lobatto chunk · ${layerId} · slot ${k} · ` +
-            `${cur}→${job.targetDeg} · ${job.mode} · ${bakeMs.toFixed(1)}ms`,
-        );
-      }
     }
-
-    if (keyframesFullyReady(cache)) {
-      pendingPumpLayers.delete(layerId);
-      asyncJobs.delete(layerId);
-      if (frame) {
-        onKeyframeProgress?.({
-          layerId,
-          index: -1,
-          frame,
-          readyCount: cache.readyCount,
-          K: cache.K,
-          done: true,
-        });
-      }
+    for (const idx of promoted) {
+      lastBakeDetails.push({
+        ...stages,
+        frames: 1,
+        deg: cache.frameDeg[idx] ?? deg,
+        M: Math.round(Math.cbrt(frameVolumeN(cache.frames[idx]!))),
+        role: cache.role,
+        layerId,
+        paramName: cache.paramName,
+        bakeMs: bakeMs / promoted.length,
+        async: true,
+        index: idx,
+      });
     }
-    return true;
+    const blend = segmentForValue(cache, getParam(cache.paramName)?.value ?? cache.min);
+    if (
+      promoted.includes(blend.i0) &&
+      promoted.includes(blend.i1) &&
+      cache.frameDeg[blend.i0] === cache.frameDeg[blend.i1]
+    ) {
+      const d = cache.frameDeg[blend.i0] ?? deg;
+      maybeLogBlendPairReady(cache, layerId, blend.i0, blend.i1, d, bakeMs, "async", k);
+    }
+  } else if (complete && frame) {
+    onKeyframeProgress?.({
+      layerId,
+      index: k,
+      frame,
+      readyCount: cache.readyCount,
+      K: cache.K,
+      done: keyframesFullyReady(cache),
+    });
+  } else if (!complete) {
+    if (cache.lobattoFinalizeByK.has(k)) {
+      const fin = cache.lobattoFinalizeByK.get(k)!;
+      console.log(
+        `[keyframes] finalize chunk · ${layerId} · slot ${k} · ${fin.phase} · ${bakeMs.toFixed(1)}ms`,
+      );
+    } else if (cache.lobattoJobByK.has(k)) {
+      const job = cache.lobattoJobByK.get(k)!;
+      const cur = bakedDegAt(cache, k);
+      console.log(
+        `[keyframes] lobatto chunk · ${layerId} · slot ${k} · ` +
+          `${cur}→${job.targetDeg} · ${job.mode} · ${bakeMs.toFixed(1)}ms`,
+      );
+    }
   }
-  return false;
+
+  if (keyframesFullyReady(cache)) {
+    pendingPumpLayers.delete(layerId);
+    asyncJobs.delete(layerId);
+    if (frame) {
+      onKeyframeProgress?.({
+        layerId,
+        index: -1,
+        frame,
+        readyCount: cache.readyCount,
+        K: cache.K,
+        done: true,
+      });
+    }
+  }
+  return true;
 }
 
 /** Run async keyframe work after render; default one unit per frame. */
@@ -1448,9 +1545,16 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
   let syncCount = 0;
   let lastSyncK = blend.i0;
   let syncPromoted: number[] = [];
-  if (!opts.deferSyncBake) {
+  // Never defer when the active blend pair has no display frames — that used to
+  // skip sync bake, materialize at bogus M=2, throw, and stall the pump.
+  const pairHasDisplay =
+    (cache.frameDeg[blend.i0] ?? 0) > 0 &&
+    (cache.frameDeg[blend.i1] ?? 0) > 0 &&
+    !!cache.frames[blend.i0] &&
+    !!cache.frames[blend.i1];
+  if (!opts.deferSyncBake || !pairHasDisplay) {
     for (const k of [blend.i0, blend.i1]) {
-      if (cache.frameDeg[k]! > 0) continue;
+      if (cache.frameDeg[k]! > 0 && cache.frames[k]) continue;
       const { frame, complete } = bakeFrameAtDeg(cache, k, startDeg, stages, null);
       if (!complete || !frame) throw new Error("sync keyframe bake incomplete");
       syncPromoted = commitFrame(cache, k, frame, startDeg);

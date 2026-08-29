@@ -35,6 +35,10 @@ export function clearLobattoFitCache(): void {
   lobattoByLayer.clear();
 }
 
+export function clearLobattoLayerCache(layerId: string): void {
+  lobattoByLayer.delete(layerId);
+}
+
 /** Invalidate any in-flight progressive ladder. */
 export function cancelProgressiveFit(): void {
   generation++;
@@ -82,7 +86,6 @@ export function scheduleProgressiveUploadFit(
     }
 
     cancelProgressiveFit();
-    clearLobattoFitCache();
     uploadFit(fitOpts);
   }, delay);
 }
@@ -94,7 +97,6 @@ function startProgressiveLadder(
 ): void {
   cancelProgressiveFit();
   const runGen = generation;
-  clearLobattoFitCache();
 
   const steps = lobattoLadderDegrees(targetDeg);
   let stepIdx = 0;

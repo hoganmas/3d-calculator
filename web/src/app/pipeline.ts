@@ -5,9 +5,10 @@ import {
   ensureLobattoDegree,
   idctLobatto3D,
   lobattoChebToSeries,
+  lobattoLadderDegrees,
 } from "../math/chebLobatto.js";
 import {
-  clearLobattoFitCache,
+  clearLobattoLayerCache,
   getLobattoLayerCache,
   isProgressiveLobattoEnabled,
   scheduleProgressiveUploadFit,
@@ -95,6 +96,24 @@ interface CachedLayer {
   cheb?: Float32Array;
   fitRel?: number;
   isoLevel?: number;
+  /** Content fingerprint at last bake — per-expression dirty tracking. */
+  bakeFp?: string;
+}
+
+/** Last successful dens/keyframe fingerprint per layer id (decoupled invalidation). */
+const layerBakeFingerprints = new Map<string, string>();
+
+function layerBakeFingerprint(
+  layer: {
+    item: { id: string; latex: string };
+    role: string;
+    compiled?: { isoLevel?: number } | null;
+  },
+  deg: number,
+  half: number,
+): string {
+  const iso = layer.compiled?.isoLevel ?? 0;
+  return `${layer.role}\0${layer.item.latex}\0${deg}\0${half}\0${iso}`;
 }
 
 const lastGpuBlendByLayer = new Map<
@@ -108,7 +127,7 @@ export function tickGpuKeyframeBlends() {
   /** @type {{ id: string, i0: number, i1: number, t: number }[]} */
   const blends = [];
   let needReupload = false;
-  let targetM = 2;
+  let targetM = 0;
   for (const c of isoLayers) {
     if (!c?.id || !Array.isArray(c.keyframes) || !c.keyframes.length) continue;
     const promoted = refreshIsoBlendDisplay(c.id);
@@ -132,10 +151,11 @@ export function tickGpuKeyframeBlends() {
     c.blend = { i0: b.i0, i1: b.i1, t: b.t };
     blends.push(b);
   }
-  if (needReupload && state.lastSceneBake) {
+  if (needReupload && state.lastSceneBake && targetM > 0) {
     for (const c of isoLayers) {
       if (c?.id) targetM = Math.max(targetM, getIsoBlendSceneM(c.id));
     }
+    if (targetM <= 0) return needReupload;
     state.lastSceneBake.M = targetM;
     for (const c of isoLayers) {
       if (c?.id) syncIsoKeyframesToSceneBake(c.id, state.lastSceneBake, targetM);
@@ -173,7 +193,7 @@ export function uploadFit(
     const half = 0.5 * boxSize;
 
     if (!progressive && !fromAnim) {
-      clearLobattoFitCache();
+      // Per-layer Lobatto invalidation happens only for layers that actually refit.
     }
 
     const tUpload = performance.now();
@@ -192,6 +212,7 @@ export function uploadFit(
     // Park keyframe caches (don't wipe) so re-enabling can reuse them.
     if (!layers.length) {
       syncKeyframeScene();
+      layerBakeFingerprints.clear();
       state.lastSceneBake = { cloudLayers: [], isosurfaceLayers: [], flowLayers: [], M: Math.max(2, deg + 1), dens: null };
       state.lastFitTiming = null;
       state.lastNCoeff = 0;
@@ -230,42 +251,57 @@ export function uploadFit(
     let densKeyframedCpu = false;
 
     // Anim ticks: only refit layers that depend on dirty params; reuse the rest.
+    // Structural refits: reuse per-expression when latex/role/deg/half unchanged.
     // Dirty layers with exactly one animating slider: GPU keyframe blend (iso) / CPU lerp (dens).
-    // Structural refits (visibility, latex, …): park/drop keyframe caches instead of wiping all.
     const dirty = fromAnim ? collectAnimDirtyParams() : null;
     syncKeyframeScene();
     if (fromAnim) beginKeyframePass();
 
     const prevById = new Map<string, CachedLayer>();
     const lastBake = state.lastSceneBake;
-    const canReuseCache =
-      fromAnim &&
-      dirty &&
-      lastBake &&
-      lastBake.deg === deg &&
-      Math.abs((lastBake.half ?? NaN) - half) < 1e-12;
-    if (canReuseCache && lastBake) {
+    // Half must match; deg may differ during progressive ladder steps — per-layer
+    // fingerprints decide which expressions are actually dirty.
+    const sceneMetaOk =
+      !!lastBake && Math.abs((lastBake.half ?? NaN) - half) < 1e-12;
+    if (sceneMetaOk && lastBake) {
       for (const d of lastBake.cloudLayers) {
-        if (d.id) prevById.set(d.id, { kind: "cloud", ...d });
+        if (d.id) prevById.set(d.id, { kind: "cloud", ...d, bakeFp: layerBakeFingerprints.get(d.id) });
       }
       for (const c of lastBake.isosurfaceLayers) {
-        if (c.id) prevById.set(c.id, { kind: "isosurface", ...c });
+        if (c.id) prevById.set(c.id, { kind: "isosurface", ...c, bakeFp: layerBakeFingerprints.get(c.id) });
       }
       for (const f of lastBake.flowLayers ?? []) {
-        if (f.id) prevById.set(f.id, { kind: "flow", ...f });
+        if (f.id) prevById.set(f.id, { kind: "flow", ...f, bakeFp: layerBakeFingerprints.get(f.id) });
+      }
+    }
+
+    const liveIds = new Set(layers.map((L) => L.item.id));
+    for (const id of [...layerBakeFingerprints.keys()]) {
+      if (!liveIds.has(id)) {
+        layerBakeFingerprints.delete(id);
+        clearLobattoLayerCache(id);
       }
     }
 
     const baseParams = getParamValues();
+    const commitLayerFp = (layerId: string, fp: string) => {
+      if (deg === uiDeg || opts.progressiveFinal || (!progressive && !fromAnim)) {
+        layerBakeFingerprints.set(layerId, fp);
+      }
+    };
 
     for (const L of layers) {
       const { color, color2, colors } = layerRgbFromItem(L.item);
-      const depends =
-        !dirty ||
+      const fp = layerBakeFingerprint(L, uiDeg, half);
+      const paramDepends =
+        !!dirty &&
         (L.role === "flow"
           ? L.vectorCompiled!.freeParams.some((p) => dirty.has(p))
           : L.compiled!.freeParams.some((p) => dirty.has(p)));
-      const prev = canReuseCache && !depends ? prevById.get(L.item.id) : null;
+      // Structural: dirty when fingerprint changed. Anim: dirty when params depend.
+      const contentDirty = layerBakeFingerprints.get(L.item.id) !== fp;
+      const depends = fromAnim ? !dirty || paramDepends : contentDirty;
+      const prev = sceneMetaOk && !depends ? prevById.get(L.item.id) : null;
       const prevHasKf =
         prev && Array.isArray(prev.keyframes) && prev.keyframes.length > 0;
       const reuseKind =
@@ -330,6 +366,7 @@ export function uploadFit(
           cheb = prev.cheb;
           fitRel = prev.fitRel ?? fitRel;
         }
+        commitLayerFp(L.item.id, fp);
         continue;
       }
 
@@ -405,6 +442,7 @@ export function uploadFit(
             fitRel = sample.fitRel ?? fitRel;
           }
         }
+        commitLayerFp(L.item.id, fp);
         continue;
       }
 
@@ -447,9 +485,11 @@ export function uploadFit(
             cheb = sample.cheb;
             fitRel = sample.fitRel ?? fitRel;
           }
+          commitLayerFp(L.item.id, fp);
           continue;
         }
 
+        clearLobattoLayerCache(L.item.id);
         const skipHeavy = fromAnim || layers.length > 1;
         const fit = fitVectorField(
           L.vectorCompiled!,
@@ -475,9 +515,13 @@ export function uploadFit(
           cheb = fit.cheb;
           fitRel = fit.fitRel ?? fitRel;
         }
+        commitLayerFp(L.item.id, fp);
         continue;
       }
 
+      // Reset this layer's dens Lobatto only at the start of a progressive rebuild.
+      const ladderStart = lobattoLadderDegrees(uiDeg)[0] ?? uiDeg;
+      if (!progressive || deg === ladderStart) clearLobattoLayerCache(L.item.id);
       const skipHeavy = fromAnim || layers.length > 1 || progressive;
       const useLobatto =
         progressive &&
@@ -544,6 +588,7 @@ export function uploadFit(
           timingAcc[k] += scalarFit.timing[k] || 0;
         }
       }
+      commitLayerFp(L.item.id, fp);
     }
 
     // WebGL preview texture: sum of cloud layers (skipped when WebGPU is active).

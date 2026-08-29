@@ -192,6 +192,68 @@ export async function run() {
       },
     },
     {
+      name: "progressive: multi-layer fill completes independently",
+      fn: async () => {
+        clearKeyframeCaches();
+        setupAnimParam("t", 0.5);
+        ensureLayerKeyframes({ ...keyframeOpts("layer-a", "t"), deg: 16, K: 3 });
+        ensureLayerKeyframes({
+          ...keyframeOpts("layer-b", "t"),
+          layerId: "layer-b",
+          latex: String.raw`\cos(x+t)`,
+          compiled: compileExpr(String.raw`\cos(x+t)`),
+          deg: 16,
+          K: 3,
+        });
+        await waitForComplete(30000);
+        assert(getKeyframeProgress("layer-a")!.readyCount === 3, "a complete");
+        assert(getKeyframeProgress("layer-b")!.readyCount === 3, "b complete");
+      },
+    },
+    {
+      name: "progressive: regenerating one layer does not reset sibling",
+      fn: async () => {
+        clearKeyframeCaches();
+        setupAnimParam("t", 0.5);
+        ensureLayerKeyframes({ ...keyframeOpts("layer-keep", "t"), deg: 8, K: 3 });
+        ensureLayerKeyframes({
+          ...keyframeOpts("layer-edit", "t"),
+          layerId: "layer-edit",
+          latex: String.raw`\cos(x+t)`,
+          compiled: compileExpr(String.raw`\cos(x+t)`),
+          deg: 8,
+          K: 3,
+        });
+        await waitForComplete(20000);
+        const keepBefore = getKeyframeProgress("layer-keep")!;
+        assert(keepBefore.readyCount === 3, "keep ready");
+
+        // Drop only the edited layer (simulates latex change sync).
+        syncKeyframeCachesWithExpressions(
+          [
+            { id: "layer-keep", latex: String.raw`\sin(x+t)`, enabled: true },
+            { id: "layer-edit", latex: String.raw`\cos(x+2t)`, enabled: true },
+          ],
+          { deg: 8, half: 0.75 },
+        );
+        assert(hasLayerKeyframeCache("layer-keep"), "keep cache survives");
+        assert(!hasLayerKeyframeCache("layer-edit"), "edit cache dropped");
+
+        ensureLayerKeyframes({
+          ...keyframeOpts("layer-edit", "t"),
+          layerId: "layer-edit",
+          latex: String.raw`\cos(x+2t)`,
+          compiled: compileExpr(String.raw`\cos(x+2t)`),
+          deg: 8,
+          K: 3,
+        });
+        const keepAfter = ensureLayerKeyframes({ ...keyframeOpts("layer-keep", "t"), deg: 8, K: 3 });
+        assert(!keepAfter.baked, "keep not rebaked");
+        assert(getKeyframeProgress("layer-keep")!.readyCount === 3, "keep still complete");
+        assert(getKeyframeProgress("layer-keep")!.displayDeg.every((d) => d === 8), "keep deg");
+      },
+    },
+    {
       name: "progressive: display blend keeps matched degrees",
       fn: async () => {
         clearKeyframeCaches();
@@ -428,6 +490,27 @@ export async function run() {
         clearKeyframeCaches();
         assert(!hasActiveKeyframeCaches(), "cleared");
         assert(allKeyframesComplete(), "vacuously complete");
+      },
+    },
+    {
+      name: "ensureLayerKeyframes forces sync when defer would leave empty pair",
+      fn: () => {
+        clearKeyframeCaches();
+        setupAnimParam("t", 0.5);
+        const opts = { ...keyframeOpts("layer-defer-guard", "t"), deg: 8, K: 3 };
+        // First ensure creates cache; second call with mismatched latex rebuilds empty
+        // while deferSyncBake=true — must still sync-bake the blend pair.
+        ensureLayerKeyframes(opts);
+        const rebuilt = ensureLayerKeyframes({
+          ...opts,
+          latex: String.raw`\cos(x+t)`,
+          compiled: compileExpr(String.raw`\cos(x+t)`),
+          deferSyncBake: true,
+        });
+        assert(rebuilt.baked, "forced sync bake");
+        assert(rebuilt.M >= 5, `valid grid M, got ${rebuilt.M}`);
+        const blend = peekKeyframeBlend("layer-defer-guard");
+        assert(!!blend, "blend pair ready after forced sync");
       },
     },
     {
