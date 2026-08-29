@@ -1,13 +1,60 @@
 /**
- * Expression list: density / constraint fields and optional named parameters.
+ * Expression list: cloud / isosurface / flow fields and optional named parameters.
  * Parameter rows (`a = …`) share values across all field expressions.
  */
 
-import type { ExprItem, ExprRole } from "../types/models.js";
+import type { ExprItem, ExprRole, LayerRole } from "../types/models.js";
+import { isVectorFieldLatex } from "../math/fitVector.js";
 
 export type { ExprItem, ExprRole, AnimMode } from "../types/models.js";
 
+const LEGACY_EXPR_ROLES: Record<string, ExprRole> = {
+  density: "cloud",
+  constraint: "isosurface",
+};
+
+/** Map stored/MCP role strings to current primitive names. */
+export function normalizeExprRole(role: string | undefined): ExprRole {
+  if (!role) return "auto";
+  return LEGACY_EXPR_ROLES[role] ?? (role as ExprRole);
+}
+
 let nextId = 1;
+
+function parseExprIdNum(id: string): number | null {
+  const m = /^e(\d+)$/.exec(String(id || ""));
+  return m ? parseInt(m[1]!, 10) : null;
+}
+
+/** Keep auto-generated ids above every id already in the list. */
+function syncNextIdFromItems(extraIds: string[] = []) {
+  for (const item of items) {
+    const n = parseExprIdNum(item.id);
+    if (n != null) nextId = Math.max(nextId, n + 1);
+  }
+  for (const id of extraIds) {
+    const n = parseExprIdNum(id);
+    if (n != null) nextId = Math.max(nextId, n + 1);
+  }
+}
+
+/** Ensure ids are unique (e.g. after loading stale persistence). */
+function dedupeExprIds(rows: ExprItem[]): ExprItem[] {
+  const seen = new Set<string>();
+  const out: ExprItem[] = [];
+  for (const row of rows) {
+    if (!seen.has(row.id)) {
+      seen.add(row.id);
+      out.push(row);
+      continue;
+    }
+    let id = `e${nextId++}`;
+    while (seen.has(id)) id = `e${nextId++}`;
+    seen.add(id);
+    out.push({ ...row, id });
+  }
+  return out;
+}
 
 /** Max / min stops in a layer gradient. */
 export const MAX_GRAD_STOPS = 6;
@@ -175,7 +222,12 @@ export function createExprItem(
     value?: number;
   } = {},
 ): ExprItem {
+  syncNextIdFromItems(init.id ? [init.id] : []);
   const id = init.id ?? `e${nextId++}`;
+  if (init.id) {
+    const n = parseExprIdNum(init.id);
+    if (n != null) nextId = Math.max(nextId, n + 1);
+  }
   let sliderMin: number = Number.isFinite(init.sliderMin)
     ? (init.sliderMin as number)
     : Number.isFinite(init.min)
@@ -198,7 +250,7 @@ export function createExprItem(
     color: grad.color,
     color2: grad.color2,
     colors: grad.colors,
-    role: init.role ?? "auto",
+    role: normalizeExprRole(init.role as string | undefined),
     enabled: init.enabled !== false,
     sliderMin,
     sliderMax,
@@ -237,12 +289,15 @@ export function selectExpr(id: string | null) {
  * @param {Partial<ExprItem>[]} list
  */
 export function setExpressions(list: Partial<ExprItem>[]) {
-  items = list.map((init, i) =>
-    createExprItem({
-      ...init,
-      color: init.color ?? colorForIndex(i),
-    }),
+  items = dedupeExprIds(
+    list.map((init, i) =>
+      createExprItem({
+        ...init,
+        color: init.color ?? colorForIndex(i),
+      }),
+    ),
   );
+  syncNextIdFromItems();
   selectedId = items[0]?.id ?? null;
   emit();
 }
@@ -358,6 +413,7 @@ export function splitExprAt(id: string, leftLatex: string, rightLatex: string) {
 export function updateExpr(id: string, patch: Partial<ExprItem>) {
   const row = items.find((e) => e.id === id);
   if (!row) return null;
+  if (patch.role != null) patch.role = normalizeExprRole(patch.role as string);
   Object.assign(row, patch);
   if (patch.colors || patch.color != null || patch.color2 != null) {
     const g = resolveExprGradient({
@@ -405,15 +461,16 @@ export function hexToRgb01(hex: string) {
 }
 
 /**
- * Effective role from expression kind.
- * @param {ExprRole} _role
- * @param {"parameter" | "constraint" | "definition" | "bare"} kind
- * @returns {"parameter" | "density" | "constraint"}
+ * Effective role from expression kind and optional vector syntax.
  */
 export function resolveExprRole(
-  _role: ExprRole,
+  role: ExprRole,
   kind: "parameter" | "constraint" | "definition" | "bare",
-): "parameter" | "density" | "constraint" {
+  latex?: string,
+): LayerRole {
+  const r = normalizeExprRole(role as string);
   if (kind === "parameter") return "parameter";
-  return kind === "constraint" ? "constraint" : "density";
+  if (r === "cloud" || r === "isosurface" || r === "flow") return r;
+  if (r === "auto" && latex && isVectorFieldLatex(latex)) return "flow";
+  return kind === "constraint" ? "isosurface" : "cloud";
 }

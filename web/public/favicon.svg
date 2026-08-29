@@ -1,19 +1,178 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="6" fill="#ffffff"/>
-  <!-- ∇ = large △ minus smaller △ (inner nudged right) -->
-  <path
-    fill="#111111"
-    fill-rule="evenodd"
-    d="M5 7.5h14L12 25.5Z M9.15 10.2h7.7L13 20.1Z"
-  />
-  <!-- ² -->
-  <text
-    x="24.6"
-    y="13.2"
-    fill="#111111"
-    font-family="Georgia, 'Times New Roman', Times, serif"
-    font-size="12"
-    font-weight="600"
-    text-anchor="middle"
-  >2</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <defs>
+    <filter id="glassPlate" filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse"
+      x="0" y="0" width="32" height="32" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1" result="sdfA"/>
+      <feGaussianBlur in="sdfA" stdDeviation="1" result="sdf"/>
+      <feDiffuseLighting in="sdf" diffuseConstant="1" surfaceScale="5.5" lighting-color="#ffffff" result="raw">
+        <feDistantLight azimuth="225" elevation="52"/>
+      </feDiffuseLighting>
+      <feGaussianBlur in="raw" stdDeviation="0.5" result="rawSmooth"/>
+      <feComponentTransfer in="rawSmooth" result="t">
+        <feFuncR type="linear" slope="0.78" intercept="0.22"/>
+        <feFuncG type="linear" slope="0.78" intercept="0.22"/>
+        <feFuncB type="linear" slope="0.78" intercept="0.22"/>
+      </feComponentTransfer>
+      <feComponentTransfer in="t" result="color">
+        <feFuncR type="table" tableValues="0.102 0.22"/>
+        <feFuncG type="table" tableValues="0.071 0.15"/>
+        <feFuncB type="table" tableValues="0.157 0.32"/>
+      </feComponentTransfer>
+      <feComposite in="color" in2="SourceAlpha" operator="in"/>
+    </filter>
+
+    <!-- SSAO: symbol shadows onto background plate -->
+    <filter id="ssaoBg" filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse"
+      x="0" y="0" width="32" height="32" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1.5" result="blurA"/>
+      <feGaussianBlur in="blurA" stdDeviation="1.5" result="blur"/>
+      <feOffset in="blur" dx="-0.4" dy="0.9" result="off"/>
+      <feFlood flood-color="#0c041c" flood-opacity="0.78" result="flood"/>
+      <feComposite in="flood" in2="off" operator="in"/>
+    </filter>
+
+    <filter id="twoMaskBlur" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="1.4" result="blur"/>
+      <feOffset in="blur" dx="-2.5" dy="0.6"/>
+    </filter>
+
+    <mask id="twoOccMask" maskUnits="userSpaceOnUse" x="0" y="0" width="32" height="32">
+      <rect width="32" height="32" fill="black"/>
+      <g transform="translate(23.5 9) scale(0.88) translate(-10 -10.535)" filter="url(#twoMaskBlur)">
+        <use href="#two" stroke="white" stroke-width="11" fill="none"/>
+      </g>
+    </mask>
+
+    <filter id="sdfNabla" filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse"
+      x="0" y="0" width="32" height="32" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1" result="sdfA"/>
+      <feGaussianBlur in="sdfA" stdDeviation="1" result="sdf"/>
+      <feDiffuseLighting in="sdf" diffuseConstant="1.1" surfaceScale="3.2" lighting-color="#ffffff" result="rawView">
+        <feDistantLight azimuth="0" elevation="88"/>
+      </feDiffuseLighting>
+      <feGaussianBlur in="rawView" stdDeviation="0.5" result="viewSmooth"/>
+      <feComponentTransfer in="viewSmooth" result="ndotv">
+        <feFuncR type="linear" slope="0.9" intercept="0.08"/>
+        <feFuncG type="linear" slope="0.9" intercept="0.08"/>
+        <feFuncB type="linear" slope="0.9" intercept="0.08"/>
+      </feComponentTransfer>
+      <feComponentTransfer in="ndotv" result="t">
+        <feFuncR type="table" tableValues="0.96 0.88 0.76 0.58 0.34"/>
+        <feFuncG type="table" tableValues="0.96 0.88 0.76 0.58 0.34"/>
+        <feFuncB type="table" tableValues="0.96 0.88 0.76 0.58 0.34"/>
+      </feComponentTransfer>
+      <feComponentTransfer in="t" result="color">
+        <feFuncR type="table" tableValues="1 0.96"/>
+        <feFuncG type="table" tableValues="0.42 0.82"/>
+        <feFuncB type="table" tableValues="0.28 0.12"/>
+      </feComponentTransfer>
+      <feComposite in="color" in2="SourceAlpha" operator="in"/>
+    </filter>
+
+    <!-- Occluded nabla pass: cap t before LUT, clipped to 2 mask -->
+    <filter id="sdfNablaOcc" filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse"
+      x="0" y="0" width="32" height="32" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1" result="sdfA"/>
+      <feGaussianBlur in="sdfA" stdDeviation="1" result="sdf"/>
+      <feDiffuseLighting in="sdf" diffuseConstant="1.1" surfaceScale="3.2" lighting-color="#ffffff" result="rawView">
+        <feDistantLight azimuth="0" elevation="88"/>
+      </feDiffuseLighting>
+      <feGaussianBlur in="rawView" stdDeviation="0.5" result="viewSmooth"/>
+      <feComponentTransfer in="viewSmooth" result="ndotv">
+        <feFuncR type="linear" slope="0.9" intercept="0.08"/>
+        <feFuncG type="linear" slope="0.9" intercept="0.08"/>
+        <feFuncB type="linear" slope="0.9" intercept="0.08"/>
+      </feComponentTransfer>
+      <feComponentTransfer in="ndotv" result="t">
+        <feFuncR type="table" tableValues="0.96 0.88 0.76 0.58 0.34"/>
+        <feFuncG type="table" tableValues="0.96 0.88 0.76 0.58 0.34"/>
+        <feFuncB type="table" tableValues="0.96 0.88 0.76 0.58 0.34"/>
+      </feComponentTransfer>
+      <feFlood flood-color="rgb(0.32 0.32 0.32)" result="tCap"/>
+      <feBlend in="t" in2="tCap" mode="darken" result="tOcc"/>
+      <feComponentTransfer in="tOcc" result="color">
+        <feFuncR type="table" tableValues="1 0.96"/>
+        <feFuncG type="table" tableValues="0.42 0.82"/>
+        <feFuncB type="table" tableValues="0.28 0.12"/>
+      </feComponentTransfer>
+      <feComposite in="color" in2="SourceAlpha" operator="in"/>
+    </filter>
+
+    <filter id="sdfTwo" filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse"
+      x="0" y="0" width="32" height="32" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="0.42" result="sdfA"/>
+      <feGaussianBlur in="sdfA" stdDeviation="0.42" result="sdf"/>
+      <feDiffuseLighting in="sdf" diffuseConstant="1" surfaceScale="2" lighting-color="#ffffff" result="rawView">
+        <feDistantLight azimuth="0" elevation="88"/>
+      </feDiffuseLighting>
+      <feGaussianBlur in="rawView" stdDeviation="0.35" result="viewSmooth"/>
+      <feComponentTransfer in="viewSmooth" result="ndotv">
+        <feFuncR type="linear" slope="0.92" intercept="0.06"/>
+        <feFuncG type="linear" slope="0.92" intercept="0.06"/>
+        <feFuncB type="linear" slope="0.92" intercept="0.06"/>
+      </feComponentTransfer>
+      <feComponentTransfer in="ndotv" result="t">
+        <feFuncR type="table" tableValues="0.96 0.88 0.76 0.58 0.34"/>
+        <feFuncG type="table" tableValues="0.96 0.88 0.76 0.58 0.34"/>
+        <feFuncB type="table" tableValues="0.96 0.88 0.76 0.58 0.34"/>
+      </feComponentTransfer>
+      <feComponentTransfer in="t" result="color">
+        <feFuncR type="table" tableValues="0.52 1"/>
+        <feFuncG type="table" tableValues="0.20 0.32"/>
+        <feFuncB type="table" tableValues="0.82 0.74"/>
+      </feComponentTransfer>
+      <feComposite in="color" in2="SourceAlpha" operator="in"/>
+    </filter>
+
+    <path id="r" fill-rule="evenodd" d="
+      M 12 9.515
+      L 20 9.515
+      Q 25.5 9.515 22.75 14.278
+      L 18.75 21.207
+      Q 16 25.97 13.25 21.207
+      L 9.25 14.278
+      Q 6.5 9.515 12 9.515
+      Z
+      M 14.95 13.355
+      L 17.05 13.355
+      Q 18.85 13.355 17.95 14.914
+      L 16.9 16.732
+      Q 16 18.291 15.1 16.732
+      L 14.05 14.914
+      Q 13.15 13.355 14.95 13.355
+      Z
+    "/>
+    <path id="two" fill="none" stroke="white" stroke-width="3"
+      stroke-linecap="round" stroke-linejoin="round" d="
+      M 6.56 8.12
+      C 6.06 6.0 13.94 5.85 13.77 9.25
+      C 13.53 11.08 8.03 12.22 6.8 14
+      Q 7 15.2 8.1 15.4
+      L 13.44 15.4
+    "/>
+
+  </defs>
+
+  <rect width="32" height="32" rx="8" fill="#1a1228" filter="url(#glassPlate)"/>
+
+  <!-- SSAO: both symbols onto background -->
+  <g opacity="1">
+    <g transform="translate(14.5 17.5) scale(1.18) translate(-16 -15)">
+      <use href="#r" fill="black" filter="url(#ssaoBg)"/>
+    </g>
+    <g transform="translate(23.5 9) scale(0.88) translate(-10 -10.535)">
+      <use href="#two" stroke="black" stroke-width="3.4" fill="none" filter="url(#ssaoBg)"/>
+    </g>
+  </g>
+
+  <g transform="translate(14.5 17.5) scale(1.18) translate(-16 -15)">
+    <use href="#r" fill="white" filter="url(#sdfNabla)"/>
+  </g>
+  <g transform="translate(14.5 17.5) scale(1.18) translate(-16 -15)" mask="url(#twoOccMask)">
+    <use href="#r" fill="white" filter="url(#sdfNablaOcc)"/>
+  </g>
+
+  <g transform="translate(23.5 9) scale(0.88) translate(-10 -10.535)">
+    <use href="#two" filter="url(#sdfTwo)"/>
+  </g>
 </svg>

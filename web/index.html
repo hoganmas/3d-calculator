@@ -5,15 +5,37 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Laplacian</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/src/ui/theme.css" />
+    <link rel="stylesheet" href="/src/ui/splash.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
+      media="print"
+      onload="this.media='all'"
     />
+    <noscript>
+      <link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
+      />
+    </noscript>
     <link rel="stylesheet" href="/src/ui/app.css" />
   </head>
   <body>
+    <div id="splash" role="status" aria-live="polite" aria-busy="true">
+      <div class="splash-card">
+        <object
+          class="splash-logo"
+          type="image/svg+xml"
+          data="/splash-logo.svg"
+          aria-label="Laplacian"
+          width="160"
+          height="160"
+        ></object>
+      </div>
+    </div>
     <div id="app">
       <aside id="panel">
         <div class="brand-row">
@@ -115,6 +137,8 @@
               <select id="themePref">
                 <option value="dark">Dark</option>
                 <option value="light">Light</option>
+                <option value="dark-scene-light-ui">Dark scene, light UI</option>
+                <option value="light-scene-dark-ui">Light scene, dark UI</option>
                 <option value="system">System</option>
               </select>
             </label>
@@ -163,6 +187,49 @@
           </section>
 
           <section class="settings-section">
+            <p class="settings-section-title">Flow</p>
+            <div class="row3">
+              <label>viz<select id="flowVizMode" title="Particle advection or IBFV dye grid">
+                <option value="particles" selected>particles</option>
+                <option value="ibfv">ibfv</option>
+              </select></label>
+              <label>count / layer<input id="flowParticleCount" type="number" min="100" max="32000" step="100" value="1000" title="Particles per flow expression (total = count × number of flow layers)" /></label>
+              <label>width<input id="flowTrailWidth" type="number" min="1" max="32" step="1" value="10" title="Trail stroke width in pixels" /></label>
+            </div>
+            <div class="row3">
+              <label>speed<input id="flowSpeed" type="number" min="0.05" max="10" step="0.05" value="0.1" title="Animation speed multiplier" /></label>
+              <label>dt<input id="flowDt" type="number" min="0.001" max="0.5" step="0.005" value="0.05" title="Base advection timestep" /></label>
+              <label>trail<input id="flowTrailSteps" type="number" min="2" max="32" step="1" value="32" title="Trail history length (segments = steps − 1)" /></label>
+            </div>
+            <div class="row3">
+              <label>alpha<input id="flowAlpha" type="number" min="0" max="1" step="0.01" value="0.1" title="Grid injection rate at upstream footpoint (0 = advection only)" /></label>
+            </div>
+            <div class="row3">
+              <label>inject<select id="flowGridMode" title="Grid lines vs lattice points">
+                <option value="lines" selected>lines</option>
+                <option value="points">points</option>
+              </select></label>
+              <label>grid<input id="flowNoiseScale" type="number" min="0.05" max="2" step="0.05" value="0.3" title="Grid spacing (world units)" /></label>
+              <label>vMax<input id="flowVMax" type="number" min="0" max="20" step="0.1" value="0" title="Velocity clamp (0 = auto)" /></label>
+            </div>
+            <div class="row3">
+              <label>opacity<input id="flowOpacity" type="number" min="0.01" max="2" step="0.01" value="0.5" /></label>
+              <label>life<input id="flowAgeMax" type="number" min="1" max="120" step="1" value="30" title="Particle lifetime / IBFV dye age (seconds)" /></label>
+            </div>
+          </section>
+
+          <section class="settings-section project-section">
+            <p class="settings-section-title">Project</p>
+            <div class="project-actions">
+              <button id="downloadScene" class="secondary" type="button">Download</button>
+              <button id="openScene" class="secondary" type="button">Open</button>
+              <button id="shareScene" class="secondary" type="button">Share</button>
+              <input id="sceneFileInput" type="file" accept=".json,.lap.json,application/json" hidden />
+            </div>
+            <p id="autosaveStatus" class="autosave-status" data-state="saved" aria-live="polite">Saved</p>
+          </section>
+
+          <section class="settings-section">
             <details class="metrics-block" open>
               <summary class="metrics-head">
                 <span>Diagnostics</span>
@@ -200,6 +267,32 @@
       </div>
     </dialog>
 
+    <script>
+      (function () {
+        var KEY = "poly-cloud-theme";
+        var PREFS = { dark: 1, light: 1, system: 1, "dark-scene-light-ui": 1, "light-scene-dark-ui": 1 };
+        var v = localStorage.getItem(KEY);
+        var pref = v && PREFS[v] ? v : "dark";
+        var ui = "dark";
+        var scene = "dark";
+        if (pref === "light") {
+          ui = scene = "light";
+        } else if (pref === "dark-scene-light-ui") {
+          ui = "light";
+          scene = "dark";
+        } else if (pref === "light-scene-dark-ui") {
+          ui = "dark";
+          scene = "light";
+        } else if (pref === "system") {
+          ui = scene = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        }
+        var root = document.documentElement;
+        root.setAttribute("data-ui-theme", ui);
+        root.setAttribute("data-scene-theme", scene);
+        root.dataset.themePref = pref;
+        root.dataset.booting = "true";
+      })();
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

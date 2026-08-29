@@ -10,7 +10,7 @@
   import ExprRow from "./ExprRow.svelte";
   import { DragReorderController } from "./dragReorder.ts";
   import { closeAllPopovers } from "./popovers.ts";
-  import { getCaretPos } from "./helpers.ts";
+  import { getCaretPos, isMathFieldFocused } from "./helpers.ts";
 
   interface Props {
     onExprChange: () => void;
@@ -56,31 +56,10 @@
   }
 
   function captureFocus(): { id: string; pos: number } | null {
-    const active = document.activeElement;
-    if (!active) return null;
-
     for (const item of items) {
       const row = rowRefs[item.id];
       const mf = row?.getMathField() ?? null;
-      if (!mf) continue;
-
-      let hit = active === mf || (typeof mf.contains === "function" && mf.contains(active));
-      if (!hit) {
-        try {
-          hit = !!(mf.shadowRoot && mf.shadowRoot.contains(active));
-        } catch {
-          hit = false;
-        }
-      }
-      if (!hit) {
-        try {
-          const path = typeof active.composedPath === "function" ? active.composedPath() : [];
-          hit = path.includes(mf);
-        } catch {
-          /* ignore */
-        }
-      }
-      if (hit) return { id: item.id, pos: getCaretPos(mf) };
+      if (mf && isMathFieldFocused(mf)) return { id: item.id, pos: getCaretPos(mf) };
     }
     return null;
   }

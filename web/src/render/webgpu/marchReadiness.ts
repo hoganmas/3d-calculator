@@ -1,4 +1,5 @@
 import { gpu } from "./gpuState.js";
+import { hasFlowGpuLayers } from "./flowGpu.js";
 
 export function getIsoInterpHermite(): boolean {
   return gpu.isoInterpHermite;
@@ -23,6 +24,6 @@ export function isClipBakeGpuReady(): boolean {
 export function isClipMarchReady(): boolean {
   return Boolean(
     isClipBakeGpuReady() && gpu.ctx && gpu.sceneM > 1 &&
-    (gpu.densLayerCount > 0 || gpu.sceneConstraints.length > 0),
+    (gpu.densLayerCount > 0 || gpu.sceneConstraints.length > 0 || hasFlowGpuLayers()),
   );
 }

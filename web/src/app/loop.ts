@@ -33,6 +33,15 @@ import {
 import { uploadFit, tickGpuKeyframeBlends } from "./pipeline.js";
 import { hudText, refreshMetricsDump } from "./hud.js";
 import { syncClipPresentation } from "./presentation.js";
+import { markSplashFrameReady, markSplashSceneReady } from "./splash.js";
+
+let splashFrameReported = false;
+
+function reportSplashFrameReady() {
+  if (splashFrameReported) return;
+  splashFrameReported = true;
+  markSplashFrameReady();
+}
 
 function frame(rafNow: number) {
   const t0 = performance.now();
@@ -114,12 +123,16 @@ function frame(rafNow: number) {
     labelRenderer.render(labelScene, camera);
   }
 
+  reportSplashFrameReady();
+
   const dt = performance.now() - t0;
   state.cpuMsSmooth = state.cpuMsSmooth * 0.85 + dt * 0.15;
   requestAnimationFrame(frame);
 }
 
 export function startRenderLoop() {
+  markSplashSceneReady();
+
   controls.addEventListener("start", () => {
     state.clipDirty = true;
   });

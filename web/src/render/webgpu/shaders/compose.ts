@@ -6,6 +6,9 @@ import gridWgsl from "./grid.wgsl?raw";
 import axisLabelWgsl from "./axisLabel.wgsl?raw";
 import fxaaWgsl from "./fxaa.wgsl?raw";
 import ssaoWgsl from "./ssao.wgsl?raw";
+import flowParticlesWgsl from "./flowParticles.wgsl?raw";
+import { MAX_GRAD_STOPS } from "../../../model/expressions.js";
+import { MAX_FLOW_TRAIL_STEPS } from "../../../math/fitVector.js";
 
 function inject(src: string, vars: Record<string, string | number>): string {
   return Object.entries(vars).reduce(
@@ -48,4 +51,11 @@ export function getFxaaShader(): string {
 
 export function getSsaoShader(): string {
   return ssaoWgsl;
+}
+
+export function getFlowParticlesShader(): string {
+  return inject(flowParticlesWgsl, {
+    MAX_GRAD_STOPS,
+    MAX_FLOW_TRAIL_STEPS,
+  });
 }

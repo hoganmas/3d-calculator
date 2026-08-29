@@ -1,4 +1,5 @@
 import { compileExpr, classifyExpr, PRESETS, formatParamLatexValue, compileParamLatex } from "../math/fit.js";
+import { compileVectorExpr } from "../math/fitVector.js";
 import {
   syncParamsFromDefinitions,
   applyParamSeed,
@@ -18,7 +19,8 @@ import {
   removeExprSilent,
   resolveExprGradient,
 } from "../model/expressions.js";
-import { els } from "./dom.js";
+import { closeSettingsDialog, els } from "./dom.js";
+import { isMathFieldFocused } from "../ui/expr-sidebar/helpers.js";
 import { state } from "./state.js";
 import type { CompileAllResult, CompileLayerResult, ExprItem } from "../types/models.js";
 
@@ -61,7 +63,9 @@ export function collectParamReferences() {
         const compiled = compileParamLatex(item.latex, classified.paramName!);
         for (const p of compiled.freeParams) refs.add(p);
       } else {
-        const compiled = compileExpr(item.latex);
+        const role = resolveExprRole(item.role, classified.kind, item.latex);
+        const compiled =
+          role === "flow" ? compileVectorExpr(item.latex) : compileExpr(item.latex);
         for (const p of compiled.freeParams) refs.add(p);
       }
     } catch {
@@ -96,7 +100,8 @@ export function shouldDeferAutoParamRows() {
   const mf =
     (ae.closest && ae.closest("math-field")) ||
     (ae.tagName === "MATH-FIELD" ? ae : null);
-  if (!mf) return false;
+  if (!(mf instanceof HTMLElement)) return false;
+  if (!isMathFieldFocused(mf as MathfieldElement)) return false;
   const row = mf.closest?.(".expr-row");
   if (!row || row.classList.contains("is-param-def")) return false;
   return true;
@@ -139,10 +144,32 @@ export function compileAllExprs(opts: CompileOpts = {}): CompileAllResult {
       paramRows.push({ item, name });
       continue;
     }
+
+    const role = resolveExprRole(item.role, classified.kind, item.latex);
+
+    if (role === "flow") {
+      try {
+        const vectorCompiled = compileVectorExpr(item.latex);
+        for (const p of vectorCompiled.freeParams) freeSet.add(p);
+        if (!vectorCompiled.usesSpace) continue;
+        layers.push({
+          item,
+          vectorCompiled,
+          role: "flow",
+          vectorFn: vectorCompiled.bind(getParamValues()),
+        });
+      } catch (e) {
+        warnings.push([
+          item.id,
+          e instanceof Error ? e.message : "Invalid flow field",
+        ]);
+      }
+      continue;
+    }
+
     const compiled = compileExpr(item.latex);
     for (const p of compiled.freeParams) freeSet.add(p);
     if (!compiled.usesSpace || compiled.shade === "none") continue;
-    const role = resolveExprRole(item.role, compiled.kind);
     layers.push({
       item,
       compiled,
@@ -202,7 +229,13 @@ export function compileAllExprs(opts: CompileOpts = {}): CompileAllResult {
 
   evalParamEquations();
   const params = getParamValues();
-  for (const L of layers) L.fn = L.compiled.bind(params);
+  for (const L of layers) {
+    if (L.role === "flow" && L.vectorCompiled) {
+      L.vectorFn = L.vectorCompiled.bind(params);
+    } else if (L.compiled) {
+      L.fn = L.compiled.bind(params);
+    }
+  }
 
   if (rebuildUi) {
     if (!state.exprListApi?.syncParamChrome?.()) {
@@ -210,13 +243,14 @@ export function compileAllExprs(opts: CompileOpts = {}): CompileAllResult {
     }
   }
 
-  const nCons = layers.filter((L) => L.role === "constraint").length;
-  const nDens = layers.filter((L) => L.role === "density").length;
+  const nIso = layers.filter((L) => L.role === "isosurface").length;
+  const nCloud = layers.filter((L) => L.role === "cloud").length;
+  const nFlow = layers.filter((L) => L.role === "flow").length;
   state.lastExprMeta = {
-    kind: nCons && nDens ? "mixed" : nCons ? "constraint" : "bare",
-    shade: nCons && !nDens ? "iso" : "volume",
+    kind: nIso && nCloud ? "mixed" : nIso ? "constraint" : nFlow ? "bare" : "bare",
+    shade: nIso && !nCloud && !nFlow ? "iso" : "volume",
     isoLevel: 0,
-    label: `${nDens} density · ${nCons} manifold`,
+    label: `${nCloud} cloud · ${nIso} isosurface · ${nFlow} flow`,
   };
 
   return {
@@ -229,11 +263,18 @@ export function compileAllExprs(opts: CompileOpts = {}): CompileAllResult {
 export function applyPreset(key: string) {
   const p = PRESETS[key] ?? PRESETS.sincos;
   els.preset.value = key in PRESETS ? key : "sincos";
+  closeSettingsDialog();
   state.pendingParamSeed = p.params ?? {};
   if (Array.isArray(p.expressions) && p.expressions.length) {
     setExpressions(p.expressions);
   } else {
     setExpressions([{ latex: p.latex ?? "" }]);
+  }
+  // Insert any auto-param rows before a single UI rebuild.
+  try {
+    compileAllExprs({ rebuildUi: false });
+  } catch {
+    /* uploadFit / syncExprCompileState will surface errors */
   }
   state.exprListApi?.render();
 }

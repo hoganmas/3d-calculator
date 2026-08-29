@@ -1,0 +1,46 @@
+html[data-booting] #app {
+  visibility: hidden;
+}
+
+#splash {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg, #1a1228);
+  opacity: 1;
+  transition: opacity 0.34s cubic-bezier(0.32, 0.72, 0, 1);
+  contain: strict;
+}
+
+html:not([data-booting]) #splash {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.splash-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.splash-logo {
+  display: block;
+  width: 160px;
+  height: 160px;
+  border: none;
+  border-radius: 28px;
+  background: transparent;
+  overflow: hidden;
+  transform: translateZ(0);
+  contain: layout style paint;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #splash {
+    transition: none;
+  }
+}

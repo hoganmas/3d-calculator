@@ -5,10 +5,10 @@ import { PRESETS } from "../math/fit.js";
 import {
   listExpressions,
   getSelectedId,
-  getExprWarning,
   updateExpr,
   insertExprAt,
   removeExpr,
+  normalizeExprRole,
 } from "../model/expressions.js";
 import {
   listParamNames,
@@ -22,6 +22,7 @@ import {
 } from "../model/params.js";
 import type { AnimMode, ExprItem } from "../types/models.js";
 import { applyPreset } from "./compile.js";
+import { getRenderSettingsSnapshot, serializeExpr, serializeParam } from "./persistence/document.js";
 import { els } from "./dom.js";
 import { syncExprCompileState, buildMetricsReport, refreshMetricsDump } from "./hud.js";
 import {
@@ -51,49 +52,6 @@ export function ok(data: unknown): ToolResult {
 
 export function err(message: string): ToolResult {
   return { ok: false, error: message };
-}
-
-function serializeExpr(item: ExprItem) {
-  return {
-    id: item.id,
-    latex: item.latex,
-    enabled: item.enabled,
-    role: item.role,
-    color: item.color,
-    color2: item.color2,
-    autoParam: item.autoParam,
-    warning: getExprWarning(item.id) ?? null,
-  };
-}
-
-function serializeParam(name: string) {
-  const p = getParam(name);
-  if (!p) return null;
-  return {
-    name,
-    value: p.value,
-    min: p.min,
-    max: p.max,
-    speed: p.speed,
-    animating: p.animating,
-    animMode: p.animMode,
-    driven: p.driven,
-    latex: p.latex,
-    error: p.error,
-    exprId: p.exprId,
-  };
-}
-
-export function getRenderSettingsSnapshot() {
-  return {
-    deg: Number(els.deg.value),
-    scale: Number(els.scale.value),
-    steps: Number(els.steps.value),
-    boxSize: Number(els.boxSize.value),
-    marchDownscale: Number(els.marchDownscale.value),
-    isoInterp: els.isoInterp?.value ?? "trilinear",
-    preset: els.preset.value,
-  };
 }
 
 function refreshAfterStructuralChange(): boolean {
@@ -323,7 +281,7 @@ function tools(): ToolDef[] {
           id: { type: "string", description: "Expression row id" },
           latex: { type: "string" },
           enabled: { type: "boolean" },
-          role: { type: "string", enum: ["auto", "density", "constraint"] },
+          role: { type: "string", enum: ["auto", "cloud", "isosurface", "flow", "density", "constraint"] },
           color: { type: "string", description: "Gradient start hex e.g. #ff4500" },
           color2: { type: "string", description: "Gradient end hex e.g. #ffec00" },
         },
@@ -335,7 +293,7 @@ function tools(): ToolDef[] {
         const patch: Partial<ExprItem> = {};
         if (input.latex != null) patch.latex = String(input.latex);
         if (input.enabled != null) patch.enabled = Boolean(input.enabled);
-        if (input.role != null) patch.role = input.role as ExprItem["role"];
+        if (input.role != null) patch.role = normalizeExprRole(String(input.role));
         if (input.color != null) patch.color = String(input.color);
         if (input.color2 != null) patch.color2 = String(input.color2);
         const row = updateExpr(id, patch);

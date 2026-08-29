@@ -18,6 +18,7 @@ declare global {
     mathVirtualKeyboardPolicy?: string;
     menuItems?: unknown[];
     inlineShortcutTimeout?: number;
+    macros?: Record<string, string | object>;
     contains(node: Node | null): boolean;
     getValue(
       start?: number | "latex",

@@ -1,11 +1,19 @@
-import type { ConstraintLayer, DensLayer, KeyframeBlend, KeyframeFrame } from "../../types/models.js";
+import type { CloudLayer, FlowLayer, IsosurfaceLayer, KeyframeBlend, KeyframeFrame } from "../../types/models.js";
 import { MAX_DENS_LAYERS, gpu, DEFAULT_DENS_RGB, DEFAULT_DENS_RGB2, type RgbTriplet } from "./gpuState.js";
 import { normalizeRgbStops, writeLayerColors } from "./uniforms.js";
+import { hasFlowGpuLayers } from "./flowGpu.js";
+import { flowPresenceSlice } from "../../math/fitVector.js";
+import { DEFAULT_FLOW_GRID_M, ensureFlowDyeBuffers, ensureFlowIbfvPipeline, destroyFlowDyeBuffers } from "./flowIbfv.js";
+import { destroyFlowParticleBuffers, ensureFlowParticleBuffers, ensureFlowParticlesPipeline } from "./flowParticles.js";
+
+const MAX_FLOW_LAYERS = 4;
 
 export interface SceneUploadPayload {
-  densLayers?: DensLayer[];
-  constraints?: ConstraintLayer[];
+  cloudLayers?: CloudLayer[];
+  isosurfaceLayers?: IsosurfaceLayer[];
+  flowLayers?: FlowLayer[];
   M: number;
+  half?: number;
 }
 
 export interface SceneUploadResult {
@@ -39,7 +47,7 @@ function ensureVolumeBuf(floatCount: number): void {
   }
 }
 
-function stopsFromLayer(d: Pick<DensLayer, "color" | "color2" | "colors"> | undefined): RgbTriplet[] {
+function stopsFromLayer(d: Pick<CloudLayer, "color" | "color2" | "colors"> | undefined): RgbTriplet[] {
   if (Array.isArray(d?.colors) && d.colors.length) {
     return d.colors.map((c) => [c[0], c[1], c[2]]);
   }
@@ -68,10 +76,20 @@ export function uploadSceneVolumes(scene: SceneUploadPayload | null): SceneUploa
   const volN = M * M * M;
   gpu.sceneM = M;
 
-  const cons = scene.constraints || [];
-  const dens = (scene.densLayers || []).slice(0, MAX_DENS_LAYERS);
+  const cons = scene.isosurfaceLayers || [];
+  const flow = (scene.flowLayers || []).slice(0, MAX_FLOW_LAYERS);
+  const scalarDens = (scene.cloudLayers || []).slice(0, Math.max(0, MAX_DENS_LAYERS - flow.length));
+  const flowAsDens: CloudLayer[] = flow.map((f) => ({
+    id: f.id,
+    dens: flowPresenceSlice(f.fx, f.fy, f.fz, M),
+    color: f.color,
+    color2: f.color2,
+    colors: f.colors,
+  }));
+  const dens = [...scalarDens, ...flowAsDens].slice(0, MAX_DENS_LAYERS);
   gpu.densLayerCount = dens.length;
   gpu.densGradStops = dens.map((d) => stopsFromLayer(d));
+  const half = scene.half ?? gpu.flowHalf ?? 2.5;
 
   const consStride = 4;
   let consFloats = 0;
@@ -81,7 +99,7 @@ export function uploadSceneVolumes(scene: SceneUploadPayload | null): SceneUploa
       : 1;
     consFloats += K * consStride * volN;
   }
-  const totalFloats = consFloats + dens.length * volN;
+  const totalFloats = consFloats + dens.length * volN + flow.length * volN * 3;
   gpu.scenePacked = totalFloats > 0 ? new Float32Array(Math.max(volN, totalFloats)) : null;
   let off = 0;
   const putVol = (src: Float32Array | undefined) => {
@@ -128,14 +146,26 @@ export function uploadSceneVolumes(scene: SceneUploadPayload | null): SceneUploa
   });
   gpu.densBase = off;
   gpu.densPacked = dens.length > 0;
+  gpu.flowLayerStart = flow.length > 0 ? scalarDens.length : -1;
   if (gpu.densPacked && gpu.scenePacked) {
     for (let i = 0; i < dens.length; i++) {
-      putVol(dens[i].dens);
+      putVol(dens[i]!.dens);
+    }
+  }
+  gpu.flowVelBase = off;
+  if (gpu.densPacked && gpu.scenePacked && flow.length) {
+    for (let i = 0; i < flow.length; i++) {
+      const f = flow[i]!;
+      putVol(f.fx);
+      putVol(f.fy);
+      putVol(f.fz);
     }
   }
 
+  const packedFloats = off;
+
   gpu.sceneEpoch++;
-  ensureVolumeBuf(Math.max(volN, gpu.scenePacked ? gpu.scenePacked.length : volN));
+  ensureVolumeBuf(Math.max(volN, packedFloats > 0 ? packedFloats : volN));
   if (gpu.scenePacked && gpu.volumeBuf) gpu.device.queue.writeBuffer(gpu.volumeBuf, 0, gpu.scenePacked);
   writeLayerColors(gpu.device, gpu.colorBuf, gpu.densGradStops);
 
@@ -143,6 +173,17 @@ export function uploadSceneVolumes(scene: SceneUploadPayload | null): SceneUploa
   gpu.profileGridM = M;
   const anyKf = gpu.sceneConstraints.some((c) => c.K > 1);
   gpu.profileMethod = anyKf ? "gpu-kf-scene" : "cpu-idct-scene";
+
+  if (flow.length > 0) {
+    ensureFlowDyeBuffers(flow.length, DEFAULT_FLOW_GRID_M, half);
+    ensureFlowParticleBuffers(flow.length, half);
+    void ensureFlowIbfvPipeline();
+    void ensureFlowParticlesPipeline();
+  } else {
+    destroyFlowDyeBuffers();
+    destroyFlowParticleBuffers();
+  }
+
   return { M, bakeMs: performance.now() - t0, epoch: gpu.sceneEpoch };
 }
 
@@ -197,7 +238,10 @@ export function patchConstraintKeyframeFrame(
 }
 
 export function hasUploadedVolume(): boolean {
-  return gpu.sceneM > 0 && (gpu.densLayerCount > 0 || gpu.sceneConstraints.length > 0);
+  return (
+    gpu.sceneM > 0 &&
+    (gpu.densLayerCount > 0 || gpu.sceneConstraints.length > 0 || hasFlowGpuLayers())
+  );
 }
 
 export { ensureVolumeBuf };

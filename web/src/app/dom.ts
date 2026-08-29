@@ -35,6 +35,23 @@ export interface DomElements {
   closeSettings: HTMLButtonElement | null;
   settingsDialog: HTMLDialogElement | null;
   themePref: HTMLSelectElement | null;
+  flowAlpha: HTMLInputElement | null;
+  flowGridMode: HTMLSelectElement | null;
+  flowNoiseScale: HTMLInputElement | null;
+  flowDt: HTMLInputElement | null;
+  flowSpeed: HTMLInputElement | null;
+  flowVMax: HTMLInputElement | null;
+  flowOpacity: HTMLInputElement | null;
+  flowAgeMax: HTMLInputElement | null;
+  flowVizMode: HTMLSelectElement | null;
+  flowParticleCount: HTMLInputElement | null;
+  flowTrailSteps: HTMLInputElement | null;
+  flowTrailWidth: HTMLInputElement | null;
+  downloadScene: HTMLButtonElement | null;
+  openScene: HTMLButtonElement | null;
+  shareScene: HTMLButtonElement | null;
+  sceneFileInput: HTMLInputElement | null;
+  autosaveStatus: HTMLElement | null;
 }
 
 export const els: DomElements = {
@@ -58,6 +75,23 @@ export const els: DomElements = {
   closeSettings: document.getElementById("closeSettings") as HTMLButtonElement | null,
   settingsDialog: document.getElementById("settingsDialog") as HTMLDialogElement | null,
   themePref: document.getElementById("themePref") as HTMLSelectElement | null,
+  flowAlpha: document.getElementById("flowAlpha") as HTMLInputElement | null,
+  flowGridMode: document.getElementById("flowGridMode") as HTMLSelectElement | null,
+  flowNoiseScale: document.getElementById("flowNoiseScale") as HTMLInputElement | null,
+  flowDt: document.getElementById("flowDt") as HTMLInputElement | null,
+  flowSpeed: document.getElementById("flowSpeed") as HTMLInputElement | null,
+  flowVMax: document.getElementById("flowVMax") as HTMLInputElement | null,
+  flowOpacity: document.getElementById("flowOpacity") as HTMLInputElement | null,
+  flowAgeMax: document.getElementById("flowAgeMax") as HTMLInputElement | null,
+  flowVizMode: document.getElementById("flowVizMode") as HTMLSelectElement | null,
+  flowParticleCount: document.getElementById("flowParticleCount") as HTMLInputElement | null,
+  flowTrailSteps: document.getElementById("flowTrailSteps") as HTMLInputElement | null,
+  flowTrailWidth: document.getElementById("flowTrailWidth") as HTMLInputElement | null,
+  downloadScene: document.getElementById("downloadScene") as HTMLButtonElement | null,
+  openScene: document.getElementById("openScene") as HTMLButtonElement | null,
+  shareScene: document.getElementById("shareScene") as HTMLButtonElement | null,
+  sceneFileInput: document.getElementById("sceneFileInput") as HTMLInputElement | null,
+  autosaveStatus: document.getElementById("autosaveStatus"),
 };
 
 export function viewportSize() {

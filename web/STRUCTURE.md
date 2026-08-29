@@ -10,13 +10,16 @@ src/
     dom.ts                  DOM refs, settings dialog, panel resize
     scene.ts                THREE scene, camera, grid, lava background
     compile.ts              Expression compile + preset helpers
+    persistence/            Scene document serialize, IndexedDB autosave, file I/O
     pipeline.ts             uploadFit, bakeChebVolume, keyframes
     webglFallback.ts        WebGL Beer march (no WebGPU)
     presentation.ts         Resize, march downscale, GPU/CPU presentation
     hud.ts                  Metrics HUD + compile status
     loop.ts                 requestAnimationFrame loop
+    persistence/            Scene document v1, IndexedDB autosave, file import/export
   math/
     fit.ts                  LaTeX compile + Chebyshev least-squares fit
+    fitVector.ts            Vector field tuple/grad parse + fit
     idct.ts                 Separable Chebyshev IDCT → dens grid (+ grad)
     limits.ts               MAX_DEG and shared math constants
   model/
@@ -40,10 +43,12 @@ src/
       gpuState.ts           Shared GPU device / texture state
       uniforms.ts           Draw-param packing + layer color upload
       sceneUpload.ts        Volume upload + keyframe patch
+      flowIbfv.ts           3D IBFV dye advection (compute)
       pipelines.ts          Shader module compile + pipeline creation
       shaders/
         compose.ts          Load .wgls ?raw, inject constants
         common/gradient.wgsl
+        flowIbfv.wgsl
         isoHermite.wgsl
         isoTrilinear.wgsl
         beer.wgsl, grid.wgsl, axisLabel.wgsl, fxaa.wgsl, ssao.wgsl
