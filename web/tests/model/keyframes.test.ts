@@ -1,5 +1,6 @@
 import "../helpers/setup-dom.ts";
 import { compileExpr } from "../../src/math/fit.ts";
+import { compileVectorExpr } from "../../src/math/fitVector.ts";
 import {
   allKeyframesComplete,
   beginKeyframePass,
@@ -12,6 +13,7 @@ import {
   logKeyframeBake,
   noteKeyframeLayer,
   peekKeyframeBlend,
+  sampleFlowLayerKeyframes,
   sampleLayerKeyframes,
   setKeyframeProgressHandler,
 } from "../../src/model/keyframes.ts";
@@ -43,6 +45,21 @@ function keyframeOpts(layerId: string, paramName: string, role: "cloud" | "isosu
     isoLevel: 0,
     paramName,
     compiled,
+    baseParams: {},
+    half: 0.75,
+    deg: 4,
+    K: 3,
+  };
+}
+
+function flowKeyframeOpts(layerId: string, paramName: string) {
+  const vectorCompiled = compileVectorExpr(String.raw`(${paramName}\cdot x,0,0)`);
+  return {
+    layerId,
+    latex: String.raw`(t\cdot x,0,0)`,
+    role: "flow" as const,
+    paramName,
+    vectorCompiled,
     baseParams: {},
     half: 0.75,
     deg: 4,
@@ -189,6 +206,33 @@ export async function run() {
         assert(second.baked, "rebuilt on latex change");
         assert(second.readyCount >= 2, "pair rebaked");
         assert(first.frames !== second.frames, "new frame array");
+      },
+    },
+    {
+      name: "flow keyframes bake velocity grids",
+      fn: () => {
+        clearKeyframeCaches();
+        setupAnimParam("t", 0.5);
+        const result = ensureLayerKeyframes(flowKeyframeOpts("layer-flow", "t"));
+        assert(result.baked, "sync baked");
+        assert(result.readyCount >= 2, "blend pair ready");
+        const frame = result.frames[0];
+        assert(!!frame?.fx && !!frame?.fy && !!frame?.fz, "velocity channels");
+        assert(!frame?.dens, "flow frame has no dens");
+      },
+    },
+    {
+      name: "sampleFlowLayerKeyframes lerps fx/fy/fz",
+      fn: () => {
+        clearKeyframeCaches();
+        setupAnimParam("t", 0.5);
+        const opts = flowKeyframeOpts("layer-flow-sample", "t");
+        ensureLayerKeyframes(opts);
+        const sampled = sampleFlowLayerKeyframes(opts);
+        assert(sampled.fx.length > 0, "lerped fx");
+        assert(sampled.fy.length === sampled.fx.length, "matching fy");
+        assert(sampled.fz.length === sampled.fx.length, "matching fz");
+        assert(Number.isFinite(sampled.fx[0]!), "finite fx");
       },
     },
     {

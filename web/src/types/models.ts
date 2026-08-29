@@ -61,10 +61,13 @@ export interface KeyframeBlend {
 }
 
 export interface KeyframeFrame {
-  dens: Float32Array;
+  dens?: Float32Array;
   gx?: Float32Array;
   gy?: Float32Array;
   gz?: Float32Array;
+  fx?: Float32Array;
+  fy?: Float32Array;
+  fz?: Float32Array;
   cheb?: Float32Array;
   fitRel?: number;
 }
@@ -106,6 +109,8 @@ export interface FlowLayer {
   colors?: number[][];
   cheb?: Float32Array;
   fitRel?: number;
+  keyframes?: KeyframeFrame[];
+  blend?: KeyframeBlend;
 }
 
 export interface SceneBake {
