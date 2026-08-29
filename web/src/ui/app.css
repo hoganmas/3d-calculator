@@ -139,6 +139,9 @@
         gap: 0;
         align-items: stretch;
         min-height: 52px;
+        /* Horizontal (short) panel: do not flex-shrink rows — overflow:hidden
+           would otherwise zero the automatic minimum and crop param sliders. */
+        flex-shrink: 0;
         padding: 0;
         border-radius: 10px;
         border: none;
