@@ -272,15 +272,18 @@ export async function run() {
       },
     },
     {
-      name: "ensureParamExprRows inserts seeded auto-param rows",
+      name: "compileAllExprs: grad(r)·grad(r) is scalar cloud not flow",
       fn: () => {
         resetScene();
-        clearExpressions();
-        state.pendingParamSeed = { k: { value: 2, min: 0, max: 5, animate: true } };
-        const added = ensureParamExprRows(["k"]);
-        assert(added, "rows added");
-        const row = listExpressions().find((e) => e.latex.startsWith("k="));
-        assert(!!row?.autoParam, "auto param row");
+        const latex = String.raw`\nabla\left(r\right)\cdot\nabla\left(r\right)`;
+        setExpressions([{ id: "e1", latex, enabled: true, role: "auto" }]);
+        const result = compileAllExprs({ rebuildUi: false });
+        assert(result.layers.length === 1, "one layer");
+        assert(result.layers[0]?.role === "cloud", "cloud role");
+        assert(result.layers[0]?.compiled?.operator === "grad_dot", "grad dot scalar");
+        assert(result.warnings.length === 0, "no warnings");
+        const v = result.layers[0]?.fn?.(0.5, 0.2, 0.1);
+        assertNear(v ?? NaN, 1, 0.05, "|grad r|^2");
       },
     },
   ]);

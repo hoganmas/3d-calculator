@@ -20,6 +20,21 @@ function evalVector(latex: string, pt = XYZ) {
 export async function run() {
   return runSuite("flow / vector-calculus-identities", [
     {
+      name: "\\nabla(r)\\cdot\\nabla(r) = 1 (scalar, not flow)",
+      fn: () => {
+        const latex = String.raw`\nabla\left(r\right)\cdot\nabla\left(r\right)`;
+        const { compiled, v } = evalScalar(latex);
+        assert(compiled.operator === "grad_dot", "grad dot operator");
+        assertNear(v, 1, 0.05, "|grad r|^2");
+        try {
+          compileVectorExpr(latex);
+          assert(false, "should not compile as vector");
+        } catch {
+          /* expected */
+        }
+      },
+    },
+    {
       name: "\\nabla\\cdot(x,y,z) = 3",
       fn: () => {
         const { compiled, v } = evalScalar(String.raw`\nabla\cdot(x,y,z)`);

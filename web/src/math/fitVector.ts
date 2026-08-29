@@ -9,7 +9,9 @@ import {
   extractTriple,
   extractScaledTriple,
   mathJsonHasError,
+  parseGradDotMatch,
   parseTupleCrossMatch,
+  parseTupleDotMatch,
   scalarFromUnaryOpJson,
   tripleFromUnaryOpJson,
 } from "./calcOps.js";
@@ -264,6 +266,9 @@ function scalarFromGradJson(json: unknown): string | null {
 }
 
 function looksLikeGrad(src: string, json: unknown): string | null {
+  if (parseGradDotMatch(src)) return null;
+  if (parseTupleDotMatch(src)) return null;
+
   const fromJson = scalarFromGradJson(json);
   if (fromJson) return fromJson.trim();
 
@@ -326,6 +331,8 @@ function looksLikeCurl(src: string, json: unknown): string[] | null {
 /** Syntax-only vector-field check (before alias/funcdef expansion). */
 function looksLikeVectorFieldSyntax(raw: string): boolean {
   const src = normalizeVectorLatex(String(raw ?? "").trim());
+  if (parseGradDotMatch(src)) return false;
+  if (parseTupleDotMatch(src)) return false;
   if (/\\operatorname\s*\{\s*curl\s*\}|\\curl|\\nabla\s*\\times/i.test(src)) return true;
   if (/\\nabla\s*\^|\^2|\\laplacian|\\Delta|\\div|\\nabla\s*\\cdot/i.test(src)) return false;
   if (/\\operatorname\s*\{\s*grad\s*\}|\\grad|\\nabla/i.test(src)) return true;
@@ -348,6 +355,9 @@ function looksLikeVectorFieldSyntax(raw: string): boolean {
 
 /** Quick check for auto role inference. */
 export function isVectorFieldLatex(raw: string, registry?: SymbolRegistry): boolean {
+  const src = normalizeVectorLatex(String(raw ?? "").trim());
+  if (parseGradDotMatch(src)) return false;
+  if (parseTupleDotMatch(src)) return false;
   if (looksLikeVectorFieldSyntax(raw)) return true;
   try {
     const expanded = registry ? expandVectorOperatorArgs(raw, registry) : raw;
@@ -361,6 +371,10 @@ export function isVectorFieldLatex(raw: string, registry?: SymbolRegistry): bool
 export function classifyVectorExpr(raw: string): ClassifiedVectorExpr {
   const src = normalizeVectorLatex(String(raw ?? "").trim());
   if (!src) throw new Error("Empty vector expression");
+
+  if (parseTupleDotMatch(src) || parseGradDotMatch(src)) {
+    throw new Error("Dot product is a scalar field — use cloud or isosurface role");
+  }
 
   const crossMatch = parseTupleCrossMatch(src);
   if (crossMatch) {

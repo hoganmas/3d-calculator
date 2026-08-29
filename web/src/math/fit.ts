@@ -12,6 +12,8 @@ import {
   parseDivergenceMatch,
   parseTupleCrossMatch,
   parseTupleDotMatch,
+  parseGradDotMatch,
+  extractGradOperand,
   peelDefiniteIntegrals,
   scalarFromUnaryOpJson,
   tripleFromUnaryOpJson,
@@ -562,6 +564,43 @@ function resolveVectorOpInner(inner: string, registry: SymbolRegistry, warnings?
   return expandDefinitions(trimmed, registry, warnings);
 }
 
+/** Remaining LaTeX after the first \\operatorname{op} argument (empty string if none). */
+function remainderAfterOperatorArg(src: string, op: string): string | null {
+  const re = new RegExp(`^\\\\operatorname\\s*\\{\\s*${op}\\s*\\}`, "i");
+  const m = re.exec(src.trim());
+  if (!m) return null;
+  let rest = src.slice(m.index + m[0].length).replace(/^\s*\\left\s*/, "").trimStart();
+  if (!rest) return null;
+
+  const open = rest[0];
+  if (open === "(" || open === "{") {
+    const close = open === "(" ? ")" : "}";
+    let depth = 0;
+    for (let i = 0; i < rest.length; i++) {
+      const c = rest[i]!;
+      if (c === open) depth++;
+      else if (c === close) {
+        depth--;
+        if (depth === 0) return rest.slice(i + 1).trim();
+      }
+    }
+    return null;
+  }
+
+  const bare = rest.match(
+    /^((?:\\(?:mathrm|mathbf|mathit|textrm|bf|it)\s*\{[^{}]+\}|[A-Za-z][A-Za-z0-9_]*(?:\([^()]*\))?))/,
+  );
+  if (!bare) return null;
+  return rest.slice(bare[1]!.length).trim();
+}
+
+/** True when `src` is exactly one \\operatorname{op}(…) call (not grad·grad etc.). */
+function isWholeOperatornameCall(src: string, op: string): boolean {
+  if (parseGradDotMatch(src)) return false;
+  const rem = remainderAfterOperatorArg(src, op);
+  return rem === "";
+}
+
 /**
  * Expand aliases / function calls inside vector-calculus operators before the
  * general expandDefinitions pass (CE parses \\div(V) as V×div, which breaks substitution).
@@ -574,9 +613,17 @@ export function expandVectorOperatorArgs(
   const src = normalizeForCe(raw);
   if (!src) return src;
 
+  const gradDot = parseGradDotMatch(src);
+  if (gradDot) {
+    const left = resolveVectorOpInner(gradDot.left, registry, warnings);
+    const right = resolveVectorOpInner(gradDot.right, registry, warnings);
+    return `\\operatorname{grad}(${left})\\cdot\\operatorname{grad}(${right})`;
+  }
+
   for (const op of ["div", "curl", "grad", "laplacian"] as const) {
     const inner = extractOperatornameArg(src, op);
     if (inner == null) continue;
+    if (!isWholeOperatornameCall(src, op)) continue;
     const expanded = resolveVectorOpInner(inner, registry, warnings);
     return `\\operatorname{${op}}(${expanded})`;
   }
@@ -860,6 +907,75 @@ function bindLaplacianFromScalar(
     const d2z =
       (scalarFn(x, y, z + eps) - 2 * c + scalarFn(x, y, z - eps)) / h2;
     return d2x + d2y + d2z;
+  };
+}
+
+function bindGradVectorFromScalar(
+  scalarFn: (x: number, y: number, z: number) => number,
+  eps = 1e-5,
+): (x: number, y: number, z: number) => [number, number, number] {
+  return (x: number, y: number, z: number) => {
+    const dfx = (scalarFn(x + eps, y, z) - scalarFn(x - eps, y, z)) / (2 * eps);
+    const dfy = (scalarFn(x, y + eps, z) - scalarFn(x, y - eps, z)) / (2 * eps);
+    const dfz = (scalarFn(x, y, z + eps) - scalarFn(x, y, z - eps)) / (2 * eps);
+    return [dfx, dfy, dfz];
+  };
+}
+
+function bindGradDotFromScalars(
+  leftFn: (x: number, y: number, z: number) => number,
+  rightFn: (x: number, y: number, z: number) => number,
+  eps = 1e-5,
+): (x: number, y: number, z: number) => number {
+  const gradLeft = bindGradVectorFromScalar(leftFn, eps);
+  const gradRight = bindGradVectorFromScalar(rightFn, eps);
+  return (x: number, y: number, z: number) => {
+    const [lx, ly, lz] = gradLeft(x, y, z);
+    const [rx, ry, rz] = gradRight(x, y, z);
+    return lx * rx + ly * ry + lz * rz;
+  };
+}
+
+function compileGradDotProductExpr(
+  leftLatex: string,
+  rightLatex: string,
+  classified: ClassifiedExpr,
+): CompiledExpr {
+  const leftCompiled = compileLatex(leftLatex);
+  const rightCompiled = compileLatex(rightLatex);
+  if (!leftCompiled?.success || typeof leftCompiled.run !== "function") {
+    throw new Error(`Could not compile grad dot left operand: ${leftLatex}`);
+  }
+  if (!rightCompiled?.success || typeof rightCompiled.run !== "function") {
+    throw new Error(`Could not compile grad dot right operand: ${rightLatex}`);
+  }
+  const leftFp = collectFreeParams(leftCompiled.freeSymbols, leftLatex).freeParams;
+  const rightFp = collectFreeParams(rightCompiled.freeSymbols, rightLatex).freeParams;
+  const freeSet = new Set<string>([...leftFp, ...rightFp]);
+  let usesSpace = false;
+  if (collectFreeParams(leftCompiled.freeSymbols, leftLatex).usesSpace) usesSpace = true;
+  if (collectFreeParams(rightCompiled.freeSymbols, rightLatex).usesSpace) usesSpace = true;
+  if (!usesSpace) {
+    for (const sym of ["x", "y", "z", "r"]) {
+      if (leftLatex.includes(sym) || rightLatex.includes(sym)) usesSpace = true;
+    }
+  }
+  const freeParams = [...freeSet].sort();
+  if (!usesSpace) throw new Error("Grad dot product must depend on x, y, or z");
+  const shade = classified.shade === "none" ? "none" : classified.shade;
+  return {
+    freeParams,
+    usesSpace,
+    kind: classified.kind as FieldKind,
+    shade,
+    isoLevel: classified.isoLevel,
+    classifyLabel: "grad dot product",
+    operator: "grad_dot",
+    bind(params: Record<string, number> = {}) {
+      const leftFn = bindScalarFromLatex(leftLatex, leftFp)(params);
+      const rightFn = bindScalarFromLatex(rightLatex, rightFp)(params);
+      return bindGradDotFromScalars(leftFn, rightFn);
+    },
   };
 }
 
@@ -1175,30 +1291,51 @@ function bindDotProductFromTuples(
 ) {
   const leftCompiled = left.map((latex) => compileLatex(latex));
   const rightCompiled = right.map((latex) => compileLatex(latex));
+  const leftGrad = left.map((latex) => extractGradOperand(latex.trim()));
+  const rightGrad = right.map((latex) => extractGradOperand(latex.trim()));
+
   for (let i = 0; i < 3; i++) {
-    if (!leftCompiled[i]?.success || typeof leftCompiled[i]!.run !== "function") {
+    if (!leftGrad[i] && (!leftCompiled[i]?.success || typeof leftCompiled[i]!.run !== "function")) {
       throw new Error(`Could not compile dot left component: ${left[i]}`);
     }
-    if (!rightCompiled[i]?.success || typeof rightCompiled[i]!.run !== "function") {
+    if (!rightGrad[i] && (!rightCompiled[i]?.success || typeof rightCompiled[i]!.run !== "function")) {
       throw new Error(`Could not compile dot right component: ${right[i]}`);
     }
   }
+
   return (params: Record<string, number> = {}) =>
     (x: number, y: number, z: number) => {
       const { r, theta, phi, rho } = polarFromCartesian(x, y, z);
+      const evalPart = (
+        latex: string,
+        compiled: ReturnType<typeof compileLatex>,
+        gradInner: string | null,
+        axis: 0 | 1 | 2,
+      ) => {
+        if (gradInner) {
+          const fp = collectFreeParams(
+            compileLatex(gradInner).freeSymbols,
+            gradInner,
+          ).freeParams;
+          const scalarFn = bindScalarFromLatex(gradInner, fp)(params);
+          const [gx, gy, gz] = bindGradVectorFromScalar(scalarFn)(x, y, z);
+          return [gx, gy, gz][axis]!;
+        }
+        const fp = collectFreeParams(compiled.freeSymbols, latex).freeParams;
+        const scope: Record<string, number> = { x, y, z, r, theta, phi, rho };
+        for (const name of fp) {
+          const v = params[name];
+          scope[name] = Number.isFinite(v) ? v : 1;
+        }
+        return coerceNumber(compiled.run!(scope));
+      };
+
       let sum = 0;
       for (let i = 0; i < 3; i++) {
-        const evalPart = (latex: string, compiled: ReturnType<typeof compileLatex>) => {
-          const fp = collectFreeParams(compiled.freeSymbols, latex).freeParams;
-          const scope: Record<string, number> = { x, y, z, r, theta, phi, rho };
-          for (const name of fp) {
-            const v = params[name];
-            scope[name] = Number.isFinite(v) ? v : 1;
-          }
-          return coerceNumber(compiled.run!(scope));
-        };
+        const axis = i as 0 | 1 | 2;
         sum +=
-          evalPart(left[i]!, leftCompiled[i]!) * evalPart(right[i]!, rightCompiled[i]!);
+          evalPart(left[i]!, leftCompiled[i]!, leftGrad[i], axis) *
+          evalPart(right[i]!, rightCompiled[i]!, rightGrad[i], axis);
       }
       return sum;
     };
@@ -1283,12 +1420,14 @@ function compileDivergenceExpr(
 function isLikelyFlowLatex(raw: string): boolean {
   const s = normalizeLatexAliases(String(raw ?? "").trim());
   if (/\\partial|\\operatorname\s*\{\s*partial_[xyz]/i.test(s)) return false;
-  if (/\\grad\s*_\s*\{?\s*[xyz]/i.test(s)) return false;
   if (/\\int(?:\s*_\s*\{|\s*\^\s*\{|\s+)/i.test(s)) return false;
+  const normalized = normalizeForCe(s);
+  if (parseGradDotMatch(normalized)) return false;
+  if (parseTupleDotMatch(normalized)) return false;
+  if (/\\grad\s*_\s*\{?\s*[xyz]/i.test(s)) return false;
   if (/\\curl|\\operatorname\s*\{\s*curl\s*\}|\\nabla\s*\\times/i.test(s)) return true;
   if (/\\nabla\s*\^|\^2|\\laplacian|\\Delta|\\div|\\nabla\s*\\cdot/i.test(s)) return false;
   if (/\\grad|\\operatorname\s*\{\s*grad\s*\}|\\nabla/i.test(s)) return true;
-  const normalized = normalizeForCe(s);
   if (parseTupleCrossMatch(normalized)) return true;
   const m = normalized.match(/^\(([\s\S]+)\)$/);
   if (m) {
@@ -1313,18 +1452,27 @@ export function compileExpr(
 ): CompiledExpr {
   const expandedRaw = registry ? expandVectorOperatorArgs(raw, registry, expandWarnings) : raw;
 
+  const normalizedEarly = normalizeForCe(normalizeLatexAliases(String(expandedRaw ?? "").trim()));
+  if (normalizedEarly) {
+    const gradDotMatch = parseGradDotMatch(normalizedEarly);
+    if (gradDotMatch) {
+      const classified = classifyExpr(expandedRaw);
+      return compileGradDotProductExpr(gradDotMatch.left, gradDotMatch.right, classified);
+    }
+
+    const dotMatchEarly = parseTupleDotMatch(normalizedEarly);
+    if (dotMatchEarly) {
+      const classified = classifyExpr(expandedRaw);
+      return compileDotProductExpr(dotMatchEarly.left, dotMatchEarly.right, classified);
+    }
+  }
+
   if (isLikelyFlowLatex(expandedRaw)) {
     throw new Error("Vector field — use flow role (tuple, \\grad, or \\curl)");
   }
 
   const normalized = normalizeForCe(expandedRaw);
   if (normalized) {
-    const dotMatch = parseTupleDotMatch(normalized);
-    if (dotMatch) {
-      const classified = classifyExpr(expandedRaw);
-      return compileDotProductExpr(dotMatch.left, dotMatch.right, classified);
-    }
-
     const peeledInt = peelDefiniteIntegrals(normalized);
     if (peeledInt) {
       const classified = classifyExpr(expandedRaw);

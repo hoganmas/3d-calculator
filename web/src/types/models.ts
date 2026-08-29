@@ -12,7 +12,8 @@ export type ScalarFieldOperator =
   | "divergence"
   | "partial"
   | "definite_integral"
-  | "dot_product";
+  | "dot_product"
+  | "grad_dot";
 
 export interface IntegralAxisSpec {
   axis: 0 | 1 | 2;

@@ -9,6 +9,7 @@ import {
   normalizeDegreeLatex,
   looksLikePartial,
   parseDivergenceMatch,
+  parseGradDotMatch,
   scalarFromGradJson,
   tripleFromOpLatex,
   tripleFromUnaryOpJson,
@@ -104,6 +105,15 @@ export async function run() {
         const { src, json } = normalizedJson(latex);
         const match = parseDivergenceMatch(src, json);
         assert(match?.mode === "laplacian", `mode ${match?.mode}`);
+      },
+    },
+    {
+      name: "parseGradDotMatch: nabla(r) dot nabla(r)",
+      fn: () => {
+        const latex = String.raw`\nabla\left(r\right)\cdot\nabla\left(r\right)`;
+        const { src } = normalizedJson(latex);
+        const match = parseGradDotMatch(src);
+        assert(match?.left === "r" && match?.right === "r", "grad operands");
       },
     },
     {

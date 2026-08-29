@@ -413,6 +413,29 @@ export function parseTupleDotMatch(src: string): TupleBinaryMatch | null {
   return parseTupleBinaryOp(src, "\\cdot");
 }
 
+/** Inner scalar of `\grad(f)`, `\nabla(f)`, etc. Requires balanced parens/brackets. */
+export function extractGradOperand(part: string): string | null {
+  const trimmed = String(part ?? "").trim();
+  const m = trimmed.match(
+    /^\\(?:operatorname\s*\{\s*grad\s*\}|grad|nabla)\s*(?:\\left)?[\{\(]\s*([\s\S]+?)\s*(?:\\right)?[\}\)]\s*$/i,
+  );
+  if (m?.[1]) return m[1].trim();
+  const m2 = trimmed.match(
+    /^\\(?:operatorname\s*\{\s*grad\s*\}|grad|nabla)\s+(?![_\^\\])([\s\S]+)$/i,
+  );
+  return m2?.[1]?.trim() ?? null;
+}
+
+/** Scalar `\grad f \cdot \grad g` (top-level `\cdot` between two gradients). */
+export function parseGradDotMatch(src: string): { left: string; right: string } | null {
+  const split = splitTopLevelInfix(src, "\\cdot");
+  if (!split) return null;
+  const left = extractGradOperand(split[0]);
+  const right = extractGradOperand(split[1]);
+  if (!left || !right) return null;
+  return { left, right };
+}
+
 /** Numeric scale × 3-tuple from CE `Multiply` MathJSON. */
 export function extractScaledTriple(
   json: unknown,
