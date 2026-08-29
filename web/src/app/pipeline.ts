@@ -25,6 +25,10 @@ import {
   sampleLayerKeyframes,
   sampleFlowLayerKeyframes,
   peekKeyframeBlend,
+  syncIsoKeyframesToSceneBake,
+  getKeyframeLayerRole,
+  getIsoBlendSceneM,
+  refreshIsoBlendDisplay,
 } from "../model/keyframes.js";
 import {
   getParamValues,
@@ -35,7 +39,6 @@ import {
   uploadSceneVolumes,
   uploadSceneColors,
   setConstraintKeyframeBlends,
-  patchConstraintKeyframeFrame,
 } from "../render/webgpu/march.js";
 import { reseedFlowDyeBuffers } from "../render/webgpu/flowIbfv.js";
 import { reseedFlowParticles } from "../render/webgpu/flowParticles.js";
@@ -103,10 +106,17 @@ export function tickGpuKeyframeBlends() {
   if (!isoLayers?.length || !isClipBakeGpuReady()) return false;
   /** @type {{ id: string, i0: number, i1: number, t: number }[]} */
   const blends = [];
+  let needReupload = false;
+  let targetM = 2;
   for (const c of isoLayers) {
     if (!c?.id || !Array.isArray(c.keyframes) || !c.keyframes.length) continue;
+    const promoted = refreshIsoBlendDisplay(c.id);
+    if (promoted.length) needReupload = true;
+    const layerM = getIsoBlendSceneM(c.id);
+    if (layerM > 0) targetM = Math.max(targetM, layerM);
     const b = peekKeyframeBlend(c.id);
     if (!b) continue;
+    if (layerM > 0 && layerM !== gpu.sceneM) needReupload = true;
     const a0 = c.keyframes[b.i0];
     const a1 = c.keyframes[b.i1];
     const next = {
@@ -121,7 +131,19 @@ export function tickGpuKeyframeBlends() {
     c.blend = { i0: b.i0, i1: b.i1, t: b.t };
     blends.push(b);
   }
-  if (!blends.length) return false;
+  if (needReupload && state.lastSceneBake) {
+    for (const c of isoLayers) {
+      if (c?.id) targetM = Math.max(targetM, getIsoBlendSceneM(c.id));
+    }
+    state.lastSceneBake.M = targetM;
+    for (const c of isoLayers) {
+      if (c?.id) syncIsoKeyframesToSceneBake(c.id, state.lastSceneBake, targetM);
+    }
+    tearLog("iso-blend-reupload", { targetM, gpuM: gpu.sceneM });
+    bakeChebVolume();
+    state.clipDirty = true;
+  }
+  if (!blends.length) return needReupload;
   setConstraintKeyframeBlends(blends);
   state.clipDirty = true;
   return true;
@@ -194,6 +216,7 @@ export function uploadFit(
     let fittedCount = 0;
     let keyframedCount = 0;
     let keyframeBaked = false;
+    let isoGpuUploadNeeded = false;
     let densKeyframedCpu = false;
 
     // Anim ticks: only refit layers that depend on dirty params; reuse the rest.
@@ -321,6 +344,7 @@ export function uploadFit(
             deferSyncBake: fromAnim && prevHasKf,
           });
           if (sample.baked) keyframeBaked = true;
+          if (sample.gpuUploadNeeded) isoGpuUploadNeeded = true;
           M = sample.M || M;
           isosurfaceLayers.push({
             id: L.item.id,
@@ -547,13 +571,26 @@ export function uploadFit(
     state.lastNCoeff = (deg + 1) ** 3 * layers.length;
     if (Number.isFinite(fitRel)) state.lastFitRel = fitRel;
 
+    for (const iso of isosurfaceLayers) {
+      if (!iso.keyframes?.length) continue;
+      const blendM = iso.id ? getIsoBlendSceneM(iso.id) : 0;
+      if (blendM > 0) {
+        M = Math.max(M, blendM);
+      } else {
+        for (const fr of iso.keyframes) {
+          const m = gridMFromDens(fr?.dens);
+          if (m > 0) M = Math.max(M, m);
+        }
+      }
+    }
+
     if (cheb) state.worldCheb = cheb;
     else if (!fromAnim && opts.progressiveFinal) state.worldCheb = null;
     state.fitDeg = deg;
-    // GPU iso keyframes: upload only on bake / dens CPU lerp / full fit.
-    // Warm anim ticks only update blend uniforms.
+    // GPU iso keyframes during anim: blend uniforms every frame; full upload only on
+    // sync coarse pair, async promote, or M change (tickGpuKeyframeBlends / progress handler).
     const needUpload =
-      fittedCount > 0 || keyframeBaked || densKeyframedCpu || !fromAnim;
+      fittedCount > 0 || densKeyframedCpu || !fromAnim || isoGpuUploadNeeded;
     tearLog("uploadFit", {
       fromAnim,
       progressive,
@@ -564,6 +601,7 @@ export function uploadFit(
       fittedCount,
       keyframedCount,
       keyframeBaked,
+      isoGpuUploadNeeded,
       densKeyframedCpu,
       sceneM: M,
       gpuM: gpu.sceneM,
@@ -589,7 +627,7 @@ export function uploadFit(
 
     if (!fromAnim) resize();
     state.clipDirty = true;
-    if (needUpload) {
+    if (needUpload && !fromAnim) {
       void prepareClipGpuForDegree(deg).then(() => {
         if (state.lastSceneBake) bakeChebVolume();
         syncClipPresentation();
@@ -640,25 +678,20 @@ export function applyRenderHyperparams() {
 }
 
 export function initKeyframeHandler() {
-  /** Async keyframe fills: patch GPU slot + keep lastSceneBake in sync. */
-  setKeyframeProgressHandler(({ layerId, index, frame, readyCount, K, done }) => {
+  /** Async keyframe fills: iso blend-pair promote → full GPU upload; off-blend → CPU sync only. */
+  setKeyframeProgressHandler(({ layerId, index, frame, readyCount, K, done, promoted }) => {
     if (index >= 0 && frame && state.lastSceneBake?.isosurfaceLayers) {
       const c = state.lastSceneBake.isosurfaceLayers.find((x) => x.id === layerId);
-      if (c && Array.isArray(c.keyframes) && index < c.keyframes.length) {
-        c.keyframes[index] = frame;
-        if (isClipBakeGpuReady()) {
-          const patched = patchConstraintKeyframeFrame(layerId, index, frame);
-          if (!patched) {
-            tearLog("patch-fallback-upload", {
-              layerId,
-              index,
-              frameM: gridMFromDens(frame.dens),
-              gpuM: gpu.sceneM,
-            });
+      if (c && Array.isArray(c.keyframes)) {
+        if (promoted?.length && getKeyframeLayerRole(layerId) === "isosurface") {
+          if (isClipBakeGpuReady()) {
+            const M = syncIsoKeyframesToSceneBake(layerId, state.lastSceneBake);
+            tearLog("iso-promote-upload", { layerId, promoted, sceneM: M, gpuM: gpu.sceneM });
             bakeChebVolume();
+            state.clipDirty = true;
           }
-          state.clipDirty = true;
         }
+        // Iso GPU buffers hold display frames only; staging commits stay in cache until promote.
       }
     }
     if (done) {

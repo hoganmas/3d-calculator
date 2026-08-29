@@ -81,6 +81,8 @@ interface KeyframeProgressInfo {
   readyCount: number;
   K: number;
   done: boolean;
+  /** Blend-pair promote: update all listed slots then full GPU upload (iso). */
+  promoted?: number[];
 }
 
 interface EnsureKeyframesOpts {
@@ -126,6 +128,54 @@ let lastKfLayers = 0;
 let bakeMsAcc = 0;
 let lerpMsAcc = 0;
 let lastBakeDetails: BakeDetail[] = [];
+
+export function getKeyframeLayerRole(layerId: string): KeyframeRole | null {
+  return caches.get(layerId)?.role ?? null;
+}
+
+/**
+ * Copy display keyframes into lastSceneBake at the active blend pair's grid M.
+ * Off-blend slots at other resolutions are filled from the nearest same-M frame.
+ */
+export function syncIsoKeyframesToSceneBake(
+  layerId: string,
+  sceneBake: { isosurfaceLayers: { id?: string; keyframes?: KeyframeFrame[]; blend?: { i0: number; i1: number; t: number } }[]; M: number },
+  uploadM?: number,
+): number {
+  const cache = caches.get(layerId);
+  if (!cache || cache.role !== "isosurface") return sceneBake.M;
+  const layer = sceneBake.isosurfaceLayers.find((x) => x.id === layerId);
+  if (!layer) return sceneBake.M;
+  const st = getParam(cache.paramName);
+  const value = st?.value ?? cache.min;
+  const blend = displayBlendForValue(cache, value);
+  layer.blend = { i0: blend.i0, i1: blend.i1, t: blend.t };
+  const blendM = isoBlendSceneM(cache, blend.i0, blend.i1, blend.t);
+  const M = uploadM ?? Math.max(sceneBake.M, blendM);
+  layer.keyframes = materializeKeyframeFramesAtM(cache.frames, M);
+  sceneBake.M = M;
+  return blendM;
+}
+
+/** Grid M for the current iso blend pair (matches displayBlendForValue snap semantics). */
+export function getIsoBlendSceneM(layerId: string): number {
+  const cache = caches.get(layerId);
+  if (!cache || cache.role !== "isosurface") return 0;
+  const st = getParam(cache.paramName);
+  const value = st?.value ?? cache.min;
+  const blend = displayBlendForValue(cache, value);
+  return isoBlendSceneM(cache, blend.i0, blend.i1, blend.t);
+}
+
+/** Promote staged pair when both slots share a staging degree (display path is read-only). */
+export function refreshIsoBlendDisplay(layerId: string): number[] {
+  const cache = caches.get(layerId);
+  if (!cache || cache.role !== "isosurface") return [];
+  const st = getParam(cache.paramName);
+  if (!st) return [];
+  const { i0, i1 } = segmentForValue(cache, st.value);
+  return tryPromoteStagingPair(cache, i0, i1);
+}
 
 export function setKeyframeProgressHandler(cb: typeof onKeyframeProgress) {
   onKeyframeProgress = cb;
@@ -437,6 +487,8 @@ function stageOffBlendFrame(
   frame: KeyframeFrame,
   deg: number,
 ) {
+  const displayDeg = cache.frameDeg[k] ?? 0;
+  if (deg <= displayDeg) return;
   const prev = bakedDegAt(cache, k);
   cache.stagingFrames[k] = frame;
   cache.stagingDeg[k] = deg;
@@ -444,21 +496,58 @@ function stageOffBlendFrame(
   if (prev !== cache.targetDeg && deg === cache.targetDeg) cache.readyCount++;
 }
 
-/** Promote staged refinement when a slot enters the active blend pair. */
-function ensureBlendSlotDisplay(cache: LayerKeyframeCache, k: number) {
+function clearCoarseStaging(cache: LayerKeyframeCache, k: number) {
   const sd = cache.stagingDeg[k] ?? 0;
   const dd = cache.frameDeg[k] ?? 0;
-  if (sd > 0 && sd >= dd && cache.stagingFrames[k]) {
-    applyDisplayFrame(cache, k, cache.stagingFrames[k]!, sd);
+  if (sd > 0 && sd < dd) {
+    cache.stagingFrames[k] = null;
+    cache.stagingDeg[k] = 0;
   }
 }
 
-function blendFramesAt(
+function isoBlendSceneM(
   cache: LayerKeyframeCache,
-  k: number,
-): { frame: KeyframeFrame | null; deg: number } {
-  ensureBlendSlotDisplay(cache, k);
-  return { frame: cache.frames[k] ?? null, deg: cache.frameDeg[k] ?? 0 };
+  i0: number,
+  i1: number,
+  t: number,
+): number {
+  const d0 = cache.frameDeg[i0] ?? 0;
+  const d1 = cache.frameDeg[i1] ?? 0;
+  const M0 = gridMFromFrame(cache.frames[i0] ?? {});
+  const M1 = gridMFromFrame(cache.frames[i1] ?? {});
+  if (d0 === d1 && M0 > 0 && M0 === M1) return M0;
+  if (d0 > d1 || (d0 > 0 && d1 <= 0)) return M0 || M1 || 2;
+  if (d1 > d0 || (d1 > 0 && d0 <= 0)) return M1 || M0 || 2;
+  if (M0 > 0 && M0 === M1) return M0;
+  return t < 0.5 ? M0 || M1 || 2 : M1 || M0 || 2;
+}
+
+/** Promote when both blend slots share the same staging degree. */
+function tryPromoteStagingPair(cache: LayerKeyframeCache, i0: number, i1: number): number[] {
+  const sd0 = cache.stagingDeg[i0] ?? 0;
+  const sd1 = cache.stagingDeg[i1] ?? 0;
+  if (sd0 <= 0 || sd0 !== sd1 || !cache.stagingFrames[i0] || !cache.stagingFrames[i1]) {
+    return [];
+  }
+  const promoted: number[] = [];
+  for (const slot of [i0, i1]) {
+    if ((cache.frameDeg[slot] ?? 0) < sd0) {
+      applyDisplayFrame(cache, slot, cache.stagingFrames[slot]!, sd0);
+      cache.stagingFrames[slot] = null;
+      cache.stagingDeg[slot] = 0;
+      promoted.push(slot);
+    }
+  }
+  if (promoted.length) {
+    tearLog("promote-staging-pair", {
+      layerId: cache.bakeOpts.layerId,
+      i0,
+      i1,
+      deg: sd0,
+      promoted,
+    });
+  }
+  return promoted;
 }
 
 function bakedDegAt(cache: LayerKeyframeCache, k: number): number {
@@ -510,6 +599,15 @@ function commitFrame(
   const { i0, i1 } = segmentForValue(cache, value);
 
   if (k !== i0 && k !== i1) {
+    if (deg <= (cache.frameDeg[k] ?? 0)) {
+      tearLog("commit-stale-skip", {
+        layerId: cache.bakeOpts.layerId,
+        k,
+        deg,
+        displayDeg: cache.frameDeg[k] ?? 0,
+      });
+      return [];
+    }
     stageOffBlendFrame(cache, k, frame, deg);
     tearLog("commit-off-blend-staged", {
       layerId: cache.bakeOpts.layerId,
@@ -521,10 +619,33 @@ function commitFrame(
     return [];
   }
 
+  if (deg <= (cache.frameDeg[k] ?? 0)) {
+    tearLog("commit-stale-skip", {
+      layerId: cache.bakeOpts.layerId,
+      k,
+      deg,
+      displayDeg: cache.frameDeg[k] ?? 0,
+    });
+    return [];
+  }
+  clearCoarseStaging(cache, i0);
+  clearCoarseStaging(cache, i1);
+
   cache.stagingFrames[k] = frame;
   cache.stagingDeg[k] = deg;
   const partner = k === i0 ? i1 : i0;
+  const maxDisplay = Math.max(cache.frameDeg[i0] ?? 0, cache.frameDeg[i1] ?? 0);
   if (cache.stagingDeg[partner] === deg && cache.stagingFrames[partner]) {
+    if (deg < maxDisplay) {
+      tearLog("commit-promote-blocked", {
+        layerId: cache.bakeOpts.layerId,
+        k,
+        deg,
+        maxDisplay,
+        slots: [i0, i1].map((s) => slotSummary(cache, s)),
+      });
+      return [];
+    }
     const promoted: number[] = [];
     for (const slot of [i0, i1]) {
       applyDisplayFrame(cache, slot, cache.stagingFrames[slot]!, deg);
@@ -540,6 +661,17 @@ function commitFrame(
       slots: [i0, i1].map((s) => slotSummary(cache, s)),
     });
     return promoted;
+  }
+  if ((cache.frameDeg[partner] ?? 0) === deg && cache.frames[partner] && deg >= (cache.frameDeg[k] ?? 0)) {
+    applyDisplayFrame(cache, k, frame, deg);
+    tearLog("commit-promote-solo", {
+      layerId: cache.bakeOpts.layerId,
+      k,
+      deg,
+      partner,
+      M: gridMFromDens(frame.dens),
+    });
+    return [k];
   }
   tearLog("commit-staged", {
     layerId: cache.bakeOpts.layerId,
@@ -559,10 +691,12 @@ function commitFrame(
 function displayBlendForValue(cache: LayerKeyframeCache, value: number) {
   const seg = segmentForValue(cache, value);
   const { i0, i1, t } = seg;
-  ensureBlendSlotDisplay(cache, i0);
-  ensureBlendSlotDisplay(cache, i1);
-  const { frame: a, deg: d0 } = blendFramesAt(cache, i0);
-  const { frame: b, deg: d1 } = blendFramesAt(cache, i1);
+  clearCoarseStaging(cache, i0);
+  clearCoarseStaging(cache, i1);
+  const d0 = cache.frameDeg[i0] ?? 0;
+  const d1 = cache.frameDeg[i1] ?? 0;
+  const a = cache.frames[i0];
+  const b = cache.frames[i1];
   if (d0 !== d1 || !a || !b) {
     const snap =
       d0 > 0 && d1 <= 0 ? { i0, i1, t: 0 } :
@@ -725,21 +859,43 @@ function materializeKeyframeFrames(frames: (KeyframeFrame | null)[]): KeyframeFr
     }
   }
   if (!last) throw new Error("no keyframes ready");
+  const sceneM = gridMFromFrame(last) || 2;
+  return materializeKeyframeFramesAtM(frames, sceneM);
+}
+
+function frameAtGridM(fr: KeyframeFrame | null | undefined, sceneM: number): boolean {
+  if (!fr) return false;
+  return gridMFromFrame(fr) === sceneM;
+}
+
+/** GPU upload: every slot gets a buffer sized for sceneM (nearest same-M neighbor fill). */
+function materializeKeyframeFramesAtM(
+  frames: (KeyframeFrame | null)[],
+  sceneM: number,
+): KeyframeFrame[] {
+  let fallback: KeyframeFrame | null = null;
+  for (const fr of frames) {
+    if (frameAtGridM(fr, sceneM)) {
+      fallback = fr!;
+      break;
+    }
+  }
+  if (!fallback) throw new Error(`no keyframes at grid M=${sceneM}`);
   const out: KeyframeFrame[] = new Array(frames.length);
+  let lastAtM: KeyframeFrame = fallback;
   for (let i = 0; i < frames.length; i++) {
-    if (frames[i]) {
-      last = frames[i];
+    if (frameAtGridM(frames[i], sceneM)) {
+      lastAtM = frames[i]!;
       out[i] = frames[i]!;
     } else {
-      // Look ahead for a ready frame if we haven't seen one yet in this pass.
-      let fwd = last;
+      let fwd = lastAtM;
       for (let j = i + 1; j < frames.length; j++) {
-        if (frames[j]) {
-          fwd = frames[j];
+        if (frameAtGridM(frames[j], sceneM)) {
+          fwd = frames[j]!;
           break;
         }
       }
-      out[i] = (fwd || last)!;
+      out[i] = fwd;
     }
   }
   return out;
@@ -778,22 +934,25 @@ function runOneKeyframeWork(): boolean {
     bakeMsAcc += bakeMs;
     lastBakeMs = bakeMsAcc;
     if (complete && frame && promoted?.length) {
-      for (const idx of promoted) {
-        const shown = cache.frames[idx];
-        if (!shown) continue;
+      const first = promoted[0]!;
+      const shown = cache.frames[first];
+      if (shown) {
         onKeyframeProgress?.({
           layerId,
-          index: idx,
+          index: first,
           frame: shown,
+          promoted,
           readyCount: cache.readyCount,
           K: cache.K,
           done: keyframesFullyReady(cache),
         });
+      }
+      for (const idx of promoted) {
         lastBakeDetails.push({
           ...stages,
           frames: 1,
           deg: cache.frameDeg[idx] ?? deg,
-          M: Math.round(Math.cbrt(frameVolumeN(shown))),
+          M: Math.round(Math.cbrt(frameVolumeN(cache.frames[idx]!))),
           role: cache.role,
           layerId,
           paramName: cache.paramName,
@@ -1035,7 +1194,13 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
     scheduleAsyncFill(key, cache);
   }
 
-  const frames = materializeKeyframeFrames(cache.frames);
+  const frames =
+    cache.role === "isosurface"
+      ? materializeKeyframeFramesAtM(
+          cache.frames,
+          isoBlendSceneM(cache, displayBlend.i0, displayBlend.i1, displayBlend.t),
+        )
+      : materializeKeyframeFrames(cache.frames);
   const a = frames[displayBlend.i0];
   const b = frames[displayBlend.i1];
   return {
@@ -1046,6 +1211,11 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
     fitRel: displayBlend.t < 0.5 ? a.fitRel : b.fitRel,
     M: gridMFromFrame(a),
     baked,
+    gpuUploadNeeded:
+      opts.role === "isosurface" &&
+      syncPromoted.length > 0 &&
+      syncPromoted.includes(displayBlend.i0) &&
+      syncPromoted.includes(displayBlend.i1),
     readyCount: cache.readyCount,
     complete: keyframesFullyReady(cache),
   };
@@ -1063,8 +1233,8 @@ export function sampleLayerKeyframes(opts: EnsureKeyframesOpts) {
   const st = getParam(cache.paramName);
   const tLerp = performance.now();
   const { i0, i1, t } = displayBlendForValue(cache, st?.value ?? cache.min);
-  const { frame: a } = blendFramesAt(cache, i0);
-  const { frame: b } = blendFramesAt(cache, i1);
+  const a = cache.frames[i0];
+  const b = cache.frames[i1];
   if (!a || !b) throw new Error("sync keyframe pair missing");
   if (!a.dens || !b.dens) throw new Error("scalar keyframe pair missing dens");
   const d0 = cache.frameDeg[i0] ?? 0;
@@ -1108,8 +1278,8 @@ export function sampleFlowLayerKeyframes(opts: EnsureKeyframesOpts) {
   if (!cache) throw new Error("keyframe cache missing after ensure");
   const tLerp = performance.now();
   const { i0, i1, t } = displayBlendForValue(cache, getParam(cache.paramName)?.value ?? cache.min);
-  const { frame: a } = blendFramesAt(cache, i0);
-  const { frame: b } = blendFramesAt(cache, i1);
+  const a = cache.frames[i0];
+  const b = cache.frames[i1];
   if (!a || !b) throw new Error("sync keyframe pair missing");
   if (!a.fx || !a.fy || !a.fz || !b.fx || !b.fy || !b.fz) {
     throw new Error("flow keyframe pair missing velocity grids");
@@ -1214,19 +1384,6 @@ export function peekKeyframeBlend(layerId: string) {
       i1: blend.i1,
       d0: cache.frameDeg[blend.i0] ?? 0,
       d1: cache.frameDeg[blend.i1] ?? 0,
-    });
-    return null;
-  }
-  if ((cache.frameDeg[blend.i0] ?? 0) !== (cache.frameDeg[blend.i1] ?? 0)) {
-    tearLogOnce(`peek-null-deg-${layerId}`, "peek-null", {
-      layerId,
-      reason: "deg-mismatch",
-      i0: blend.i0,
-      i1: blend.i1,
-      d0: cache.frameDeg[blend.i0] ?? 0,
-      d1: cache.frameDeg[blend.i1] ?? 0,
-      M0: gridMFromDens(cache.frames[blend.i0]?.dens),
-      M1: gridMFromDens(cache.frames[blend.i1]?.dens),
     });
     return null;
   }

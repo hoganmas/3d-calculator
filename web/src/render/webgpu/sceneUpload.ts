@@ -106,17 +106,24 @@ export function uploadSceneVolumes(scene: SceneUploadPayload | null): SceneUploa
   const putVol = (src: Float32Array | undefined, ctx?: { layerId?: string; slot?: number; field?: string }) => {
     if (!gpu.scenePacked) return;
     if (src && src.length) {
-      if (isTearDebugEnabled() && src.length < volN) {
-        tearLog("upload-short", {
-          layerId: ctx?.layerId,
-          slot: ctx?.slot,
-          field: ctx?.field,
-          sceneM: M,
-          srcLen: src.length,
-          volN,
-        });
+      if (src.length >= volN) {
+        gpu.scenePacked.set(src.subarray(0, volN), off);
+      } else {
+        if (isTearDebugEnabled()) {
+          tearLog("upload-short", {
+            layerId: ctx?.layerId,
+            slot: ctx?.slot,
+            field: ctx?.field,
+            sceneM: M,
+            srcLen: src.length,
+            volN,
+          });
+        }
+        gpu.scenePacked.fill(0, off, off + volN);
+        gpu.scenePacked.set(src, off);
       }
-      gpu.scenePacked.set(src.length >= volN ? src.subarray(0, volN) : src, off);
+    } else {
+      gpu.scenePacked.fill(0, off, off + volN);
     }
     off += volN;
   };
