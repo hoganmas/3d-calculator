@@ -3,8 +3,11 @@ import { clipGridVertex, clipGridFragment } from "../render/webgl/marchShaders.j
 import { ndcToDirMatrix, perspectiveDirScale, offsetDirMatrix } from "../render/camera.js";
 import {
   initClipBakeGpu,
+  isClipGpuUploadReady,
   isClipBakeGpuReady,
   isClipMarchReady,
+  scheduleMarchPipelines,
+  setMarchPipelinesReadyHandler,
   renderClipFrameGpu,
   setClipGpuCanvasVisible,
   ensurePipelinesForDegree,
@@ -26,7 +29,9 @@ import {
   compositionNdcOffsetY,
   marchFramebufferSize,
   syncClipPresentation,
+  resize,
 } from "./presentation.js";
+import { startupBegin, startupEnd, startupMark } from "./startupProfile.js";
 
 const volPlaceholder = new Float32Array(8);
 const volumeTex = new THREE.DataTexture(volPlaceholder, 2, 4, THREE.RedFormat, THREE.FloatType);
@@ -149,12 +154,25 @@ export function ensureDensSumForWebGl() {
 }
 
 /** Fit-time: IDCT each expression → GPU scene (manifolds + densities). */
-export function bakeChebVolume() {
+export function bakeChebVolume(opts: { source?: string } = {}) {
   if (!state.lastSceneBake) return null;
   const { cloudLayers, isosurfaceLayers, flowLayers, M, half } = state.lastSceneBake;
-  if (isClipBakeGpuReady()) {
-    const up = uploadSceneVolumes({ cloudLayers, isosurfaceLayers, flowLayers, M, half });
+  startupBegin("bakeChebVolume");
+  let uploadMs = 0;
+  if (isClipGpuUploadReady()) {
+    const up = uploadSceneVolumes({
+      cloudLayers,
+      isosurfaceLayers,
+      flowLayers,
+      M,
+      half,
+      source: opts.source,
+    });
+    uploadMs = up?.bakeMs ?? 0;
     if (up) state.bakeMsSmooth = state.bakeMsSmooth * 0.5 + up.bakeMs * 0.5;
+    void scheduleMarchPipelines(state.fitDeg);
+  } else {
+    startupMark("bakeChebVolume.skipped", { reason: "gpu-not-ready", source: opts.source });
   }
   state.lastVolumeM = M;
   // WebGL fallback only — GPU path uses per-layer dens via uploadSceneVolumes.
@@ -162,7 +180,74 @@ export function bakeChebVolume() {
     const dens = ensureDensSumForWebGl();
     if (dens) applyVolumeTexture(dens, M);
   }
+  startupEnd("bakeChebVolume", {
+    source: opts.source,
+    uploadReady: isClipGpuUploadReady(),
+    renderReady: isClipBakeGpuReady(),
+    uploadMs,
+  });
   return { dens: state.lastSceneBake.dens, M };
+}
+
+/** Serialize GPU init + scene pack; coalesces concurrent callers (uploadFit vs render-loop). */
+let sceneGpuUploadChain: Promise<boolean> = Promise.resolve(true);
+
+/** True after the first full scene re-upload when render pipelines become ready. */
+let gpuPresentSynced = false;
+
+export function resetGpuPresentSync(): void {
+  gpuPresentSynced = false;
+}
+
+/**
+ * Re-upload + sync presentation when WebGPU march pipelines first become ready.
+ * Early boot uploads only need device/buffers; iso/beer shaders must exist before
+ * the first frame is trustworthy (avoids default-pink / wrong-box first paint).
+ */
+export function presentSceneAfterGpuReady(source: string): boolean {
+  if (!isClipBakeGpuReady() || !isClipGpuUploadReady()) return false;
+  const bake = state.lastSceneBake;
+  if (!bake) return false;
+  const hasLayers =
+    bake.cloudLayers.length > 0 ||
+    bake.isosurfaceLayers.length > 0 ||
+    (bake.flowLayers?.length ?? 0) > 0;
+  if (!hasLayers) return false;
+  if (gpuPresentSynced && hasUploadedVolume()) return true;
+
+  startupBegin("presentSceneAfterGpuReady");
+  bakeChebVolume({ source: `present-${source}` });
+  resize();
+  syncClipPresentation();
+  state.clipDirty = true;
+  gpuPresentSynced = true;
+  startupEnd("presentSceneAfterGpuReady", { source });
+  return true;
+}
+
+setMarchPipelinesReadyHandler((source) => {
+  presentSceneAfterGpuReady(source);
+});
+
+export function ensureSceneGpuUpload(deg: number, source: string): Promise<boolean> {
+  const task = sceneGpuUploadChain.then(async () => {
+    startupBegin("ensureSceneGpuUpload");
+    try {
+      const ok = await initClipBakeGpu(els.viewport, source);
+      if (!ok) return false;
+      if (state.lastSceneBake) bakeChebVolume({ source });
+      return hasUploadedVolume();
+    } finally {
+      startupEnd("ensureSceneGpuUpload", { source, deg });
+    }
+  });
+  sceneGpuUploadChain = task.catch(() => false);
+  return task;
+}
+
+/** Kick off WebGPU init as early as possible (shared promise; safe to call repeatedly). */
+export function warmClipGpuInit(source = "warm"): void {
+  void initClipBakeGpu(els.viewport, source);
 }
 
 /** Per-frame GPU volume march (IDCT bake is fit-time only). */
@@ -170,7 +255,14 @@ export function drawClipGpuFrame() {
   state.densSubmittedThisFrame = false;
   const { vw, vh } = viewportSize();
   const { mw, mh } = marchFramebufferSize();
-  if (!state.lastSceneBake || !isClipBakeGpuReady()) return false;
+  if (!state.lastSceneBake || !isClipBakeGpuReady()) {
+    if (isClipGpuUploadReady() && hasUploadedVolume()) {
+      void scheduleMarchPipelines(state.fitDeg).then((ok) => {
+        if (ok) presentSceneAfterGpuReady("render-loop-wait");
+      });
+    }
+    return false;
+  }
   if (!hasUploadedVolume()) {
     clearClipGpuFrame(vw, vh);
     state.clipDirty = false;
@@ -215,18 +307,10 @@ export function syncClipCpuVolume() {
   state.clipDirty = false;
 }
 
-export async function prepareClipGpuForDegree(deg: number) {
-  try {
-    const ok = await initClipBakeGpu(els.viewport);
-    if (!ok) return false;
-    await ensurePipelinesForDegree(deg);
-    if (state.lastSceneBake) bakeChebVolume();
-    syncClipPresentation();
-    return true;
-  } catch (e) {
-    console.warn("[clip-grid] pipeline specialize failed", e);
-    return false;
-  }
+export async function prepareClipGpuForDegree(deg: number, source = "unknown") {
+  const ok = await ensureSceneGpuUpload(deg, source);
+  presentSceneAfterGpuReady(source);
+  return ok;
 }
 
 export function initWebglFallback() {

@@ -1,6 +1,7 @@
 import { MAX_GRAD_STOPS } from "../../model/expressions.js";
 import { gpu, PIPELINE_EPOCH } from "./gpuState.js";
 import { MAX_DENS_LAYERS } from "./gpuState.js";
+import { startupBegin, startupEnd } from "../../app/startupProfile.js";
 import {
   getIsoShader,
   getBeerShader,
@@ -34,14 +35,19 @@ export async function ensurePipelinesForDegree(_deg: number): Promise<PipelineBu
     return {};
   }
 
+  startupBegin("gpu.pipelines.compile-shaders");
   gpu.canvasFormat = navigator.gpu.getPreferredCanvasFormat();
-  const isoMod = await compileChecked("iso", getIsoShader(MAX_GRAD_STOPS));
-  const beerMod = await compileChecked("beer", getBeerShader(MAX_GRAD_STOPS, MAX_DENS_LAYERS));
-  const gridMod = await compileChecked("grid", getGridShader());
-  const labelMod = await compileChecked("axisLabel", getAxisLabelShader());
-  const fxaaMod = await compileChecked("fxaa", getFxaaShader());
-  const ssaoMod = await compileChecked("ssao", getSsaoShader());
+  const [isoMod, beerMod, gridMod, labelMod, fxaaMod, ssaoMod] = await Promise.all([
+    compileChecked("iso", getIsoShader(MAX_GRAD_STOPS)),
+    compileChecked("beer", getBeerShader(MAX_GRAD_STOPS, MAX_DENS_LAYERS)),
+    compileChecked("grid", getGridShader()),
+    compileChecked("axisLabel", getAxisLabelShader()),
+    compileChecked("fxaa", getFxaaShader()),
+    compileChecked("ssao", getSsaoShader()),
+  ]);
+  startupEnd("gpu.pipelines.compile-shaders");
 
+  startupBegin("gpu.pipelines.create");
   const blendPremul: GPUBlendState = {
     color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
     alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
@@ -189,6 +195,7 @@ export async function ensurePipelinesForDegree(_deg: number): Promise<PipelineBu
   gpu.fxaaPipeline = nextFxaa;
   gpu.builtEpoch = PIPELINE_EPOCH;
   gpu.labelAtlasDirty = true;
+  startupEnd("gpu.pipelines.create");
 
   if (Number.isFinite(gpu.gridHalf)) {
     const h = gpu.gridHalf;

@@ -13,7 +13,23 @@ import { ensureFlowIbfvPipeline } from "./flowIbfv.js";
 import { ensureFlowParticlesPipeline } from "./flowParticles.js";
 import { syncClipGpuWorldGrid } from "./gridOverlay.js";
 import { attachMarchCanvas, bindMarchCanvasContext } from "./marchCanvas.js";
-import { isClipBakeGpuReady } from "./marchReadiness.js";
+import { isClipBakeGpuReady, isClipGpuUploadReady } from "./marchReadiness.js";
+import { startupBegin, startupEnd, startupMark } from "../../app/startupProfile.js";
+
+let marchPipelinesPromise: Promise<boolean> | null = null;
+
+type MarchPipelinesReadyHandler = (source: string) => void;
+let marchPipelinesReadyHandler: MarchPipelinesReadyHandler | null = null;
+
+/** Called once when background pipeline build finishes (avoids circular imports with app/). */
+export function setMarchPipelinesReadyHandler(fn: MarchPipelinesReadyHandler | null): void {
+  marchPipelinesReadyHandler = fn;
+}
+
+function notifyMarchPipelinesReady(source: string): void {
+  if (!isClipBakeGpuReady()) return;
+  marchPipelinesReadyHandler?.(source);
+}
 
 export async function ensurePipelinesForDegree(deg: number): Promise<boolean> {
   const result = await buildPipelines(deg);
@@ -23,22 +39,56 @@ export async function ensurePipelinesForDegree(deg: number): Promise<boolean> {
   return result !== false;
 }
 
-export async function initClipBakeGpu(viewportEl: HTMLElement | null | undefined): Promise<boolean> {
-  if (isClipBakeGpuReady()) return true;
+/** Build march render pipelines in the background (does not block volume upload). */
+export function scheduleMarchPipelines(deg = 4): Promise<boolean> {
+  if (isClipBakeGpuReady()) return Promise.resolve(true);
+  if (!gpu.device) return Promise.resolve(false);
+  if (!marchPipelinesPromise) {
+    marchPipelinesPromise = (async () => {
+      startupBegin("gpu.pipelines.background");
+      try {
+        await ensurePipelinesForDegree(deg);
+        await ensureFlowIbfvPipeline();
+        await ensureFlowParticlesPipeline();
+        const ok = isClipBakeGpuReady();
+        if (ok) notifyMarchPipelinesReady("pipelines.background");
+        return ok;
+      } finally {
+        startupEnd("gpu.pipelines.background");
+      }
+    })().catch(() => false);
+  }
+  return marchPipelinesPromise;
+}
+
+export async function initClipBakeGpu(
+  viewportEl: HTMLElement | null | undefined,
+  source = "unknown",
+): Promise<boolean> {
+  if (isClipGpuUploadReady()) return true;
   if (gpu.initFailed) return false;
   if (gpu.initPromise) return gpu.initPromise;
+  startupMark("gpu.init.queued", { source });
   gpu.initPromise = (async () => {
+    startupBegin("gpu.init");
     try {
       if (!navigator.gpu) { gpu.initFailed = true; return false; }
+      startupBegin("gpu.init.adapter");
       const adapter = await navigator.gpu.requestAdapter();
+      startupEnd("gpu.init.adapter", { ok: !!adapter });
       if (!adapter) { gpu.initFailed = true; return false; }
       gpu.timestampsSupported = adapter.features.has("timestamp-query");
       const requiredFeatures: GPUFeatureName[] = gpu.timestampsSupported ? ["timestamp-query"] : [];
+      startupBegin("gpu.init.device");
       gpu.device = await adapter.requestDevice({ requiredFeatures });
+      startupEnd("gpu.init.device");
       gpu.device.lost.then(() => {
         gpu.device = null;
         resetPipelinesOnDeviceLost();
         gpu.initFailed = true;
+        gpu.initPromise = null;
+        marchPipelinesPromise = null;
+        void import("../../app/webglFallback.js").then((m) => m.resetGpuPresentSync());
       });
       if (gpu.timestampsSupported) {
         gpu.stampQuerySet = gpu.device.createQuerySet({ type: "timestamp", count: 2 });
@@ -87,17 +137,17 @@ export async function initClipBakeGpu(viewportEl: HTMLElement | null | undefined
       });
       writeLayerColors(gpu.device, gpu.colorBuf, [[DEFAULT_DENS_RGB, DEFAULT_DENS_RGB2]]);
       ensureVolumeBuf(8 * 8 * 8);
-      await ensurePipelinesForDegree(4);
-      await ensureFlowIbfvPipeline();
-      await ensureFlowParticlesPipeline();
       if (viewportEl) attachMarchCanvas(viewportEl);
       bindMarchCanvasContext();
-      return isClipBakeGpuReady();
+      void scheduleMarchPipelines(4);
+      startupEnd("gpu.init", { source, ok: isClipGpuUploadReady() });
+      return isClipGpuUploadReady();
     } catch (e) {
       console.warn("[clipBakeGpu] init failed", e);
       gpu.initFailed = true;
       gpu.device = null;
       resetPipelinesOnDeviceLost();
+      startupEnd("gpu.init", { source, ok: false, error: String(e) });
       return false;
     }
   })();

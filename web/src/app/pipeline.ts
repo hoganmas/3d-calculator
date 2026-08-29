@@ -2,28 +2,49 @@ import { MAX_DEG } from "../math/limits.js";
 import { fitScalarField } from "../math/fit.js";
 import { idctChebGrad3D } from "../math/idct.js";
 import {
+  ensureLobattoDegree,
+  idctLobatto3D,
+  lobattoChebToSeries,
+  lobattoLadderDegrees,
+} from "../math/chebLobatto.js";
+import {
+  clearLobattoLayerCache,
+  getLobattoLayerCache,
+  isProgressiveLobattoEnabled,
+  scheduleProgressiveUploadFit,
+  setLobattoLayerCache,
+} from "./progressiveFit.js";
+import {
   beginKeyframePass,
-  clearKeyframeCaches,
+  syncKeyframeCachesWithExpressions,
   getKeyframeMetrics,
   logKeyframeBake,
   setKeyframeProgressHandler,
   keyframeAnimParam,
+  keyframeAnimParams,
+  resolveKeyframeParamNames,
   noteKeyframeLayer,
   ensureLayerKeyframes,
   sampleLayerKeyframes,
   sampleFlowLayerKeyframes,
+  sampleIsoLayerKeyframes,
   peekKeyframeBlend,
+  syncIsoKeyframesToSceneBake,
+  getKeyframeLayerRole,
+  getIsoBlendSceneM,
+  refreshIsoBlendDisplay,
+  hasLayerKeyframeCache,
 } from "../model/keyframes.js";
 import {
   getParamValues,
   collectAnimDirtyParams,
 } from "../model/params.js";
 import {
+  isClipGpuUploadReady,
   isClipBakeGpuReady,
   uploadSceneVolumes,
   uploadSceneColors,
   setConstraintKeyframeBlends,
-  patchConstraintKeyframeFrame,
 } from "../render/webgpu/march.js";
 import { reseedFlowDyeBuffers } from "../render/webgpu/flowIbfv.js";
 import { reseedFlowParticles } from "../render/webgpu/flowParticles.js";
@@ -48,7 +69,8 @@ import {
   bakeChebVolume,
   useGpuClipPath,
   syncClipCpuVolume,
-  prepareClipGpuForDegree,
+  ensureSceneGpuUpload,
+  presentSceneAfterGpuReady,
 } from "./webglFallback.js";
 import { resize, syncClipPresentation, syncShowGridAxesUi } from "./presentation.js";
 import { clearClipGpuFrame } from "../render/webgpu/march.js";
@@ -59,8 +81,10 @@ import {
   refreshMetricsDump,
 } from "./hud.js";
 import { scheduleAutosave } from "./persistence/autosave.js";
-import { tryMarkSplashBakeReady } from "./splash.js";
-import { allKeyframesComplete } from "../model/keyframes.js";
+import { isSplashContentReady, tryMarkSplashBakeReady } from "./splash.js";
+import { startupBegin, startupEnd, startupMark } from "./startupProfile.js";
+import { gridMFromDens, tearLog, tearLogBlendChange } from "./tearDebug.js";
+import { gpu } from "../render/webgpu/gpuState.js";
 
 interface CachedLayer {
   kind: "cloud" | "isosurface" | "flow";
@@ -76,32 +100,97 @@ interface CachedLayer {
   cheb?: Float32Array;
   fitRel?: number;
   isoLevel?: number;
+  /** Content fingerprint at last bake — per-expression dirty tracking. */
+  bakeFp?: string;
 }
+
+/** Last successful dens/keyframe fingerprint per layer id (decoupled invalidation). */
+const layerBakeFingerprints = new Map<string, string>();
+
+function layerBakeFingerprint(
+  layer: {
+    item: { id: string; latex: string };
+    role: string;
+    compiled?: { isoLevel?: number } | null;
+  },
+  deg: number,
+  half: number,
+): string {
+  const iso = layer.compiled?.isoLevel ?? 0;
+  return `${layer.role}\0${layer.item.latex}\0${deg}\0${half}\0${iso}`;
+}
+
+const lastGpuBlendByLayer = new Map<
+  string,
+  { i0: number; i1: number; t: number; d0?: number; d1?: number; M0?: number; M1?: number }
+>();
 
 export function tickGpuKeyframeBlends() {
   const isoLayers = state.lastSceneBake?.isosurfaceLayers;
   if (!isoLayers?.length || !isClipBakeGpuReady()) return false;
   /** @type {{ id: string, i0: number, i1: number, t: number }[]} */
   const blends = [];
+  let needReupload = false;
+  let targetM = 0;
   for (const c of isoLayers) {
     if (!c?.id || !Array.isArray(c.keyframes) || !c.keyframes.length) continue;
+    const promoted = refreshIsoBlendDisplay(c.id);
+    if (promoted.length) needReupload = true;
+    const layerM = getIsoBlendSceneM(c.id);
+    if (layerM > 0) targetM = Math.max(targetM, layerM);
     const b = peekKeyframeBlend(c.id);
     if (!b) continue;
+    if (layerM > 0 && layerM !== gpu.sceneM) needReupload = true;
+    const a0 = c.keyframes[b.i0];
+    const a1 = c.keyframes[b.i1];
+    const next = {
+      i0: b.i0,
+      i1: b.i1,
+      t: b.t,
+      M0: gridMFromDens(a0?.dens),
+      M1: gridMFromDens(a1?.dens),
+    };
+    tearLogBlendChange(c.id, lastGpuBlendByLayer.get(c.id) ?? null, next);
+    lastGpuBlendByLayer.set(c.id, next);
     c.blend = { i0: b.i0, i1: b.i1, t: b.t };
     blends.push(b);
   }
-  if (!blends.length) return false;
+  if (needReupload && state.lastSceneBake && targetM > 0) {
+    for (const c of isoLayers) {
+      if (c?.id) targetM = Math.max(targetM, getIsoBlendSceneM(c.id));
+    }
+    if (targetM <= 0) return needReupload;
+    state.lastSceneBake.M = targetM;
+    for (const c of isoLayers) {
+      if (c?.id) syncIsoKeyframesToSceneBake(c.id, state.lastSceneBake, targetM);
+    }
+    tearLog("iso-blend-reupload", { targetM, gpuM: gpu.sceneM });
+    bakeChebVolume();
+    state.clipDirty = true;
+  }
+  if (!blends.length) return needReupload;
   setConstraintKeyframeBlends(blends);
   state.clipDirty = true;
   return true;
 }
 
-export function uploadFit(opts: { fromAnim?: boolean } = {}) {
+export function uploadFit(
+  opts: {
+    fromAnim?: boolean;
+    fitDeg?: number;
+    progressive?: boolean;
+    progressiveFinal?: boolean;
+  } = {},
+) {
   const fromAnim = !!opts.fromAnim;
+  const progressive = !!opts.progressive;
+  startupBegin("uploadFit");
+  startupMark("uploadFit.begin", { fromAnim, progressive, fitDeg: opts.fitDeg });
   setErr("");
   try {
     const boxSize = Number(els.boxSize.value);
-    const deg = Number(els.deg.value);
+    const uiDeg = Number(els.deg.value);
+    const deg = opts.fitDeg ?? uiDeg;
     const densScale = Number(els.scale.value);
     const steps = Math.min(96, Math.max(8, Number(els.steps.value) || 32));
     els.steps.value = String(steps);
@@ -109,13 +198,29 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
     if (deg < 1 || deg > MAX_DEG) throw new Error(`poly deg must be 1…${MAX_DEG}`);
     const half = 0.5 * boxSize;
 
+    if (!progressive && !fromAnim) {
+      // Per-layer Lobatto invalidation happens only for layers that actually refit.
+    }
+
     const tUpload = performance.now();
+    startupBegin("uploadFit.compile");
     const { layers } = compileAllExprs({ rebuildUi: false });
+    startupEnd("uploadFit.compile", { layerCount: layers.length });
     setExprCompileOk(true);
 
+    // Keyframe identity uses UI target deg — never progressive step deg (pause ladder
+    // would otherwise wipe animation caches on every intermediate fitDeg).
+    const syncKeyframeScene = () =>
+      syncKeyframeCachesWithExpressions(
+        listExpressions().map((e) => ({ id: e.id, latex: e.latex, enabled: e.enabled })),
+        { deg: uiDeg, half },
+      );
+
     // No visible / non-empty expressions → clear volume, draw nothing.
+    // Park keyframe caches (don't wipe) so re-enabling can reuse them.
     if (!layers.length) {
-      clearKeyframeCaches();
+      syncKeyframeScene();
+      layerBakeFingerprints.clear();
       state.lastSceneBake = { cloudLayers: [], isosurfaceLayers: [], flowLayers: [], M: Math.max(2, deg + 1), dens: null };
       state.lastFitTiming = null;
       state.lastNCoeff = 0;
@@ -150,44 +255,62 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
     let fittedCount = 0;
     let keyframedCount = 0;
     let keyframeBaked = false;
+    let isoGpuUploadNeeded = false;
     let densKeyframedCpu = false;
 
     // Anim ticks: only refit layers that depend on dirty params; reuse the rest.
+    // Structural refits: reuse per-expression when latex/role/deg/half unchanged.
     // Dirty layers with exactly one animating slider: GPU keyframe blend (iso) / CPU lerp (dens).
     const dirty = fromAnim ? collectAnimDirtyParams() : null;
+    syncKeyframeScene();
     if (fromAnim) beginKeyframePass();
-    else clearKeyframeCaches();
 
     const prevById = new Map<string, CachedLayer>();
     const lastBake = state.lastSceneBake;
-    const canReuseCache =
-      fromAnim &&
-      dirty &&
-      lastBake &&
-      lastBake.deg === deg &&
-      Math.abs((lastBake.half ?? NaN) - half) < 1e-12;
-    if (canReuseCache && lastBake) {
+    // Half must match; deg may differ during progressive ladder steps — per-layer
+    // fingerprints decide which expressions are actually dirty.
+    const sceneMetaOk =
+      !!lastBake && Math.abs((lastBake.half ?? NaN) - half) < 1e-12;
+    if (sceneMetaOk && lastBake) {
       for (const d of lastBake.cloudLayers) {
-        if (d.id) prevById.set(d.id, { kind: "cloud", ...d });
+        if (d.id) prevById.set(d.id, { kind: "cloud", ...d, bakeFp: layerBakeFingerprints.get(d.id) });
       }
       for (const c of lastBake.isosurfaceLayers) {
-        if (c.id) prevById.set(c.id, { kind: "isosurface", ...c });
+        if (c.id) prevById.set(c.id, { kind: "isosurface", ...c, bakeFp: layerBakeFingerprints.get(c.id) });
       }
       for (const f of lastBake.flowLayers ?? []) {
-        if (f.id) prevById.set(f.id, { kind: "flow", ...f });
+        if (f.id) prevById.set(f.id, { kind: "flow", ...f, bakeFp: layerBakeFingerprints.get(f.id) });
+      }
+    }
+
+    const liveIds = new Set(layers.map((L) => L.item.id));
+    for (const id of [...layerBakeFingerprints.keys()]) {
+      if (!liveIds.has(id)) {
+        layerBakeFingerprints.delete(id);
+        clearLobattoLayerCache(id);
       }
     }
 
     const baseParams = getParamValues();
+    const commitLayerFp = (layerId: string, fp: string) => {
+      if (deg === uiDeg || opts.progressiveFinal || (!progressive && !fromAnim)) {
+        layerBakeFingerprints.set(layerId, fp);
+      }
+    };
 
+    startupBegin("uploadFit.layers");
     for (const L of layers) {
       const { color, color2, colors } = layerRgbFromItem(L.item);
-      const depends =
-        !dirty ||
+      const fp = layerBakeFingerprint(L, uiDeg, half);
+      const paramDepends =
+        !!dirty &&
         (L.role === "flow"
           ? L.vectorCompiled!.freeParams.some((p) => dirty.has(p))
           : L.compiled!.freeParams.some((p) => dirty.has(p)));
-      const prev = canReuseCache && !depends ? prevById.get(L.item.id) : null;
+      // Structural: dirty when fingerprint changed. Anim: dirty when params depend.
+      const contentDirty = layerBakeFingerprints.get(L.item.id) !== fp;
+      const depends = fromAnim ? !dirty || paramDepends : contentDirty;
+      const prev = sceneMetaOk && !depends ? prevById.get(L.item.id) : null;
       const prevHasKf =
         prev && Array.isArray(prev.keyframes) && prev.keyframes.length > 0;
       const reuseKind =
@@ -252,45 +375,91 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
           cheb = prev.cheb;
           fitRel = prev.fitRel ?? fitRel;
         }
+        commitLayerFp(L.item.id, fp);
         continue;
       }
 
-      // Keyframe path: one dirty animated slider → GPU blend (iso) / CPU lerp (dens).
-      const kfParam =
-        fromAnim && depends && dirty && L.compiled
-          ? keyframeAnimParam(L.compiled.freeParams, dirty)
+      // Keyframe path: animated slider(s) → GPU blend (iso 1D) / CPU multilinear (cloud, iso N-D).
+      const kfParams =
+        isSplashContentReady() &&
+        isClipBakeGpuReady() &&
+        fromAnim &&
+        depends &&
+        dirty &&
+        L.compiled
+          ? keyframeAnimParams(L.compiled.freeParams, dirty)
           : null;
-      if (kfParam && L.compiled && L.fn) {
+      if (kfParams?.length && L.compiled && L.fn) {
         noteKeyframeLayer();
         keyframedCount++;
+        const paramNames = resolveKeyframeParamNames(L.item.id, kfParams);
+        const memKf = hasLayerKeyframeCache(L.item.id);
+        const deferKf = fromAnim && (prevHasKf || memKf);
         if (L.role === "isosurface") {
-          const sample = ensureLayerKeyframes({
-            layerId: L.item.id,
-            latex: L.item.latex,
-            role: "isosurface",
-            isoLevel: L.compiled?.isoLevel ?? 0,
-            paramName: kfParam,
-            compiled: L.compiled,
-            baseParams,
-            half,
-            deg,
-          });
-          if (sample.baked) keyframeBaked = true;
-          M = sample.M || M;
-          isosurfaceLayers.push({
-            id: L.item.id,
-            keyframes: sample.frames,
-            blend: sample.blend,
-            color,
-            color2,
-            colors,
-            isoLevel: L.compiled?.isoLevel ?? 0,
-            cheb: sample.cheb,
-            fitRel: sample.fitRel,
-          });
-          if (!cheb && sample.cheb) {
-            cheb = sample.cheb;
-            fitRel = sample.fitRel ?? fitRel;
+          if (paramNames.length === 1) {
+            const sample = ensureLayerKeyframes({
+              layerId: L.item.id,
+              latex: L.item.latex,
+              role: "isosurface",
+              isoLevel: L.compiled?.isoLevel ?? 0,
+              paramNames,
+              compiled: L.compiled,
+              baseParams,
+              half,
+              deg,
+              deferSyncBake: deferKf,
+            });
+            if (sample.baked) keyframeBaked = true;
+            if (sample.gpuUploadNeeded || (memKf && !prevHasKf)) isoGpuUploadNeeded = true;
+            M = sample.M || M;
+            isosurfaceLayers.push({
+              id: L.item.id,
+              keyframes: sample.frames,
+              blend: sample.blend,
+              color,
+              color2,
+              colors,
+              isoLevel: L.compiled?.isoLevel ?? 0,
+              cheb: sample.cheb,
+              fitRel: sample.fitRel,
+            });
+            if (!cheb && sample.cheb) {
+              cheb = sample.cheb;
+              fitRel = sample.fitRel ?? fitRel;
+            }
+          } else {
+            const sample = sampleIsoLayerKeyframes({
+              layerId: L.item.id,
+              latex: L.item.latex,
+              role: "isosurface",
+              isoLevel: L.compiled?.isoLevel ?? 0,
+              paramNames,
+              compiled: L.compiled,
+              baseParams,
+              half,
+              deg,
+              deferSyncBake: deferKf,
+            });
+            if (sample.baked) keyframeBaked = true;
+            M = sample.M || M;
+            isosurfaceLayers.push({
+              id: L.item.id,
+              dens: sample.dens.slice(),
+              gx: sample.gx.slice(),
+              gy: sample.gy.slice(),
+              gz: sample.gz.slice(),
+              color,
+              color2,
+              colors,
+              isoLevel: L.compiled?.isoLevel ?? 0,
+              cheb: sample.cheb,
+              fitRel: sample.fitRel,
+            });
+            densKeyframedCpu = true;
+            if (!cheb && sample.cheb) {
+              cheb = sample.cheb;
+              fitRel = sample.fitRel ?? fitRel;
+            }
           }
         } else {
           const sample = sampleLayerKeyframes({
@@ -298,11 +467,12 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
             latex: L.item.latex,
             role: "cloud",
             isoLevel: L.compiled?.isoLevel ?? 0,
-            paramName: kfParam,
+            paramNames,
             compiled: L.compiled,
             baseParams,
             half,
             deg,
+            deferSyncBake: deferKf,
           });
           if (sample.baked) keyframeBaked = true;
           M = sample.M || M;
@@ -321,26 +491,36 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
             fitRel = sample.fitRel ?? fitRel;
           }
         }
+        commitLayerFp(L.item.id, fp);
         continue;
       }
 
       if (L.role === "flow") {
-        const kfParam =
-          fromAnim && depends && dirty && L.vectorCompiled
-            ? keyframeAnimParam(L.vectorCompiled.freeParams, dirty)
+        const kfParamsFlow =
+          isSplashContentReady() &&
+          isClipBakeGpuReady() &&
+          fromAnim &&
+          depends &&
+          dirty &&
+          L.vectorCompiled
+            ? keyframeAnimParams(L.vectorCompiled.freeParams, dirty)
             : null;
-        if (kfParam && L.vectorCompiled && L.vectorFn) {
+        if (kfParamsFlow?.length && L.vectorCompiled && L.vectorFn) {
           noteKeyframeLayer();
           keyframedCount++;
+          const paramNames = resolveKeyframeParamNames(L.item.id, kfParamsFlow);
+          const memKf = hasLayerKeyframeCache(L.item.id);
+          const deferKf = fromAnim && (prevHasKf || memKf);
           const sample = sampleFlowLayerKeyframes({
             layerId: L.item.id,
             latex: L.item.latex,
             role: "flow",
-            paramName: kfParam,
+            paramNames,
             vectorCompiled: L.vectorCompiled,
             baseParams,
             half,
             deg,
+            deferSyncBake: deferKf,
           });
           if (sample.baked) keyframeBaked = true;
           M = sample.M || M;
@@ -360,9 +540,11 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
             cheb = sample.cheb;
             fitRel = sample.fitRel ?? fitRel;
           }
+          commitLayerFp(L.item.id, fp);
           continue;
         }
 
+        clearLobattoLayerCache(L.item.id);
         const skipHeavy = fromAnim || layers.length > 1;
         const fit = fitVectorField(
           L.vectorCompiled!,
@@ -388,18 +570,46 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
           cheb = fit.cheb;
           fitRel = fit.fitRel ?? fitRel;
         }
+        commitLayerFp(L.item.id, fp);
         continue;
       }
 
-      const skipHeavy = fromAnim || layers.length > 1;
-      const scalarFit = fitScalarField(L.compiled!, L.fn!, half, deg, {
-        skipL2: skipHeavy,
-        skipMono: skipHeavy,
-      });
+      // Reset this layer's dens Lobatto only at the start of a progressive rebuild.
+      const ladderStart = lobattoLadderDegrees(uiDeg)[0] ?? uiDeg;
+      if (!progressive || deg === ladderStart) clearLobattoLayerCache(L.item.id);
+      const skipHeavy = fromAnim || layers.length > 1 || progressive;
+      const useLobatto =
+        progressive &&
+        isProgressiveLobattoEnabled() &&
+        L.role === "cloud" &&
+        !L.compiled?.operator;
+
+      let scalarFit;
+      if (useLobatto && L.fn) {
+        const cached = getLobattoLayerCache(L.item.id);
+        const lob = ensureLobattoDegree(cached, L.fn, half, deg);
+        setLobattoLayerCache(L.item.id, lob);
+        const idct = idctLobatto3D(lob.cheb, lob.deg, lob.deg + 1);
+        scalarFit = {
+          dens: idct.dens,
+          cheb: lob.cheb,
+          fitRelL2: NaN,
+          M: idct.M,
+          deg: lob.deg,
+        };
+      } else {
+        scalarFit = fitScalarField(L.compiled!, L.fn!, half, deg, {
+          skipL2: skipHeavy,
+          skipMono: skipHeavy,
+        });
+      }
       fittedCount++;
       M = scalarFit.M;
       if (L.role === "isosurface") {
-        const grad = idctChebGrad3D(scalarFit.cheb, scalarFit.deg, scalarFit.deg + 1);
+        const gradCheb = useLobatto
+          ? lobattoChebToSeries(scalarFit.cheb, scalarFit.deg)
+          : scalarFit.cheb;
+        const grad = idctChebGrad3D(gradCheb, scalarFit.deg, scalarFit.deg + 1);
         isosurfaceLayers.push({
           id: L.item.id,
           dens: scalarFit.dens,
@@ -433,7 +643,9 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
           timingAcc[k] += scalarFit.timing[k] || 0;
         }
       }
+      commitLayerFp(L.item.id, fp);
     }
+    startupEnd("uploadFit.layers", { fittedCount, keyframedCount, layerMs: performance.now() - tUpload });
 
     // WebGL preview texture: sum of cloud layers (skipped when WebGPU is active).
     let densSum = null;
@@ -476,15 +688,83 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
     state.lastNCoeff = (deg + 1) ** 3 * layers.length;
     if (Number.isFinite(fitRel)) state.lastFitRel = fitRel;
 
+    for (const iso of isosurfaceLayers) {
+      if (!iso.keyframes?.length) continue;
+      const blendM = iso.id ? getIsoBlendSceneM(iso.id) : 0;
+      if (blendM > 0) {
+        M = Math.max(M, blendM);
+      } else {
+        for (const fr of iso.keyframes) {
+          const m = gridMFromDens(fr?.dens);
+          if (m > 0) M = Math.max(M, m);
+        }
+      }
+    }
+
     if (cheb) state.worldCheb = cheb;
-    else if (!fromAnim) state.worldCheb = null;
+    else if (!fromAnim && opts.progressiveFinal) state.worldCheb = null;
     state.fitDeg = deg;
-    // GPU iso keyframes: upload only on bake / dens CPU lerp / full fit.
-    // Warm anim ticks only update blend uniforms.
+    // GPU iso keyframes during anim: blend uniforms every frame; full upload only on
+    // sync coarse pair, async promote, M change, or dens→keyframe rebind after pause.
+    const prevM = lastBake?.M ?? 0;
+    const sceneHasIsoKf = isosurfaceLayers.some((c) => (c.keyframes?.length ?? 0) > 1);
+    const gpuHasIsoKf = gpu.sceneConstraints.some((c) => (c.K ?? 1) > 1);
     const needUpload =
-      fittedCount > 0 || keyframeBaked || densKeyframedCpu || !fromAnim;
+      fittedCount > 0 ||
+      densKeyframedCpu ||
+      !fromAnim ||
+      isoGpuUploadNeeded ||
+      (fromAnim && sceneHasIsoKf && !gpuHasIsoKf) ||
+      (fromAnim && keyframedCount > 0 && prevM > 0 && prevM !== M);
+    tearLog("uploadFit", {
+      fromAnim,
+      progressive,
+      progressiveFinal: !!opts.progressiveFinal,
+      fitDeg: deg,
+      targetDeg: uiDeg,
+      needUpload,
+      fittedCount,
+      keyframedCount,
+      keyframeBaked,
+      isoGpuUploadNeeded,
+      densKeyframedCpu,
+      sceneHasIsoKf,
+      gpuHasIsoKf,
+      sceneM: M,
+      prevM,
+      gpuM: gpu.sceneM,
+    });
+    startupMark("uploadFit.ready", {
+      fromAnim,
+      needUpload,
+      fittedCount,
+      keyframedCount,
+      sceneM: M,
+      uploadReady: isClipGpuUploadReady(),
+      renderReady: isClipBakeGpuReady(),
+      gpuM: gpu.sceneM,
+      layerMs: Math.round((performance.now() - tUpload) * 10) / 10,
+    });
     if (needUpload) {
-      bakeChebVolume();
+      const uploadDeg = fromAnim && M !== gpu.sceneM ? Math.max(1, M - 1) : deg;
+      const uploadSource = fromAnim ? "uploadFit-anim" : "uploadFit-static";
+      startupMark("uploadFit.upload-scheduled", {
+        uploadDeg,
+        uploadReady: isClipGpuUploadReady(),
+        renderReady: isClipBakeGpuReady(),
+        gpuM: gpu.sceneM,
+        source: uploadSource,
+      });
+      void ensureSceneGpuUpload(uploadDeg, uploadSource).then((ok) => {
+        if (!ok) return;
+        if (presentSceneAfterGpuReady("uploadFit")) return;
+        state.clipDirty = true;
+        syncClipPresentation();
+        if (!useGpuClipPath()) {
+          state.clipDirty = true;
+          syncClipCpuVolume();
+        }
+      });
     } else if (keyframedCount > 0) {
       setConstraintKeyframeBlends(
         isosurfaceLayers
@@ -496,28 +776,20 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
             t: c.blend!.t,
           })),
       );
+      syncClipPresentation();
+    } else {
+      syncClipPresentation();
     }
 
     clipUniforms.uScale.value = densScale;
     clipUniforms.uSteps.value = steps;
     setBoxSize(boxSize);
 
-    if (!fromAnim) resize();
+    if (!progressive) resize();
     state.clipDirty = true;
-    if (needUpload) {
-      void prepareClipGpuForDegree(deg).then(() => {
-        if (state.lastSceneBake) bakeChebVolume();
-        syncClipPresentation();
-        if (!useGpuClipPath()) {
-          state.clipDirty = true;
-          syncClipCpuVolume();
-        }
-      });
-    } else {
-      syncClipPresentation();
-    }
 
     tryMarkSplashBakeReady(layers.length > 0);
+    startupEnd("uploadFit", { uploadMs: Math.round((performance.now() - tUpload) * 10) / 10 });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     try {
@@ -537,19 +809,12 @@ export function uploadFit(opts: { fromAnim?: boolean } = {}) {
       };
     }
     tryMarkSplashBakeReady(false);
+    startupEnd("uploadFit", { error: message });
   }
 }
 
 export function scheduleUploadFit(delay = FIT_DEBOUNCE_MS, opts = {}) {
-  state.pendingFitOpts = opts && typeof opts === "object" ? opts : {};
-  if (state.fitTimer) clearTimeout(state.fitTimer);
-  state.fitTimer = window.setTimeout(() => {
-    state.fitTimer = 0;
-    const fitOpts = state.pendingFitOpts;
-    state.pendingFitOpts = {};
-    if (!syncExprCompileState()) return;
-    uploadFit(fitOpts);
-  }, delay);
+  scheduleProgressiveUploadFit(uploadFit, delay, opts);
 }
 
 /** Scale / steps: no refit — update render uniforms only. */
@@ -563,23 +828,27 @@ export function applyRenderHyperparams() {
 }
 
 export function initKeyframeHandler() {
-  /** Async keyframe fills: patch GPU slot + keep lastSceneBake in sync. */
-  setKeyframeProgressHandler(({ layerId, index, frame, readyCount, K, done }) => {
+  /** Async keyframe fills: iso blend-pair promote → full GPU upload; off-blend → CPU sync only. */
+  setKeyframeProgressHandler(({ layerId, index, frame, readyCount, K, done, promoted }) => {
     if (index >= 0 && frame && state.lastSceneBake?.isosurfaceLayers) {
       const c = state.lastSceneBake.isosurfaceLayers.find((x) => x.id === layerId);
-      if (c && Array.isArray(c.keyframes) && index < c.keyframes.length) {
-        c.keyframes[index] = frame;
-      }
-      if (isClipBakeGpuReady()) {
-        patchConstraintKeyframeFrame(layerId, index, frame);
-        state.clipDirty = true;
+      if (c && Array.isArray(c.keyframes)) {
+        if (promoted?.length && getKeyframeLayerRole(layerId) === "isosurface") {
+          if (isClipBakeGpuReady()) {
+            const M = syncIsoKeyframesToSceneBake(layerId, state.lastSceneBake);
+            tearLog("iso-promote-upload", { layerId, promoted, sceneM: M, gpuM: gpu.sceneM });
+            bakeChebVolume();
+            state.clipDirty = true;
+          }
+        }
+        // Iso GPU buffers hold display frames only; staging commits stay in cache until promote.
       }
     }
     if (done) {
       console.log(`[keyframes] async complete · ${layerId} · ${readyCount}/${K}`);
-      if (allKeyframesComplete()) {
-        tryMarkSplashBakeReady(true);
-      }
+    }
+    if (!isSplashContentReady()) {
+      tryMarkSplashBakeReady(true);
     }
   });
 }

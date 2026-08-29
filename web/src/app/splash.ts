@@ -1,6 +1,7 @@
 import { setErr } from "./hud.js";
 
-import { allKeyframesComplete, hasActiveKeyframeCaches } from "../model/keyframes.js";
+import { allKeyframesComplete, hasActiveKeyframeCaches, keyframesSplashReady } from "../model/keyframes.js";
+import { startupMark, startupReport } from "./startupProfile.js";
 
 const SPLASH_TIMEOUT_MS = 15_000;
 const SPLASH_EXIT_MS = 400;
@@ -66,6 +67,8 @@ function beginSplashExit(svg: SVGSVGElement) {
 function dismissSplash() {
   if (dismissed) return;
   dismissed = true;
+  startupMark("splash.dismiss");
+  startupReport("splash-dismiss");
   if (timeoutId) {
     clearTimeout(timeoutId);
     timeoutId = 0;
@@ -94,6 +97,7 @@ function splashDebugState(extra: Record<string, unknown> = {}) {
     frameReady,
     keyframeCaches: hasActiveKeyframeCaches(),
     keyframesComplete: allKeyframesComplete(),
+    keyframesSplashReady: keyframesSplashReady(),
     ...extra,
   };
 }
@@ -105,7 +109,7 @@ function tryDismiss() {
   }
 }
 
-/** True once the initial fit (and any keyframe cache) is ready. */
+/** True once the initial scene bake has finished (keyframe fill may still run). */
 export function isSplashContentReady() {
   return contentReady;
 }
@@ -116,20 +120,13 @@ export function getSplashDebugSnapshot() {
 }
 
 /**
- * Gate splash on the first scene bake. When keyframes are building, waits until
- * every frame in the cache is ready so the default animation is fully loaded.
+ * Gate splash on the first scene bake only. Keyframe grid refinement continues
+ * after dismiss (viewport + splash load bars).
  */
-export function tryMarkSplashBakeReady(hasSceneLayers: boolean) {
+export function tryMarkSplashBakeReady(_hasSceneLayers: boolean) {
   if (contentReady) return;
-  if (!hasSceneLayers) {
-    contentReady = true;
-    tryDismiss();
-    return;
-  }
-  if (hasActiveKeyframeCaches() && !allKeyframesComplete()) {
-    return;
-  }
   contentReady = true;
+  startupMark("splash.content-ready");
   tryDismiss();
 }
 
@@ -159,6 +156,7 @@ export function markSplashSidebarReady() {
 export function markSplashFrameReady() {
   if (frameReady) return;
   frameReady = true;
+  startupMark("splash.frame-ready");
   tryDismiss();
 }
 

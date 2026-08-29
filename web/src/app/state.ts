@@ -19,7 +19,7 @@ export const state = {
 
   worldCheb: null as Float32Array | null,
 
-  fitDeg: 20,
+  fitDeg: 32,
   clipDirty: true,
   bakeMsSmooth: 0,
   lastDensSubmitMs: 0,

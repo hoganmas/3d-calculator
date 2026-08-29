@@ -28,19 +28,23 @@ import {
   useGpuClipPath,
   syncClipCpuVolume,
   drawClipGpuFrame,
-  prepareClipGpuForDegree,
+  isVolumePresented,
+  presentSceneAfterGpuReady,
 } from "./webglFallback.js";
+import { scheduleMarchPipelines } from "../render/webgpu/march.js";
 import { uploadFit, tickGpuKeyframeBlends } from "./pipeline.js";
+import { tickKeyframePump } from "../model/keyframes.js";
 import { hudText, refreshMetricsDump } from "./hud.js";
-import { syncClipPresentation } from "./presentation.js";
 import { isSplashContentReady, markSplashFrameReady } from "./splash.js";
+import { startupMark } from "./startupProfile.js";
+import { syncKeyframeLoadBar } from "./keyframeLoadBar.js";
 
 let splashFrameReported = false;
 
 function reportSplashFrameReady() {
   if (splashFrameReported) return;
   if (!isSplashContentReady()) return;
-  // Do not block splash on first GPU volume present — async uploadFit/GPU init may lag or fail.
+  if (!isVolumePresented()) return;
   splashFrameReported = true;
   markSplashFrameReady();
 }
@@ -129,6 +133,11 @@ function frame(rafNow: number) {
 
   const dt = performance.now() - t0;
   state.cpuMsSmooth = state.cpuMsSmooth * 0.85 + dt * 0.15;
+
+  // Keyframe progressive fill runs after draw so animation stays smooth.
+  if (anyParamAnimating()) tickKeyframePump();
+  syncKeyframeLoadBar();
+
   requestAnimationFrame(frame);
 }
 
@@ -145,12 +154,12 @@ export function startRenderLoop() {
     state.clipDirty = true;
   });
 
+  startupMark("boot.render-loop-started");
   requestAnimationFrame(frame);
 
-  void initClipBakeGpu(els.viewport).then(async (ok) => {
-    if (ok && state.worldCheb) await prepareClipGpuForDegree(state.fitDeg);
-    syncClipPresentation();
-    state.clipDirty = true;
+  void initClipBakeGpu(els.viewport, "render-loop").then((ok) => {
+    if (ok) void scheduleMarchPipelines(state.fitDeg);
+    presentSceneAfterGpuReady("render-loop-init");
     if (!useGpuClipPath()) {
       syncClipCpuVolume();
     }
