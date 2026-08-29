@@ -161,6 +161,34 @@ export async function run() {
       },
     },
     {
+      name: "\\partial_x e^{-(x^2+y^2+z^2)} evaluates to -2x e^{-(x^2+y^2+z^2)}",
+      fn: () => {
+        const compiled = compileExpr(String.raw`\partial_x e^{-(x^2+y^2+z^2)}`);
+        assert(compiled.operator === "partial", "expected partial operator");
+        assert(compiled.partialAxis === 0, "expected x axis");
+        const fn = compiled.bind({});
+        const x = 0.3;
+        const y = 0.4;
+        const z = 0.5;
+        const g = Math.exp(-(x * x + y * y + z * z));
+        assertNear(fn(x, y, z), -2 * x * g, 0.05, "partial d/dx of Gaussian");
+      },
+    },
+    {
+      name: "\\frac{\\partial}{\\partial x} e^{-(x^2+y^2+z^2)} evaluates to -2x e^{-(x^2+y^2+z^2)}",
+      fn: () => {
+        const latex = String.raw`\frac{\partial}{\partial x} e^{-(x^2+y^2+z^2)}`;
+        const compiled = compileExpr(latex);
+        assert(compiled.operator === "partial", "expected partial operator");
+        const fn = compiled.bind({});
+        const x = 0.2;
+        const y = 0.3;
+        const z = 0.4;
+        const g = Math.exp(-(x * x + y * y + z * z));
+        assertNear(fn(x, y, z), -2 * x * g, 0.05, "fraction partial of Gaussian");
+      },
+    },
+    {
       name: "spectral partial d/dx of x^2+y^2 on Cheb grid",
       fn: () => {
         const compiled = compileExpr(String.raw`\frac{\partial}{\partial x}(x^2+y^2)`);

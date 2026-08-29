@@ -94,33 +94,61 @@ function partialOpName(axis: ChebAxis): string {
   return PARTIAL_OP_NAMES[axis]!;
 }
 
+function extractUnaryTail(rest: string): string | null {
+  let s = rest.replace(/^\s*\\left\s*/, "").trimStart();
+  if (!s) return null;
+
+  const open = s[0];
+  if (open === "(" || open === "{") {
+    const close = open === "(" ? ")" : "}";
+    let depth = 0;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i]!;
+      if (c === open) depth++;
+      else if (c === close) {
+        depth--;
+        if (depth === 0) return s.slice(1, i).trim();
+      }
+    }
+    return null;
+  }
+
+  return s.trim();
+}
+
+function wrapPartial(axis: ChebAxis, inner: string): string {
+  return `\\operatorname{${partialOpName(axis)}}{${inner.trim()}}`;
+}
+
 /** Normalize partial-derivative LaTeX before nabla→grad rules. */
 export function normalizePartialForms(latex: string): string {
-  let s = String(latex ?? "");
+  let s = String(latex ?? "").trim();
 
-  // \grad_x f → \operatorname{partial_x}{f}
-  s = s.replace(
-    /\\grad\s*_\s*\{?\s*([xyz])\s*\}?\s*(?:\\left)?[\{\(]?\s*([\s\S]+?)\s*(?:\\right)?[\}\)]?\s*$/gi,
-    (_, v, inner) => `\\operatorname{partial_${v.toLowerCase()}}{${inner.trim()}}`,
+  const subscript = s.match(
+    /^\\(?:partial|grad)\s*_\s*\{?\s*([xyz])\s*\}?\s*([\s\S]+)$/i,
   );
+  if (subscript?.[1] && subscript[2]) {
+    const axis = axisFromVar(subscript[1]);
+    const inner = extractUnaryTail(subscript[2]);
+    if (axis != null && inner) return wrapPartial(axis, inner);
+  }
 
-  // \partial_x f → \operatorname{partial_x}{f}
-  s = s.replace(
-    /\\partial\s*_\s*\{?\s*([xyz])\s*\}?\s*(?:\\left)?[\{\(]?\s*([\s\S]+?)\s*(?:\\right)?[\}\)]?\s*$/gi,
-    (_, v, inner) => `\\operatorname{partial_${v.toLowerCase()}}{${inner.trim()}}`,
+  const fracInner = s.match(
+    /^\\frac\s*\{\s*\\partial\s+([\s\S]+?)\s*\}\s*\{\s*\\partial\s*([xyz])\s*\}$/i,
   );
+  if (fracInner?.[1] && fracInner[2]) {
+    const axis = axisFromVar(fracInner[2]);
+    if (axis != null) return wrapPartial(axis, fracInner[1]);
+  }
 
-  // \frac{\partial f}{\partial x} → \operatorname{partial_x}{f}
-  s = s.replace(
-    /\\frac\s*\{\s*\\partial\s+([\s\S]+?)\s*\}\s*\{\s*\\partial\s*([xyz])\s*\}/gi,
-    (_, inner, v) => `\\operatorname{partial_${v.toLowerCase()}}{${inner.trim()}}`,
+  const fracPrefix = s.match(
+    /^\\frac\s*\{\s*\\partial\s*\}\s*\{\s*\\partial\s*([xyz])\s*\}\s*([\s\S]+)$/i,
   );
-
-  // \frac{\partial}{\partial x} f → \operatorname{partial_x}{f}
-  s = s.replace(
-    /\\frac\s*\{\s*\\partial\s*\}\s*\{\s*\\partial\s*([xyz])\s*\}\s*(?:\\left)?[\{\(]?\s*([\s\S]+?)\s*(?:\\right)?[\}\)]?\s*$/gi,
-    (_, v, inner) => `\\operatorname{partial_${v.toLowerCase()}}{${inner.trim()}}`,
-  );
+  if (fracPrefix?.[1] && fracPrefix[2]) {
+    const axis = axisFromVar(fracPrefix[1]);
+    const inner = extractUnaryTail(fracPrefix[2]);
+    if (axis != null && inner) return wrapPartial(axis, inner);
+  }
 
   return s;
 }
@@ -278,12 +306,8 @@ export function looksLikePartial(src: string, json: unknown): PartialMatch | nul
     const fromJson = scalarFromUnaryOpJson(json, op);
     if (fromJson) return { axis, inner: fromJson.trim() };
 
-    const re = new RegExp(
-      `\\\\operatorname\\s*\\{\\s*${op}\\s*\\}\\s*(?:\\\\left)?[\\{\\(]?\\s*([\\s\\S]+?)\\s*(?:\\\\right)?[\\}\\)]?\\s*$`,
-      "i",
-    );
-    const m = src.match(re);
-    if (m?.[1]) return { axis, inner: m[1].trim() };
+    const inner = extractOperatornameArg(src, op);
+    if (inner) return { axis, inner };
   }
 
   // CE Derivative / PartialDerivative fallback
