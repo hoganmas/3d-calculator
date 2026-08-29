@@ -8,7 +8,7 @@ import {
   FLOW_PARTICLE_STRIDE,
   FLOW_TRAIL_SLOT_STRIDE,
   flowTrailBaseIndex,
-  buildFlowParticleDensityGrid,
+  buildFlowParticleDensityGrids,
   FLOW_PARTICLE_DENSITY_GRID,
   MAX_FLOW_TRAIL_STEPS,
   pushFlowTrailHist,
@@ -55,6 +55,28 @@ function destroyBuffer(buf: GPUBuffer | null): void {
   });
 }
 
+/** UI setting: particles seeded per flow layer (total = perLayer × layerCount, capped). */
+export function flowParticlesPerLayerSetting(): number {
+  return Math.max(
+    100,
+    Math.min(
+      MAX_FLOW_PARTICLE_COUNT,
+      state.flowParticleCount | 0 || DEFAULT_FLOW_PARTICLE_COUNT,
+    ),
+  );
+}
+
+export function flowParticleBudget(layerCount: number): { perLayer: number; total: number } {
+  const layers = Math.max(1, layerCount | 0);
+  const perLayer = flowParticlesPerLayerSetting();
+  let total = perLayer * layers;
+  if (total > MAX_FLOW_PARTICLE_COUNT) {
+    const cappedPer = Math.max(100, Math.floor(MAX_FLOW_PARTICLE_COUNT / layers));
+    return { perLayer: cappedPer, total: cappedPer * layers };
+  }
+  return { perLayer, total };
+}
+
 export function destroyFlowParticleBuffers(): void {
   destroyBuffer(gpu.flowParticleBuf);
   destroyBuffer(gpu.flowParticleLayerBuf);
@@ -63,6 +85,7 @@ export function destroyFlowParticleBuffers(): void {
   gpu.flowParticleLayerBuf = null;
   gpu.flowTrailBuf = null;
   gpu.flowParticleCount = 0;
+  gpu.flowParticlesPerLayer = 0;
   posAge = null;
   layerIds = null;
   trailHist = null;
@@ -78,10 +101,7 @@ export function ensureFlowParticleBuffers(layerCount: number, half: number): voi
     return;
   }
 
-  const count = Math.max(
-    100,
-    Math.min(MAX_FLOW_PARTICLE_COUNT, state.flowParticleCount | 0 || DEFAULT_FLOW_PARTICLE_COUNT),
-  );
+  const { perLayer, total: count } = flowParticleBudget(layerCount);
   const steps = trailSteps();
   const posBytes = Math.max(256, Math.ceil((count * FLOW_PARTICLE_STRIDE * 4) / 256) * 256);
   const trailFloats = count * MAX_FLOW_TRAIL_STEPS * FLOW_TRAIL_SLOT_STRIDE;
@@ -93,6 +113,7 @@ export function ensureFlowParticleBuffers(layerCount: number, half: number): voi
     !gpu.flowParticleLayerBuf ||
     !gpu.flowTrailBuf ||
     gpu.flowParticleCount !== count ||
+    gpu.flowParticlesPerLayer !== perLayer ||
     gpu.flowLayerCount !== layerCount ||
     gpu.flowParticleBuf.size < posBytes ||
     gpu.flowTrailBuf.size < trailBytes;
@@ -113,8 +134,9 @@ export function ensureFlowParticleBuffers(layerCount: number, half: number): voi
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
     gpu.flowParticleCount = count;
+    gpu.flowParticlesPerLayer = perLayer;
     const seeded = seedFlowParticles(
-      count,
+      perLayer,
       layerCount,
       half,
       state.flowNoiseScale,
@@ -138,11 +160,21 @@ export function ensureFlowParticleBuffers(layerCount: number, half: number): voi
 
 export function reseedFlowParticles(): void {
   const { device } = gpu;
-  if (!device || !gpu.flowParticleBuf || !gpu.flowParticleLayerBuf || gpu.flowLayerCount <= 0) return;
-  const count = gpu.flowParticleCount;
+  if (!device || gpu.flowLayerCount <= 0) return;
+  const { perLayer, total: count } = flowParticleBudget(gpu.flowLayerCount);
+  if (
+    !gpu.flowParticleBuf ||
+    !gpu.flowParticleLayerBuf ||
+    !gpu.flowTrailBuf ||
+    gpu.flowParticleCount !== count ||
+    gpu.flowParticlesPerLayer !== perLayer
+  ) {
+    ensureFlowParticleBuffers(gpu.flowLayerCount, gpu.flowHalf);
+    return;
+  }
   const steps = trailSteps();
   const seeded = seedFlowParticles(
-    count,
+    perLayer,
     gpu.flowLayerCount,
     gpu.flowHalf,
     state.flowNoiseScale,
@@ -223,7 +255,13 @@ export function tickFlowParticles(
   if (!layers.length) return;
 
   const steps = trailSteps();
-  const density = buildFlowParticleDensityGrid(posAge, gpu.flowParticleCount, gpu.flowHalf);
+  const densityGrids = buildFlowParticleDensityGrids(
+    posAge,
+    layerIds,
+    gpu.flowParticleCount,
+    gpu.flowHalf,
+    gpu.flowLayerCount,
+  );
   advectFlowParticles(
     posAge,
     layerIds,
@@ -241,7 +279,7 @@ export function tickFlowParticles(
     },
     trailHist,
     steps,
-    density,
+    densityGrids,
     FLOW_PARTICLE_DENSITY_GRID,
   );
   redistributeOvercrowdedFlowParticles(
@@ -257,6 +295,7 @@ export function tickFlowParticles(
     FLOW_PARTICLE_DENSITY_GRID,
     layers,
     gpu.sceneM,
+    densityGrids,
   );
   refreshTrailSpeeds(layers, gpu.sceneM, gpu.flowHalf, gpu.flowParticleCount, steps);
   if (trailHist && gpu.flowTrailBuf) {
@@ -381,17 +420,6 @@ function refreshTrailSpeeds(
   }
 }
 
-function flowLayerColorPair(): { col1: [number, number, number]; col2: [number, number, number] } {
-  const li = gpu.flowLayerStart;
-  const stops = li >= 0 ? gpu.densGradStops[li] : null;
-  if (stops?.length) {
-    const c1 = stops[0]!;
-    const c2 = stops[stops.length - 1]!;
-    return { col1: c1, col2: c2 };
-  }
-  return { col1: [1, 0.4, 0.1], col2: [1, 0.92, 0] };
-}
-
 function packFlowParticleParams(
   viewProj: Float32Array,
   ro: [number, number, number],
@@ -406,7 +434,6 @@ function packFlowParticleParams(
   const segCount = Math.max(1, steps - 1);
   const f = new Float32Array(64);
   const u = new Uint32Array(f.buffer);
-  const { col1, col2 } = flowLayerColorPair();
   f.set(viewProj, 0);
   f[16] = ro[0]; f[17] = ro[1]; f[18] = ro[2]; f[19] = half;
   f[20] = dirMatrix[0]; f[21] = dirMatrix[1]; f[22] = dirMatrix[2];
@@ -431,9 +458,6 @@ function packFlowParticleParams(
   f[46] = (2 * Math.tan(fovRad / 2)) / Math.max(fbH, 1);
   u[47] = gpu.sceneM >>> 0;
   f[48] = gpu.flowVelBase;
-  // vec3 flowCol1 @ byte offset 208 (std140 padding after f[48])
-  f[52] = col1[0]; f[53] = col1[1]; f[54] = col1[2];
-  f[56] = col2[0]; f[57] = col2[1]; f[58] = col2[2];
   return f;
 }
 
@@ -463,6 +487,7 @@ function recordRibbonDraw(
     entries: [
       { binding: 0, resource: { buffer: gpu.flowParticlesParamBuf! } },
       { binding: 2, resource: { buffer: gpu.flowParticleLayerBuf! } },
+      { binding: 3, resource: { buffer: gpu.colorBuf! } },
       { binding: 4, resource: occlIsoView },
       { binding: 5, resource: { buffer: gpu.flowTrailBuf! } },
     ],
@@ -490,7 +515,7 @@ export function drawFlowParticlesPass(
 ): void {
   if (state.flowVizMode !== "particles") return;
   if (!gpu.flowParticlesPipeline || !gpu.flowParticlesParamBuf) return;
-  if (!gpu.flowParticleBuf || !gpu.flowParticleLayerBuf || !gpu.flowTrailBuf) return;
+  if (!gpu.flowParticleBuf || !gpu.flowParticleLayerBuf || !gpu.flowTrailBuf || !gpu.colorBuf) return;
   if (gpu.flowParticleCount <= 0) return;
 
   const { device } = gpu;

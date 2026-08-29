@@ -117,7 +117,10 @@ export interface GpuState {
   flowParticleBuf: GPUBuffer | null;
   flowParticleLayerBuf: GPUBuffer | null;
   flowTrailBuf: GPUBuffer | null;
+  /** Total instanced particles in GPU buffers. */
   flowParticleCount: number;
+  /** Particles allocated per flow expression (count ≈ perLayer × flowLayerCount). */
+  flowParticlesPerLayer: number;
   /** Minimal storage buffer so Beer binding 4 is always valid. */
   flowDyeDummy: GPUBuffer | null;
 }
@@ -211,10 +214,11 @@ export const gpu: GpuState = {
   flowParticleLayerBuf: null,
   flowTrailBuf: null,
   flowParticleCount: 0,
+  flowParticlesPerLayer: 0,
   flowDyeDummy: null,
 };
 
-export const PIPELINE_EPOCH = 73;
+export const PIPELINE_EPOCH = 74;
 export const labelVertScratch = new Float32Array(18 * 6);
 
 export function resetPipelinesOnDeviceLost(): void {
@@ -226,6 +230,7 @@ export function resetPipelinesOnDeviceLost(): void {
   gpu.flowParticlesParamBuf = null;
   gpu.flowParticleBuf = gpu.flowParticleLayerBuf = gpu.flowTrailBuf = null;
   gpu.flowParticleCount = 0;
+  gpu.flowParticlesPerLayer = 0;
   gpu.flowDyeBufA = gpu.flowDyeBufB = null;
   gpu.labelAtlasTex = gpu.labelAtlasSamp = null;
   gpu.labelVertexBuf = null;

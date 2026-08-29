@@ -908,20 +908,22 @@ function hash01(a: number, b: number, c: number): number {
   return x - Math.floor(x);
 }
 
-/** Seed particles on grid injection mask (lines or points). */
+/** Seed `perLayer` particles for each flow layer (`perLayer × layers` total). */
 export function seedFlowParticles(
-  count: number,
+  perLayer: number,
   layers: number,
   half: number,
   gridSpacing: number,
   points: boolean,
 ): { posAge: Float32Array; layerIds: Uint32Array } {
+  const layerCount = Math.max(1, layers | 0);
+  const quota = Math.max(1, perLayer | 0);
+  const count = quota * layerCount;
   const posAge = new Float32Array(count * FLOW_PARTICLE_STRIDE);
   const layerIds = new Uint32Array(count);
-  const perLayer = Math.max(1, Math.floor(count / Math.max(1, layers)));
   let n = 0;
-  for (let layer = 0; layer < layers && n < count; layer++) {
-    const target = layer === layers - 1 ? count - n : perLayer;
+  for (let layer = 0; layer < layerCount && n < count; layer++) {
+    const target = quota;
     let placed = 0;
     let tries = 0;
     while (placed < target && n < count && tries < target * 40) {
@@ -1003,6 +1005,39 @@ export function buildFlowParticleDensityGrid(
     if (cells[ci]! < 65535) cells[ci] = (cells[ci]! + 1) as number;
   }
   return cells;
+}
+
+/** Per-flow-layer occupancy (spawn/redistribute stay layer-local). */
+export function buildFlowParticleDensityGrids(
+  posAge: Float32Array,
+  layerIds: Uint32Array,
+  count: number,
+  half: number,
+  layerCount: number,
+  res = FLOW_PARTICLE_DENSITY_GRID,
+): Uint16Array[] {
+  const grids: Uint16Array[] = [];
+  for (let L = 0; L < layerCount; L++) {
+    grids.push(new Uint16Array(res * res * res));
+  }
+  for (let i = 0; i < count; i++) {
+    const layer = layerIds[i]!;
+    if (layer < 0 || layer >= layerCount) continue;
+    const o = i * FLOW_PARTICLE_STRIDE;
+    const ci = flowParticleCellIndex(posAge[o]!, posAge[o + 1]!, posAge[o + 2]!, half, res);
+    const grid = grids[layer]!;
+    if (grid[ci]! < 65535) grid[ci] = (grid[ci]! + 1) as number;
+  }
+  return grids;
+}
+
+function flowParticleDensityForLayer(
+  density: Uint16Array | Uint16Array[] | null | undefined,
+  layer: number,
+): Uint16Array | null {
+  if (!density) return null;
+  if (Array.isArray(density)) return density[layer] ?? null;
+  return density;
 }
 
 function randomGridPointInCell(
@@ -1093,27 +1128,31 @@ export function redistributeOvercrowdedFlowParticles(
   res = FLOW_PARTICLE_DENSITY_GRID,
   layers: FlowParticleLayerVel[] | null = null,
   gridM = 0,
+  densityGrids: Uint16Array | Uint16Array[] | null = null,
 ): void {
-  const density = buildFlowParticleDensityGrid(posAge, count, half, res);
+  const density = densityGrids ?? buildFlowParticleDensityGrid(posAge, count, half, res);
   const cellCount = res * res * res;
-  const mean = count / Math.max(cellCount, 1);
+  const layerCount = Array.isArray(density) ? density.length : 1;
+  const mean = (count / Math.max(layerCount, 1)) / Math.max(cellCount, 1);
   const threshold = Math.max(4, Math.ceil(mean * 2.5));
   for (let i = 0; i < count; i++) {
     const o = i * FLOW_PARTICLE_STRIDE;
     const ci = flowParticleCellIndex(posAge[o]!, posAge[o + 1]!, posAge[o + 2]!, half, res);
-    if (density[ci]! <= threshold) continue;
     const layer = layerIds[i]!;
+    const layerDensity = flowParticleDensityForLayer(density, layer);
+    const grid = layerDensity ?? (!Array.isArray(density) ? density : null);
+    if (!grid || grid[ci]! <= threshold) continue;
     const picked = pickLowDensitySpawn(
-      density, res, half, i, layer, frameIdx, gridSpacing, gridPoints,
+      grid, res, half, i, layer, frameIdx, gridSpacing, gridPoints,
     );
     if (!picked) continue;
     const speed = layers?.length && gridM > 0
       ? sampleFlowParticleSpeedAt(layers, layer, gridM, half, picked[0], picked[1], picked[2])
       : 0;
     applyParticleSpawn(posAge, i, picked[0], picked[1], picked[2], trailHist, trailSteps, speed);
-    density[ci] = Math.max(0, density[ci]! - 1) as number;
+    if (grid[ci]! > 0) grid[ci] = (grid[ci]! - 1) as number;
     const ni = flowParticleCellIndex(picked[0], picked[1], picked[2], half, res);
-    if (density[ni]! < 65535) density[ni] = (density[ni]! + 1) as number;
+    if (grid[ni]! < 65535) grid[ni] = (grid[ni]! + 1) as number;
   }
 }
 
@@ -1259,7 +1298,7 @@ export function advectFlowParticles(
   params: FlowParticleAdvectParams,
   trailHist: Float32Array | null = null,
   trailSteps = 0,
-  density: Uint16Array | null = null,
+  density: Uint16Array | Uint16Array[] | null = null,
   densityRes = FLOW_PARTICLE_DENSITY_GRID,
 ): void {
   const { dt, vMax, half, alpha, gridSpacing, gridPoints, ageMax, frameIdx } = params;
@@ -1268,6 +1307,7 @@ export function advectFlowParticles(
     const layer = layerIds[i]!;
     const vel = layers[layer];
     if (!vel) continue;
+    const layerDensity = flowParticleDensityForLayer(density, layer);
     const o = i * FLOW_PARTICLE_STRIDE;
     let px = posAge[o]!;
     let py = posAge[o + 1]!;
@@ -1281,7 +1321,7 @@ export function advectFlowParticles(
     if (expired || stuck) {
       respawnParticle(
         posAge, i, layer, half, gridSpacing, gridPoints, frameIdx,
-        trailHist, trailSteps, density, densityRes, layers, M,
+        trailHist, trailSteps, layerDensity, densityRes, layers, M,
       );
       continue;
     }
@@ -1292,7 +1332,7 @@ export function advectFlowParticles(
     if (alpha > 1e-6 && hash01(i, frameIdx, 919) < alpha) {
       respawnParticle(
         posAge, i, layer, half, gridSpacing, gridPoints, frameIdx,
-        trailHist, trailSteps, density, densityRes, layers, M,
+        trailHist, trailSteps, layerDensity, densityRes, layers, M,
       );
       continue;
     }

@@ -30,16 +30,35 @@ struct FlowParticleParams {
 
 @group(0) @binding(0) var<uniform> u: FlowParticleParams;
 @group(0) @binding(2) var<storage, read> particleLayers: array<u32>;
+@group(0) @binding(3) var<storage, read> layerGrads: array<vec4f>;
 @group(0) @binding(4) var occlTex: texture_2d<f32>;
 @group(0) @binding(5) var<storage, read> trailHist: array<f32>;
 
+const MAX_GRAD_STOPS: u32 = {{MAX_GRAD_STOPS}}u;
 const MAX_TRAIL_STEPS: u32 = {{MAX_FLOW_TRAIL_STEPS}}u;
 const TRAIL_STRIDE: u32 = 5u;
 
-fn speedColor(speed: f32) -> vec3f {
+fn sampleGradStopsLayer(layer: u32, t: f32) -> vec3f {
+  let base = layer * MAX_GRAD_STOPS;
+  var stops: array<vec4f, MAX_GRAD_STOPS>;
+  for (var i: u32 = 0u; i < MAX_GRAD_STOPS; i++) {
+    stops[i] = layerGrads[base + i];
+  }
+  let n = max(min(u32(stops[0].w), MAX_GRAD_STOPS), 1u);
+  if (n <= 1u) { return stops[0].xyz; }
+  let x = clamp(t, 0.0, 1.0) * f32(n - 1u);
+  let i = min(u32(floor(x)), n - 2u);
+  let f = fract(x);
+  return mix(stops[i].xyz, stops[i + 1u].xyz, f);
+}
+
+fn speedColor(speed: f32, flowIdx: u32) -> vec3f {
+  let densLayer = u32(max(u.flowLayerStart, 0.0)) + flowIdx;
+  let col1 = sampleGradStopsLayer(densLayer, 0.0);
+  let col2 = sampleGradStopsLayer(densLayer, 1.0);
   let vSpan = max(u.flowVMax - u.flowVMin, max(u.flowVMax, 1e-6) * 0.08);
   let speedNorm = clamp((speed - u.flowVMin) / vSpan, 0.0, 1.0);
-  return mix(u.flowCol1, u.flowCol2, speedNorm);
+  return mix(col1, col2, speedNorm);
 }
 
 fn trailSlotBase(pIdx: u32, slot: u32) -> u32 {
@@ -171,9 +190,8 @@ fn vsMain(
   let spdNew = trailSpeed(pIdx, slotNew);
   let spdOld = trailSpeed(pIdx, slotOld);
   let spd = mix(spdNew, spdOld, tAlong);
-  let rgb = speedColor(spd);
-  let alpha = u.flowOpacity * max(ribbonAlphaEnvelope(ribbonPos), widthMix * 0.15) * boxFade(world)
-    * (1.0 + f32(flowIdx) * 0.0);
+  let rgb = speedColor(spd, flowIdx);
+  let alpha = u.flowOpacity * max(ribbonAlphaEnvelope(ribbonPos), widthMix * 0.15) * boxFade(world);
 
   o.clip = clipPos;
   o.world = worldOffset;

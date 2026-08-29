@@ -586,7 +586,10 @@ export function wirePipelineDom() {
   });
   els.flowParticleCount?.addEventListener("change", () => {
     state.flowParticleCount = Math.max(100, Math.min(32000, Number(els.flowParticleCount!.value) || 1000));
-    if (state.lastSceneBake?.flowLayers?.length) state.clipDirty = true;
+    if (state.lastSceneBake?.flowLayers?.length) {
+      state.clipDirty = true;
+      reseedFlowParticles();
+    }
     autosave();
   });
   els.flowGridMode?.addEventListener("change", () => {

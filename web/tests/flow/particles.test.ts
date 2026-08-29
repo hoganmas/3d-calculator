@@ -1,6 +1,7 @@
 import {
   advectFlowParticles,
   buildFlowParticleDensityGrid,
+  buildFlowParticleDensityGrids,
   FLOW_PARTICLE_DENSITY_GRID,
   FLOW_PARTICLE_STRIDE,
   flowParticleSpeedMinMax,
@@ -21,6 +22,22 @@ import { runSuite } from "../helpers/runner.ts";
 
 export async function run() {
   return runSuite("flow / particles", [
+    {
+      name: "seedFlowParticles allocates per flow layer",
+      fn: () => {
+        const { posAge, layerIds } = seedFlowParticles(10, 2, 1, 0.4, false);
+        assert(posAge.length === 10 * 2 * FLOW_PARTICLE_STRIDE, "total buffer size");
+        assert(layerIds.length === 20, "20 particles for 2 layers");
+        let n0 = 0;
+        let n1 = 0;
+        for (let i = 0; i < layerIds.length; i++) {
+          if (layerIds[i] === 0) n0++;
+          if (layerIds[i] === 1) n1++;
+        }
+        assert(n0 === 10, "10 particles on layer 0");
+        assert(n1 === 10, "10 particles on layer 1");
+      },
+    },
     {
       name: "seedFlowParticles places particles on grid mask",
       fn: () => {
@@ -227,6 +244,29 @@ export async function run() {
         const [lo, hi] = resolveFlowParticleColorRange(trailHist, 1, 2, 60, [0.5, 4]);
         assert(Math.abs(lo - 0.5) < 1e-6, "field lo");
         assert(Math.abs(hi - 4) < 1e-6, "field hi");
+      },
+    },
+    {
+      name: "buildFlowParticleDensityGrids are layer-local",
+      fn: () => {
+        const count = 4;
+        const posAge = new Float32Array(count * FLOW_PARTICLE_STRIDE);
+        const layerIds = new Uint32Array([0, 0, 1, 1]);
+        for (let i = 0; i < count; i++) {
+          const o = i * FLOW_PARTICLE_STRIDE;
+          posAge[o] = i < 2 ? -0.5 : 0.5;
+          posAge[o + 1] = 0;
+          posAge[o + 2] = 0;
+        }
+        const grids = buildFlowParticleDensityGrids(posAge, layerIds, count, 1, 2);
+        assert(grids.length === 2, "one grid per layer");
+        const sum = (g: Uint16Array) => {
+          let s = 0;
+          for (let i = 0; i < g.length; i++) s += g[i]!;
+          return s;
+        };
+        assert(sum(grids[0]!) === 2, "layer 0 has two particles");
+        assert(sum(grids[1]!) === 2, "layer 1 has two particles");
       },
     },
     {
