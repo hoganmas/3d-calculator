@@ -24,7 +24,6 @@ export function getClipGpuProfile(): ClipGpuProfile {
     method: gpu.profileMethod,
     gridM: gpu.profileGridM,
     timestamps: gpu.timestampsSupported,
-    isoInterp: gpu.isoInterpHermite ? "hermite" : "trilinear",
   };
 }
 

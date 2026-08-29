@@ -12,10 +12,6 @@ import { syncMarchSlider } from "../presentation.js";
 import { camera, controls } from "../scene.js";
 import { state } from "../state.js";
 import {
-  resetClipGpuProfile,
-  setIsoInterpHermite,
-} from "../../render/webgpu/march.js";
-import {
   bumpDocumentRevision,
   getDocumentRevision,
   setDocumentRevision,
@@ -108,7 +104,6 @@ export function getRenderSettingsSnapshot(): LaplacianRenderSnapshot {
     steps: Number(els.steps.value),
     boxSize: Number(els.boxSize.value),
     marchDownscale: Number(els.marchDownscale.value),
-    isoInterp: els.isoInterp?.value ?? "trilinear",
     preset: els.preset.value,
   };
 }
@@ -194,7 +189,6 @@ function syncRenderDom(render: LaplacianRenderSnapshot) {
   els.steps.value = String(Math.round(render.steps));
   els.boxSize.value = String(render.boxSize);
   els.marchDownscale.value = String(Math.round(render.marchDownscale));
-  if (els.isoInterp) els.isoInterp.value = render.isoInterp === "hermite" ? "hermite" : "trilinear";
   els.preset.value = render.preset in PRESETS ? render.preset : "sincos";
   syncMarchSlider();
   applyRenderHyperparams();
@@ -244,11 +238,6 @@ export async function applyDocument(doc: LaplacianDocument) {
       camera.position.set(doc.camera.position[0], doc.camera.position[1], doc.camera.position[2]);
       controls.target.set(doc.camera.target[0], doc.camera.target[1], doc.camera.target[2]);
       controls.update();
-      state.clipDirty = true;
-    }
-    const hermite = doc.render.isoInterp === "hermite";
-    if (setIsoInterpHermite(hermite)) {
-      resetClipGpuProfile();
       state.clipDirty = true;
     }
     syncExprCompileState();

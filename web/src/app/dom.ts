@@ -21,7 +21,6 @@ export interface DomElements {
   scale: HTMLInputElement;
   steps: HTMLInputElement;
   boxSize: HTMLInputElement;
-  isoInterp: HTMLSelectElement;
   marchDownscale: HTMLInputElement;
   marchScaleLabel: HTMLElement | null;
   reset: HTMLButtonElement;
@@ -61,7 +60,6 @@ export const els: DomElements = {
   scale: el("scale"),
   steps: el("steps"),
   boxSize: el("boxSize"),
-  isoInterp: el("isoInterp"),
   marchDownscale: el("marchDownscale"),
   marchScaleLabel: document.getElementById("marchScaleLabel"),
   reset: el("reset"),

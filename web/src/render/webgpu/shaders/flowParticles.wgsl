@@ -14,7 +14,7 @@ struct FlowParticleParams {
   particleCount: u32,
   trailSteps: u32,
   trailSegCount: u32,
-  _pad1: u32,
+  segStride: u32,
   trailWidth: f32,
   flowVMin: f32,
   flowVMax: f32,
@@ -33,6 +33,7 @@ struct FlowParticleParams {
 @group(0) @binding(3) var<storage, read> layerGrads: array<vec4f>;
 @group(0) @binding(4) var occlTex: texture_2d<f32>;
 @group(0) @binding(5) var<storage, read> trailHist: array<f32>;
+@group(0) @binding(6) var<storage, read> sortOrder: array<u32>;
 
 const MAX_GRAD_STOPS: u32 = {{MAX_GRAD_STOPS}}u;
 const MAX_TRAIL_STEPS: u32 = {{MAX_FLOW_TRAIL_STEPS}}u;
@@ -152,16 +153,20 @@ fn vsMain(
 
   if (pIdx >= u.particleCount) { return o; }
 
+  let particleIdx = sortOrder[pIdx];
+  if (particleIdx >= u.particleCount) { return o; }
+
   let segCount = max(u.trailSegCount, 1u);
   let seg = vi / 6u;
   if (seg >= segCount) { return o; }
 
-  let slotNew = seg;
-  let slotOld = seg + 1u;
+  let stride = max(u.segStride, 1u);
+  let slotNew = seg * stride;
+  let slotOld = slotNew + stride;
   if (slotOld >= u.trailSteps) { return o; }
 
-  let pNew = trailPosAge(pIdx, slotNew);
-  let pOld = trailPosAge(pIdx, slotOld);
+  let pNew = trailPosAge(particleIdx, slotNew);
+  let pOld = trailPosAge(particleIdx, slotOld);
   let segLen = length(pNew.xyz - pOld.xyz);
   if (segLen < 1e-5 || segLen > u.maxSegLen) { return o; }
 
@@ -186,9 +191,9 @@ fn vsMain(
   let worldOffset = world + side * (tSide * halfW);
   let clipPos = u.viewProj * vec4f(worldOffset, 1.0);
 
-  let flowIdx = particleLayers[pIdx];
-  let spdNew = trailSpeed(pIdx, slotNew);
-  let spdOld = trailSpeed(pIdx, slotOld);
+  let flowIdx = particleLayers[particleIdx];
+  let spdNew = trailSpeed(particleIdx, slotNew);
+  let spdOld = trailSpeed(particleIdx, slotOld);
   let spd = mix(spdNew, spdOld, tAlong);
   let rgb = speedColor(spd, flowIdx);
   let alpha = u.flowOpacity * max(ribbonAlphaEnvelope(ribbonPos), widthMix * 0.15) * boxFade(world);

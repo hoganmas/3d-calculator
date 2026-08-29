@@ -1,19 +1,6 @@
 import { gpu } from "./gpuState.js";
 import { hasFlowGpuLayers } from "./flowGpu.js";
 
-export function getIsoInterpHermite(): boolean {
-  return gpu.isoInterpHermite;
-}
-
-/** @returns true if the mode changed (iso pipeline must rebuild) */
-export function setIsoInterpHermite(on: boolean): boolean {
-  const next = !!on;
-  if (next === gpu.isoInterpHermite) return false;
-  gpu.isoInterpHermite = next;
-  gpu.isoPipeline = null;
-  return true;
-}
-
 export function isClipBakeGpuReady(): boolean {
   return Boolean(
     gpu.device && gpu.isoPipeline && gpu.beerPipeline && gpu.fxaaPipeline && gpu.ssaoPipeline &&

@@ -98,7 +98,6 @@ export interface GpuState {
   profileMethod: string;
   profileGridM: number;
   builtEpoch: number;
-  isoInterpHermite: boolean;
   flowGridM: number;
   flowHalf: number;
   /** First Beer layer index that is a flow layer. */
@@ -116,6 +115,7 @@ export interface GpuState {
   flowParticlesParamBuf: GPUBuffer | null;
   flowParticleBuf: GPUBuffer | null;
   flowParticleLayerBuf: GPUBuffer | null;
+  flowParticleSortBuf: GPUBuffer | null;
   flowTrailBuf: GPUBuffer | null;
   /** Total instanced particles in GPU buffers. */
   flowParticleCount: number;
@@ -196,7 +196,6 @@ export const gpu: GpuState = {
   profileMethod: "",
   profileGridM: 0,
   builtEpoch: -1,
-  isoInterpHermite: true,
   flowGridM: 0,
   flowHalf: 2.5,
   flowLayerStart: -1,
@@ -212,13 +211,14 @@ export const gpu: GpuState = {
   flowParticlesParamBuf: null,
   flowParticleBuf: null,
   flowParticleLayerBuf: null,
+  flowParticleSortBuf: null,
   flowTrailBuf: null,
   flowParticleCount: 0,
   flowParticlesPerLayer: 0,
   flowDyeDummy: null,
 };
 
-export const PIPELINE_EPOCH = 74;
+export const PIPELINE_EPOCH = 76;
 export const labelVertScratch = new Float32Array(18 * 6);
 
 export function resetPipelinesOnDeviceLost(): void {
@@ -228,7 +228,7 @@ export function resetPipelinesOnDeviceLost(): void {
   gpu.flowIbfvParamBuf = null;
   gpu.flowParticlesPipeline = null;
   gpu.flowParticlesParamBuf = null;
-  gpu.flowParticleBuf = gpu.flowParticleLayerBuf = gpu.flowTrailBuf = null;
+  gpu.flowParticleBuf = gpu.flowParticleLayerBuf = gpu.flowParticleSortBuf = gpu.flowTrailBuf = null;
   gpu.flowParticleCount = 0;
   gpu.flowParticlesPerLayer = 0;
   gpu.flowDyeBufA = gpu.flowDyeBufB = null;

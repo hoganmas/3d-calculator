@@ -19,8 +19,6 @@ export type {
 } from "./marchTypes.js";
 
 export {
-  getIsoInterpHermite,
-  setIsoInterpHermite,
   isClipBakeGpuReady,
   isClipMarchReady,
 } from "./marchReadiness.js";

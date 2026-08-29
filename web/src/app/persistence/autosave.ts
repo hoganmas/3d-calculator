@@ -124,7 +124,6 @@ export function initAutosave() {
   bindInput(els.steps);
   bindInput(els.boxSize);
   bindInput(els.marchDownscale);
-  bindInput(els.isoInterp);
   bindInput(els.preset);
   bindInput(els.flowAlpha);
   bindInput(els.flowGridMode);

@@ -23,8 +23,6 @@ import {
   uploadSceneColors,
   setConstraintKeyframeBlends,
   patchConstraintKeyframeFrame,
-  resetClipGpuProfile,
-  setIsoInterpHermite,
 } from "../render/webgpu/march.js";
 import { reseedFlowDyeBuffers } from "../render/webgpu/flowIbfv.js";
 import { reseedFlowParticles } from "../render/webgpu/flowParticles.js";
@@ -567,15 +565,6 @@ export function wirePipelineDom() {
   });
   els.marchDownscale.addEventListener("input", autosave);
   els.marchDownscale.addEventListener("change", autosave);
-  els.isoInterp?.addEventListener("change", async () => {
-    const hermite = els.isoInterp.value === "hermite";
-    if (!setIsoInterpHermite(hermite)) return;
-    resetClipGpuProfile();
-    state.clipDirty = true;
-    await prepareClipGpuForDegree(state.fitDeg || Number(els.deg.value) || 23);
-    refreshMetricsDump();
-    autosave();
-  });
   els.flowAlpha?.addEventListener("input", () => {
     state.flowAlpha = Math.max(0, Math.min(1, Number(els.flowAlpha!.value) || 0));
     autosave();
