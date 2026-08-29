@@ -7,6 +7,7 @@ import {
   getParam,
   recompileAllParams,
   evalParamEquations,
+  ensureParamAnimationFromExprs,
 } from "../model/params.js";
 import { SymbolRegistry, type SymbolEntry } from "../model/symbols.js";
 import {
@@ -351,6 +352,7 @@ export function applyPreset(key: string) {
   } catch {
     /* uploadFit / syncExprCompileState will surface errors */
   }
+  ensureParamAnimationFromExprs();
   state.exprListApi?.render();
 }
 
@@ -380,6 +382,11 @@ export function layerRgbFromItem(item: ExprItem) {
 export function initCompile() {
   applyPreset("sincos");
   if (!listExpressions().length) {
-    setExpressions([{ latex: PRESETS.sincos.latex ?? "" }]);
+    const p = PRESETS.sincos;
+    if (Array.isArray(p.expressions) && p.expressions.length) {
+      setExpressions(p.expressions);
+    } else {
+      setExpressions([{ latex: p.latex ?? "" }]);
+    }
   }
 }

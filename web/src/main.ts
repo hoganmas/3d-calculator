@@ -4,7 +4,7 @@ import "./ui/theme.css";
 import { initTheme } from "./ui/theme.js";
 import { mountExprList } from "./ui/expr-sidebar/mount.js";
 import { setExpressionsOnChange } from "./model/expressions.js";
-import { anyParamAnimating } from "./model/params.js";
+import { anyParamAnimating, ensureParamAnimationFromExprs } from "./model/params.js";
 import { syncExprCompileState } from "./app/hud.js";
 import { initDom, els, initPanelResize, initPanelToggle } from "./app/dom.js";
 import { initScene, bindClipUniforms, controls, camera } from "./app/scene.js";
@@ -113,10 +113,11 @@ async function bootstrap() {
 
   const restored = await restoreAutosave();
   if (!restored) initCompile();
+  ensureParamAnimationFromExprs();
   state.exprListApi?.render();
   requestAnimationFrame(() => markSplashSidebarReady());
 
-  uploadFit();
+  uploadFit({ fromAnim: anyParamAnimating() });
 }
 
 function initProjectActions() {

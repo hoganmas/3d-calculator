@@ -1267,8 +1267,34 @@ export function compileExpr(
 /** Preset densities as LaTeX (shown in the MathLive field). */
 export const PRESETS: Record<string, PresetDef> = {
   sincos: {
-    label: "y = sin(x) cos(x)",
-    latex: String.raw`y=\sin(x)\cos(z)`,
+    label: "y = sin(x + 2πt) cos(z)",
+    expressions: [
+      {
+        latex: "t=0",
+        autoParam: true,
+        sliderMin: 0,
+        sliderMax: 1,
+        sliderSpeed: 0.12,
+        sliderAnimating: true,
+        sliderAnimMode: "loop",
+        sliderPhase: 0,
+      },
+      {
+        latex: String.raw`y=\sin\left(x+2\pi t\right)\cos\left(z\right)`,
+      },
+    ],
+    params: {
+      t: {
+        value: 0,
+        min: 0,
+        max: 1,
+        animate: true,
+        animating: true,
+        speed: 0.12,
+        animMode: "loop",
+        phase: 0,
+      },
+    },
   },
   blob: {
     label: "Gaussian blob",
