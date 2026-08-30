@@ -3,7 +3,43 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>laplaci</title>
+    <title>Laplaci — 3D Polynomial Calculator</title>
+    <meta
+      name="description"
+      content="Laplaci is a browser-based 3D polynomial calculator. Enter math expressions, fit Chebyshev polynomials, and ray-march isosurfaces and density clouds with WebGPU."
+    />
+    <meta name="theme-color" content="#1a1228" />
+    <link rel="canonical" href="https://laplaci.com/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://laplaci.com/" />
+    <meta property="og:title" content="Laplaci — 3D Polynomial Calculator" />
+    <meta
+      property="og:description"
+      content="Enter math expressions and visualize 3D manifolds and density clouds in the browser with WebGPU."
+    />
+    <meta property="og:image" content="https://laplaci.com/og-image.svg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Laplaci — 3D Polynomial Calculator" />
+    <meta
+      name="twitter:description"
+      content="Enter math expressions and visualize 3D manifolds and density clouds in the browser with WebGPU."
+    />
+    <meta name="twitter:image" content="https://laplaci.com/og-image.svg" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Laplaci",
+        "url": "https://laplaci.com/",
+        "description": "Multi-expression 3D polynomial calculator with Chebyshev fit and WebGPU ray marching.",
+        "applicationCategory": "DesignApplication",
+        "operatingSystem": "Any",
+        "browserRequirements": "Requires WebGPU or WebGL",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      }
+    </script>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/src/ui/theme.css" />
     <link rel="stylesheet" href="/src/ui/splash.css" />
@@ -24,6 +60,13 @@
     <link rel="stylesheet" href="/src/ui/app.css" />
   </head>
   <body>
+    <noscript>
+      <p>
+        Laplaci is a browser-based 3D polynomial calculator. Enter mathematical expressions to
+        visualize isosurfaces and density clouds using Chebyshev polynomial fitting and WebGPU ray
+        marching. JavaScript is required to run the app.
+      </p>
+    </noscript>
     <div id="splash" role="status" aria-live="polite" aria-busy="true">
       <div class="splash-card">
         <object
