@@ -194,6 +194,19 @@
               <path stroke-linecap="round" d="M8 4v16M16 4v16" />
             </svg>
           </button>
+          <button
+            id="shareLink"
+            class="icon-btn has-tooltip"
+            type="button"
+            aria-label="Share link"
+            data-tooltip="Share link"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v9" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="m8 8 4-4 4 4" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="M5 14v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" />
+            </svg>
+          </button>
         </div>
         <div id="kfLoadBar" class="kf-load-bar" hidden aria-hidden="true">
           <div
@@ -336,17 +349,7 @@
             </div>
           </section>
 
-          <section class="settings-section project-section">
-            <p class="settings-section-title">Project</p>
-            <div class="project-actions">
-              <button id="downloadScene" class="secondary" type="button">Download</button>
-              <button id="openScene" class="secondary" type="button">Open</button>
-              <button id="copyExprLink" class="secondary" type="button">Copy link</button>
-              <button id="shareScene" class="secondary" type="button">Share</button>
-              <input id="sceneFileInput" type="file" accept=".json,.lap.json,application/json" hidden />
-            </div>
-            <p id="autosaveStatus" class="autosave-status" data-state="saved" aria-live="polite">Saved</p>
-          </section>
+          <p id="autosaveStatus" class="autosave-status" data-state="saved" aria-live="polite">Saved</p>
 
           <section class="settings-section settings-dev-only">
             <details class="metrics-block" open>

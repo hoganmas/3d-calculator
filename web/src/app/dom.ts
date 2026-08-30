@@ -24,6 +24,7 @@ export interface DomElements {
   boundsSizeLabel: HTMLElement | null;
   marchDownscale: HTMLInputElement;
   toggleGridAxes: HTMLButtonElement | null;
+  shareLink: HTMLButtonElement | null;
   marchScaleLabel: HTMLElement | null;
   reset: HTMLButtonElement;
   togglePanel: HTMLButtonElement | null;
@@ -44,11 +45,6 @@ export interface DomElements {
   flowParticleCount: HTMLInputElement | null;
   flowTrailSteps: HTMLInputElement | null;
   flowTrailWidth: HTMLInputElement | null;
-  downloadScene: HTMLButtonElement | null;
-  openScene: HTMLButtonElement | null;
-  copyExprLink: HTMLButtonElement | null;
-  shareScene: HTMLButtonElement | null;
-  sceneFileInput: HTMLInputElement | null;
   autosaveStatus: HTMLElement | null;
   autosaveStatusBar: HTMLElement | null;
   scalarQuality: HTMLInputElement | null;
@@ -67,6 +63,7 @@ export const els: DomElements = {
   boundsSizeLabel: document.getElementById("boundsSizeLabel"),
   marchDownscale: el("marchDownscale"),
   toggleGridAxes: document.getElementById("toggleGridAxes") as HTMLButtonElement | null,
+  shareLink: document.getElementById("shareLink") as HTMLButtonElement | null,
   marchScaleLabel: document.getElementById("marchScaleLabel"),
   reset: el("reset"),
   togglePanel: document.getElementById("togglePanel") as HTMLButtonElement | null,
@@ -87,11 +84,6 @@ export const els: DomElements = {
   flowParticleCount: document.getElementById("flowParticleCount") as HTMLInputElement | null,
   flowTrailSteps: document.getElementById("flowTrailSteps") as HTMLInputElement | null,
   flowTrailWidth: document.getElementById("flowTrailWidth") as HTMLInputElement | null,
-  downloadScene: document.getElementById("downloadScene") as HTMLButtonElement | null,
-  openScene: document.getElementById("openScene") as HTMLButtonElement | null,
-  copyExprLink: document.getElementById("copyExprLink") as HTMLButtonElement | null,
-  shareScene: document.getElementById("shareScene") as HTMLButtonElement | null,
-  sceneFileInput: document.getElementById("sceneFileInput") as HTMLInputElement | null,
   autosaveStatus: document.getElementById("autosaveStatus"),
   autosaveStatusBar: document.getElementById("autosaveStatusBar"),
   scalarQuality: document.getElementById("scalarQuality") as HTMLInputElement | null,
