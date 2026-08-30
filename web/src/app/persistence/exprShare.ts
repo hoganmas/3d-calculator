@@ -45,18 +45,42 @@ export async function applyExpressionsFromFragment(hash = location.hash): Promis
 }
 
 export async function copyExpressionShareLink(btn?: HTMLButtonElement): Promise<boolean> {
+  const result = await shareExpressionLink();
+  if (result === "failed") return false;
+  if (btn) {
+    const prev = btn.textContent;
+    btn.textContent = result === "shared" ? "Shared" : "Copied";
+    window.setTimeout(() => {
+      btn.textContent = prev;
+    }, 1600);
+  }
+  return true;
+}
+
+export type ShareLinkResult = "shared" | "copied" | "failed";
+
+/** Share the current scene as a laplaci.com URL (native share sheet or clipboard). */
+export async function shareExpressionLink(): Promise<ShareLinkResult> {
   const url = await buildExpressionShareUrl();
+  const shareData: ShareData = {
+    title: "laplaci",
+    text: "Open this link to view the graph",
+    url,
+  };
+  if (typeof navigator.share === "function") {
+    try {
+      if (typeof navigator.canShare !== "function" || navigator.canShare(shareData)) {
+        await navigator.share(shareData);
+        return "shared";
+      }
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return "failed";
+    }
+  }
   try {
     await navigator.clipboard.writeText(url);
-    if (btn) {
-      const prev = btn.textContent;
-      btn.textContent = "Copied";
-      window.setTimeout(() => {
-        btn.textContent = prev;
-      }, 1600);
-    }
-    return true;
+    return "copied";
   } catch {
-    return false;
+    return "failed";
   }
 }

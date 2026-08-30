@@ -36,15 +36,8 @@ import {
   setAutosaveError,
 } from "./app/persistence/autosave.js";
 import {
-  downloadDocument,
-  exportCurrentDocument,
-  importDocumentFromFile,
-  shareDocument,
-  canShareFiles,
-} from "./app/persistence/files.js";
-import {
   applyExpressionsFromFragment,
-  copyExpressionShareLink,
+  shareExpressionLink,
 } from "./app/persistence/exprShare.js";
 import { installOgCapture } from "./app/ogCapture.js";
 
@@ -165,48 +158,26 @@ async function bootstrap() {
   }
 }
 
+function flashShareFeedback(btn: HTMLButtonElement, message: string) {
+  const prevTip = btn.dataset.tooltip ?? "Share link";
+  const prevLabel = btn.getAttribute("aria-label") ?? "Share link";
+  btn.dataset.tooltip = message;
+  btn.setAttribute("aria-label", message);
+  window.setTimeout(() => {
+    btn.dataset.tooltip = prevTip;
+    btn.setAttribute("aria-label", prevLabel);
+  }, 1600);
+}
+
 function initProjectActions() {
-  els.downloadScene?.addEventListener("click", () => {
-    downloadDocument(exportCurrentDocument());
-  });
-
-  els.copyExprLink?.addEventListener("click", () => {
-    void copyExpressionShareLink(els.copyExprLink ?? undefined).catch((e) => {
-      const msg = e instanceof Error ? e.message : String(e);
-      setAutosaveError(msg);
+  els.shareLink?.addEventListener("click", () => {
+    void shareExpressionLink().then((result) => {
+      const btn = els.shareLink;
+      if (!btn) return;
+      if (result === "shared") flashShareFeedback(btn, "Shared");
+      else if (result === "copied") flashShareFeedback(btn, "Link copied");
+      else setAutosaveError("Could not share link");
     });
-  });
-
-  els.shareScene?.addEventListener("click", async () => {
-    try {
-      const shared = await shareDocument(exportCurrentDocument());
-      if (!shared) downloadDocument(exportCurrentDocument());
-    } catch {
-      downloadDocument(exportCurrentDocument());
-    }
-  });
-
-  if (els.shareScene && !canShareFiles()) {
-    els.shareScene.hidden = true;
-  }
-
-  els.sceneFileInput?.addEventListener("change", async () => {
-    const input = els.sceneFileInput!;
-    const file = input.files?.[0];
-    input.value = "";
-    if (!file) return;
-    try {
-      if (state.fitTimer) clearTimeout(state.fitTimer);
-      await importDocumentFromFile(file);
-      uploadFit();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setAutosaveError(msg);
-    }
-  });
-
-  els.openScene?.addEventListener("click", () => {
-    els.sceneFileInput?.click();
   });
 }
 
