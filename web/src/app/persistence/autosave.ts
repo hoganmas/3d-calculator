@@ -196,15 +196,11 @@ export function initAutosave() {
   bindInput(els.boxSize);
   bindInput(els.marchDownscale);
   bindInput(els.preset);
-  bindInput(els.flowAlpha);
-  bindInput(els.flowGridMode);
-  bindInput(els.flowNoiseScale);
   bindInput(els.flowDt);
   bindInput(els.flowSpeed);
   bindInput(els.flowVMax);
   bindInput(els.flowOpacity);
   bindInput(els.flowAgeMax);
-  bindInput(els.flowVizMode);
   bindInput(els.flowParticleCount);
   bindInput(els.flowTrailSteps);
   bindInput(els.flowTrailWidth);

@@ -43,27 +43,18 @@ export const state = {
   loopFpsLast: performance.now(),
   cpuMsSmooth: 0,
 
-  /** IBFV grid injection rate α (0 = pure advection; >0 refreshes lines at upstream footpoint). */
-  flowAlpha: 0.1,
-  /** Spatial grid spacing for IBFV injection (world units). */
-  flowNoiseScale: 0.3,
-  /** When true, inject at grid points; otherwise axis-aligned grid lines. */
-  flowGridPoints: false,
   /** Advection timestep Δt. */
   flowDt: 0.05,
   /** Animation speed multiplier (applied to Δt). */
   flowSpeed: 0.1,
-  /** Velocity clamp vMax (0 = auto: noiseScale/dt). */
+  /** Velocity clamp vMax (0 = auto). */
   flowVMax: 0,
   /** Fixed Beer density for flow layers (before global scale). */
   flowOpacity: 0.5,
-  /** Age (seconds) at which advected dye reaches gradient color 2 / particle respawn. */
+  /** Particle lifetime (seconds) / trail age cap. */
   flowAgeMax: 30.0,
   /** World-unit grid planes and RGB axis guides (+x right, +y forward, +z up). */
   showGridAxes: true,
-
-  /** Flow visualization: advected particles (depth-sorted) or IBFV dye grid. */
-  flowVizMode: "particles" as "particles" | "ibfv",
   /** Particle count for flow advection (GPU instanced billboards). */
   flowParticleCount: 1000,
   /** Trail history length (segments = steps − 1). */

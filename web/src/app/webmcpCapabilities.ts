@@ -112,7 +112,7 @@ export function buildCapabilities() {
     app: {
       name: "Laplaci",
       description:
-        "Multi-expression 3D polynomial calculator. Scalar fields → density clouds or isosurfaces; vector fields → IBFV dye advection. Shared named parameters animate over time via slider keyframes.",
+        "Multi-expression 3D polynomial calculator. Scalar fields → density clouds or isosurfaces; vector fields → particle flow trails. Shared named parameters animate over time via slider keyframes.",
       pipeline:
         "LaTeX → compile → Chebyshev fit (on structural changes) → IDCT volume → GPU march (every frame). Animated params refit only dirty layers via keyframe blend.",
     },
@@ -137,7 +137,7 @@ export function buildCapabilities() {
         {
           form: "(Fx,Fy,Fz), \\grad f, \\nabla f, \\curl(Fx,Fy,Fz), or \\nabla\\times(Fx,Fy,Fz)",
           kind: "flow",
-          description: "Vector field → IBFV dye advection (auto-detected tuple/grad/curl).",
+          description: "Vector field → advected particle trails (auto-detected tuple/grad/curl).",
         },
         {
           form: "\\laplacian f, \\nabla^2 f, \\Delta f, \\div(Fx,Fy,Fz), or \\nabla\\cdot(Fx,Fy,Fz)",

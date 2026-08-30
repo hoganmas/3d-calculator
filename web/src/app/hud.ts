@@ -215,7 +215,6 @@ export function buildMetricsReport() {
   if (hasFlowGpuLayers()) {
     const fp = getFlowParticleMetrics();
     lines.push(
-      `flow_viz_mode     ${fp.vizMode}`,
       `flow_layers       ${fp.layerCount}`,
       `flow_per_layer    ${fp.perLayer}`,
       `flow_particles    ${fp.total}`,

@@ -3,7 +3,6 @@ import { MAX_DENS_LAYERS, gpu, DEFAULT_DENS_RGB, DEFAULT_DENS_RGB2, type RgbTrip
 import { normalizeRgbStops, writeLayerColors } from "./uniforms.js";
 import { hasFlowGpuLayers } from "./flowGpu.js";
 import { flowPresenceSlice } from "../../math/fitVector.js";
-import { DEFAULT_FLOW_GRID_M, ensureFlowDyeBuffers, ensureFlowIbfvPipeline, destroyFlowDyeBuffers } from "./flowIbfv.js";
 import { destroyFlowParticleBuffers, ensureFlowParticleBuffers, ensureFlowParticlesPipeline } from "./flowParticles.js";
 import { gridMFromDens, isTearDebugEnabled, tearLog } from "../../app/tearDebug.js";
 import { startupMark } from "../../app/startupProfile.js";
@@ -199,12 +198,9 @@ export function uploadSceneVolumes(scene: SceneUploadPayload | null): SceneUploa
   gpu.profileMethod = anyKf ? "gpu-kf-scene" : "cpu-idct-scene";
 
   if (flow.length > 0) {
-    ensureFlowDyeBuffers(flow.length, DEFAULT_FLOW_GRID_M, half);
     ensureFlowParticleBuffers(flow.length, half);
-    void ensureFlowIbfvPipeline();
     void ensureFlowParticlesPipeline();
   } else {
-    destroyFlowDyeBuffers();
     destroyFlowParticleBuffers();
   }
 

@@ -46,7 +46,6 @@ import {
   uploadSceneColors,
   setConstraintKeyframeBlends,
 } from "../render/webgpu/march.js";
-import { reseedFlowDyeBuffers } from "../render/webgpu/flowIbfv.js";
 import { reseedFlowParticles } from "../render/webgpu/flowParticles.js";
 import { compileExpr, classifyExpr } from "../math/fit.js";
 import { fitVectorField } from "../math/fitVector.js";
@@ -899,32 +898,12 @@ export function wirePipelineDom() {
     syncClipPresentation();
     autosave();
   });
-  els.flowAlpha?.addEventListener("input", () => {
-    state.flowAlpha = Math.max(0, Math.min(1, Number(els.flowAlpha!.value) || 0));
-    autosave();
-  });
-  els.flowVizMode?.addEventListener("change", () => {
-    state.flowVizMode = els.flowVizMode!.value === "ibfv" ? "ibfv" : "particles";
-    autosave();
-  });
   els.flowParticleCount?.addEventListener("change", () => {
     state.flowParticleCount = Math.max(100, Math.min(32000, Number(els.flowParticleCount!.value) || 1000));
     if (state.lastSceneBake?.flowLayers?.length) {
       state.clipDirty = true;
       reseedFlowParticles();
     }
-    autosave();
-  });
-  els.flowGridMode?.addEventListener("change", () => {
-    state.flowGridPoints = els.flowGridMode!.value === "points";
-    reseedFlowDyeBuffers();
-    reseedFlowParticles();
-    autosave();
-  });
-  els.flowNoiseScale?.addEventListener("input", () => {
-    state.flowNoiseScale = Math.max(0.05, Number(els.flowNoiseScale!.value) || 0);
-    reseedFlowDyeBuffers();
-    reseedFlowParticles();
     autosave();
   });
   els.flowDt?.addEventListener("input", () => {

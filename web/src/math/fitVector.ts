@@ -839,15 +839,17 @@ function sampleFlowParticleSpeedAt(
   return Math.hypot(vx, vy, vz);
 }
 
-/** CPU mirror: distance to nearest axis-aligned grid plane. */
-function ibfvGridLineDist(coord: number, spacing: number): number {
+/** Default lattice spacing for particle spawn / redistribution (world units). */
+export const FLOW_PARTICLE_SPAWN_GRID_SPACING = 0.3;
+
+function flowSpawnGridLineDist(coord: number, spacing: number): number {
   const s = Math.max(spacing, 1e-4);
   const f = ((coord / s) % 1 + 1) % 1;
   return Math.min(f, 1 - f) * s;
 }
 
-/** Gridline injection G(p) in [0,1] on world-axis planes. */
-export function ibfvBackgroundGridlines(
+/** Gridline mask for particle spawn in [0,1] on world-axis planes. */
+function flowSpawnGridlines(
   px: number,
   py: number,
   pz: number,
@@ -856,80 +858,13 @@ export function ibfvBackgroundGridlines(
   const s = Math.max(gridSpacing, 1e-4);
   const w = s * 0.22;
   const smooth = (d: number) => Math.max(0, Math.min(1, 1 - d / w));
-  const lx = smooth(ibfvGridLineDist(px, s));
-  const ly = smooth(ibfvGridLineDist(py, s));
-  const lz = smooth(ibfvGridLineDist(pz, s));
+  const lx = smooth(flowSpawnGridLineDist(px, s));
+  const ly = smooth(flowSpawnGridLineDist(py, s));
+  const lz = smooth(flowSpawnGridLineDist(pz, s));
   return Math.max(lx, ly, lz);
 }
 
-/** Grid-point injection G(p) in [0,1] at lattice intersections only. */
-export function ibfvBackgroundGridPoints(
-  px: number,
-  py: number,
-  pz: number,
-  gridSpacing: number,
-): number {
-  const s = Math.max(gridSpacing, 1e-4);
-  const w = s * 0.22;
-  const smooth = (d: number) => Math.max(0, Math.min(1, 1 - d / w));
-  const lx = smooth(ibfvGridLineDist(px, s));
-  const ly = smooth(ibfvGridLineDist(py, s));
-  const lz = smooth(ibfvGridLineDist(pz, s));
-  return lx * ly * lz;
-}
-
-export function ibfvBackgroundGrid(
-  px: number,
-  py: number,
-  pz: number,
-  gridSpacing: number,
-  points: boolean,
-): number {
-  return points
-    ? ibfvBackgroundGridPoints(px, py, pz, gridSpacing)
-    : ibfvBackgroundGridlines(px, py, pz, gridSpacing);
-}
-
-/** Dye channels per voxel: density + advected age. */
-export const FLOW_DYE_CHANNELS = 2;
-export const FLOW_DYE_TOTAL = 0;
-export const FLOW_DYE_AGE = 1;
-
-function dyeVoxelIndex(ix: number, iy: number, iz: number, M: number): number {
-  return (ix + iy * M + iz * M * M) * FLOW_DYE_CHANNELS;
-}
-
-/** Seed dye buffer with grid injection mask (one layer block per layer). */
-export function seedFlowDyeGridlines(
-  M: number,
-  half: number,
-  gridSpacing: number,
-  layers: number,
-  points = false,
-): Float32Array {
-  const volN = M * M * M;
-  const buf = new Float32Array(volN * layers * FLOW_DYE_CHANNELS);
-  const cell = (2 * half) / M;
-  for (let layer = 0; layer < layers; layer++) {
-    const off = layer * volN * FLOW_DYE_CHANNELS;
-    for (let iz = 0; iz < M; iz++) {
-      for (let iy = 0; iy < M; iy++) {
-        for (let ix = 0; ix < M; ix++) {
-          const px = (ix + 0.5) * cell - half;
-          const py = (iy + 0.5) * cell - half;
-          const pz = (iz + 0.5) * cell - half;
-          const g = ibfvBackgroundGrid(px, py, pz, gridSpacing, points);
-          const o = off + dyeVoxelIndex(ix, iy, iz, M);
-          buf[o + FLOW_DYE_TOTAL] = g;
-          buf[o + FLOW_DYE_AGE] = 0;
-        }
-      }
-    }
-  }
-  return buf;
-}
-
-export function ibfvClampVelocity(
+function clampFlowVelocity(
   vx: number,
   vy: number,
   vz: number,
@@ -939,101 +874,6 @@ export function ibfvClampVelocity(
   if (speed <= vMax || vMax <= 1e-8) return [vx, vy, vz];
   const s = vMax / speed;
   return [vx * s, vy * s, vz * s];
-}
-
-function gridToWorld(ix: number, iy: number, iz: number, M: number, half: number): [number, number, number] {
-  const s = (2 * half) / M;
-  return [(ix + 0.5) * s - half, (iy + 0.5) * s - half, (iz + 0.5) * s - half];
-}
-
-function sampleDyeChannel(
-  dye: Float32Array,
-  px: number,
-  py: number,
-  pz: number,
-  M: number,
-  half: number,
-  ch: number,
-): number {
-  if (Math.abs(px) > half || Math.abs(py) > half || Math.abs(pz) > half) return 0;
-  const f = [(px + half) / (2 * half) * M - 0.5, (py + half) / (2 * half) * M - 0.5, (pz + half) / (2 * half) * M - 0.5];
-  const x0 = Math.floor(f[0]!);
-  const y0 = Math.floor(f[1]!);
-  const z0 = Math.floor(f[2]!);
-  const tx = Math.max(0, Math.min(1, f[0]! - x0));
-  const ty = Math.max(0, Math.min(1, f[1]! - y0));
-  const tz = Math.max(0, Math.min(1, f[2]! - z0));
-  const mi = M - 1;
-  const idx = (x: number, y: number, z: number) => dyeVoxelIndex(
-    Math.max(0, Math.min(mi, x)),
-    Math.max(0, Math.min(mi, y)),
-    Math.max(0, Math.min(mi, z)),
-    M,
-  ) + ch;
-  const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
-  const c000 = dye[idx(x0, y0, z0)]!;
-  const c100 = dye[idx(x0 + 1, y0, z0)]!;
-  const c010 = dye[idx(x0, y0 + 1, z0)]!;
-  const c110 = dye[idx(x0 + 1, y0 + 1, z0)]!;
-  const c001 = dye[idx(x0, y0, z0 + 1)]!;
-  const c101 = dye[idx(x0 + 1, y0, z0 + 1)]!;
-  const c011 = dye[idx(x0, y0 + 1, z0 + 1)]!;
-  const c111 = dye[idx(x0 + 1, y0 + 1, z0 + 1)]!;
-  return lerp(
-    lerp(lerp(c000, c100, tx), lerp(c010, c110, tx), ty),
-    lerp(lerp(c001, c101, tx), lerp(c011, c111, tx), ty),
-    tz,
-  );
-}
-
-export interface IbfvAdvectParams {
-  alpha: number;
-  gridSpacing: number;
-  dt: number;
-  vMax: number;
-  frameIdx: number;
-  half: number;
-  gridPoints?: boolean;
-}
-
-/** One IBFV advection step: total dye + advected age (CPU reference). */
-export function ibfvAdvectStep(
-  dyeIn: Float32Array,
-  dyeOut: Float32Array,
-  sampleVel: (x: number, y: number, z: number) => [number, number, number],
-  M: number,
-  params: IbfvAdvectParams,
-): void {
-  const { alpha, gridSpacing, dt, vMax, half, gridPoints = false } = params;
-  for (let iz = 0; iz < M; iz++) {
-    for (let iy = 0; iy < M; iy++) {
-      for (let ix = 0; ix < M; ix++) {
-        const [px, py, pz] = gridToWorld(ix, iy, iz, M, half);
-        const [vx, vy, vz] = sampleVel(px, py, pz);
-        const speed = Math.hypot(vx, vy, vz);
-        const [cx, cy, cz] = ibfvClampVelocity(vx, vy, vz, vMax);
-        const pPrevX = px - cx * dt;
-        const pPrevY = py - cy * dt;
-        const pPrevZ = pz - cz * dt;
-        const o = dyeVoxelIndex(ix, iy, iz, M);
-        if (speed <= 1e-5) {
-          dyeOut[o + FLOW_DYE_TOTAL] = 0;
-          dyeOut[o + FLOW_DYE_AGE] = 0;
-          continue;
-        }
-        const totalPrev = sampleDyeChannel(dyeIn, pPrevX, pPrevY, pPrevZ, M, half, FLOW_DYE_TOTAL);
-        const agePrev = sampleDyeChannel(dyeIn, pPrevX, pPrevY, pPrevZ, M, half, FLOW_DYE_AGE) + dt;
-        let G = 0;
-        if (alpha > 1e-6) {
-          G = ibfvBackgroundGrid(pPrevX, pPrevY, pPrevZ, gridSpacing, gridPoints);
-        }
-        const totalNew = (1 - alpha) * totalPrev + alpha * G;
-        dyeOut[o + FLOW_DYE_TOTAL] = totalNew;
-        dyeOut[o + FLOW_DYE_AGE] =
-          totalNew > 1e-6 ? ((1 - alpha) * totalPrev * agePrev) / totalNew : 0;
-      }
-    }
-  }
 }
 
 /** Floats per particle: x, y, z, age, speed. */
@@ -1108,7 +948,6 @@ export function seedFlowParticles(
   layers: number,
   half: number,
   gridSpacing: number,
-  points: boolean,
 ): { posAge: Float32Array; layerIds: Uint32Array } {
   const layerCount = Math.max(1, layers | 0);
   const quota = Math.max(1, perLayer | 0);
@@ -1125,7 +964,7 @@ export function seedFlowParticles(
       const px = (hash01(n, tries, layer) * 2 - 1) * half;
       const py = (hash01(n + 1, tries, layer) * 2 - 1) * half;
       const pz = (hash01(n + 2, tries, layer) * 2 - 1) * half;
-      const g = ibfvBackgroundGrid(px, py, pz, gridSpacing, points);
+      const g = flowSpawnGridlines(px, py, pz, gridSpacing);
       if (g < 0.15) continue;
       const o = n * FLOW_PARTICLE_STRIDE;
       posAge[o] = px;
@@ -1162,9 +1001,6 @@ export interface FlowParticleAdvectParams {
   dt: number;
   vMax: number;
   half: number;
-  alpha: number;
-  gridSpacing: number;
-  gridPoints: boolean;
   ageMax: number;
   frameIdx: number;
 }
@@ -1241,9 +1077,8 @@ function randomGridPointInCell(
   seed: number,
   layer: number,
   frameIdx: number,
-  gridSpacing: number,
-  gridPoints: boolean,
 ): [number, number, number] | null {
+  const gridSpacing = FLOW_PARTICLE_SPAWN_GRID_SPACING;
   const fz = Math.floor(cell / (res * res));
   const rem = cell % (res * res);
   const fy = Math.floor(rem / res);
@@ -1253,7 +1088,7 @@ function randomGridPointInCell(
     const px = -half + (fx + hash01(seed, t, frameIdx)) * cellSize;
     const py = -half + (fy + hash01(seed + 3, t, frameIdx + 1)) * cellSize;
     const pz = -half + (fz + hash01(seed + 7, t, frameIdx + 2)) * cellSize;
-    const g = ibfvBackgroundGrid(px, py, pz, gridSpacing, gridPoints);
+    const g = flowSpawnGridlines(px, py, pz, gridSpacing);
     if (g >= 0.12) return [px, py, pz];
   }
   return null;
@@ -1267,8 +1102,6 @@ export function pickLowDensitySpawn(
   seed: number,
   layer: number,
   frameIdx: number,
-  gridSpacing: number,
-  gridPoints: boolean,
 ): [number, number, number] | null {
   let minCount = Infinity;
   for (let c = 0; c < density.length; c++) {
@@ -1278,12 +1111,12 @@ export function pickLowDensitySpawn(
   for (let attempt = 0; attempt < 48; attempt++) {
     const cell = (hash01(seed, attempt, frameIdx + layer) * density.length) | 0;
     if (density[cell]! > target + 1) continue;
-    const pt = randomGridPointInCell(cell, res, half, seed + attempt, layer, frameIdx, gridSpacing, gridPoints);
+    const pt = randomGridPointInCell(cell, res, half, seed + attempt, layer, frameIdx);
     if (pt) return pt;
   }
   for (let c = 0; c < density.length; c++) {
     if (density[c]! > target + 1) continue;
-    const pt = randomGridPointInCell(c, res, half, seed + c, layer, frameIdx, gridSpacing, gridPoints);
+    const pt = randomGridPointInCell(c, res, half, seed + c, layer, frameIdx);
     if (pt) return pt;
   }
   return null;
@@ -1356,8 +1189,6 @@ export function redistributeOvercrowdedFlowParticles(
   layerIds: Uint32Array,
   count: number,
   half: number,
-  gridSpacing: number,
-  gridPoints: boolean,
   frameIdx: number,
   trailHist: Float32Array | null,
   trailSteps: number,
@@ -1380,7 +1211,7 @@ export function redistributeOvercrowdedFlowParticles(
     const grid = layerDensity ?? (!Array.isArray(density) ? density : null);
     if (!grid || grid[ci]! <= threshold) continue;
     const picked = pickLowDensitySpawn(
-      grid, res, half, i, layer, frameIdx, gridSpacing, gridPoints,
+      grid, res, half, i, layer, frameIdx,
     );
     if (!picked) continue;
     let speed = 0;
@@ -1405,8 +1236,6 @@ function respawnParticle(
   i: number,
   layer: number,
   half: number,
-  gridSpacing: number,
-  gridPoints: boolean,
   frameIdx: number,
   trailHist?: Float32Array | null,
   trailSteps?: number,
@@ -1415,6 +1244,7 @@ function respawnParticle(
   layers: FlowParticleLayerVel[] | null = null,
   gridM = 0,
 ): void {
+  const gridSpacing = FLOW_PARTICLE_SPAWN_GRID_SPACING;
   const spawnAt = (px: number, py: number, pz: number) => {
     let speed = 0;
     let vel: [number, number, number] | null = null;
@@ -1430,7 +1260,7 @@ function respawnParticle(
   };
   if (density) {
     const picked = pickLowDensitySpawn(
-      density, densityRes, half, i, layer, frameIdx, gridSpacing, gridPoints,
+      density, densityRes, half, i, layer, frameIdx,
     );
     if (picked) {
       spawnAt(picked[0], picked[1], picked[2]);
@@ -1441,7 +1271,7 @@ function respawnParticle(
     const px = (hash01(i, t, frameIdx + layer) * 2 - 1) * half;
     const py = (hash01(i + 7, t, frameIdx) * 2 - 1) * half;
     const pz = (hash01(i + 13, t, frameIdx + 1) * 2 - 1) * half;
-    const g = ibfvBackgroundGrid(px, py, pz, gridSpacing, gridPoints);
+    const g = flowSpawnGridlines(px, py, pz, gridSpacing);
     if (g < 0.12 && t < 23) continue;
     spawnAt(px, py, pz);
     return;
@@ -1541,8 +1371,6 @@ export interface FlowTrailPushContext {
   layers: FlowParticleLayerVel[];
   M: number;
   half: number;
-  gridSpacing: number;
-  gridPoints: boolean;
   frameIdx: number;
   density?: Uint16Array | Uint16Array[] | null;
   densityRes?: number;
@@ -1570,8 +1398,6 @@ export function pushFlowTrailHist(
           i,
           layer,
           pushCtx.half,
-          pushCtx.gridSpacing,
-          pushCtx.gridPoints,
           pushCtx.frameIdx,
           trailHist,
           trailSteps,
@@ -1614,7 +1440,7 @@ export function advectFlowParticles(
   density: Uint16Array | Uint16Array[] | null = null,
   densityRes = FLOW_PARTICLE_DENSITY_GRID,
 ): void {
-  const { dt, vMax, half, alpha, gridSpacing, gridPoints, ageMax, frameIdx } = params;
+  const { dt, vMax, half, ageMax, frameIdx } = params;
   const n = layerIds.length;
   const canGhostFade = !!(trailHist && trailSteps >= 2);
   for (let i = 0; i < n; i++) {
@@ -1630,7 +1456,7 @@ export function advectFlowParticles(
     let age = posAge[o + 3]!;
     const [vx, vy, vz] = sampleVelGridAt(vel.fx, vel.fy, vel.fz, M, half, px, py, pz);
     const speed = Math.hypot(vx, vy, vz);
-    const [cx, cy, cz] = ibfvClampVelocity(vx, vy, vz, vMax);
+    const [cx, cy, cz] = clampFlowVelocity(vx, vy, vz, vMax);
     const expired = age > ageMax;
     const stuck = speed <= 1e-5 && age > ageMax * 0.5;
     if (expired || stuck) {
@@ -1638,7 +1464,7 @@ export function advectFlowParticles(
         beginFlowParticleGhost(posAge, i, trailSteps);
       } else {
         respawnParticle(
-          posAge, i, layer, half, gridSpacing, gridPoints, frameIdx,
+          posAge, i, layer, half, frameIdx,
           trailHist, trailSteps, layerDensity, densityRes, layers, M,
         );
       }
@@ -1648,17 +1474,6 @@ export function advectFlowParticles(
     py += cy * dt;
     pz += cz * dt;
     age += dt;
-    if (alpha > 1e-6 && hash01(i, frameIdx, 919) < alpha) {
-      if (canGhostFade) {
-        beginFlowParticleGhost(posAge, i, trailSteps);
-      } else {
-        respawnParticle(
-          posAge, i, layer, half, gridSpacing, gridPoints, frameIdx,
-          trailHist, trailSteps, layerDensity, densityRes, layers, M,
-        );
-      }
-      continue;
-    }
     posAge[o] = px;
     posAge[o + 1] = py;
     posAge[o + 2] = pz;

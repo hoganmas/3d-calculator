@@ -9,7 +9,6 @@ import {
 import { writeLayerColors } from "./uniforms.js";
 import { ensureVolumeBuf } from "./sceneUpload.js";
 import { ensurePipelinesForDegree as buildPipelines } from "./pipelines.js";
-import { ensureFlowIbfvPipeline } from "./flowIbfv.js";
 import { ensureFlowParticlesPipeline } from "./flowParticles.js";
 import { syncClipGpuWorldGrid } from "./gridOverlay.js";
 import { attachMarchCanvas, bindMarchCanvasContext } from "./marchCanvas.js";
@@ -48,7 +47,6 @@ export function scheduleMarchPipelines(deg = 4): Promise<boolean> {
       startupBegin("gpu.pipelines.background");
       try {
         await ensurePipelinesForDegree(deg);
-        await ensureFlowIbfvPipeline();
         await ensureFlowParticlesPipeline();
         const ok = isClipBakeGpuReady();
         if (ok) notifyMarchPipelinesReady("pipelines.background");
@@ -129,10 +127,6 @@ export async function initClipBakeGpu(
       });
       gpu.colorBuf = gpu.device.createBuffer({
         size: MAX_DENS_LAYERS * MAX_GRAD_STOPS * 16,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      });
-      gpu.flowDyeDummy = gpu.device.createBuffer({
-        size: 16,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
       });
       writeLayerColors(gpu.device, gpu.colorBuf, [[DEFAULT_DENS_RGB, DEFAULT_DENS_RGB2]]);

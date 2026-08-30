@@ -21,15 +21,11 @@ export interface LaplacianRenderSnapshot {
 }
 
 export interface LaplacianFlowSnapshot {
-  flowAlpha: number;
-  flowNoiseScale: number;
-  flowGridPoints: boolean;
   flowDt: number;
   flowSpeed: number;
   flowVMax: number;
   flowOpacity: number;
   flowAgeMax: number;
-  flowVizMode: "particles" | "ibfv";
   flowParticleCount: number;
   flowTrailSteps: number;
   flowTrailWidth: number;
@@ -142,13 +138,7 @@ function validateRender(v: unknown): LaplacianRenderSnapshot {
 
 function validateFlow(v: unknown): LaplacianFlowSnapshot {
   if (!isRecord(v)) throw new Error("flow: expected object");
-  const flowVizMode = v.flowVizMode;
-  if (flowVizMode !== "particles" && flowVizMode !== "ibfv") {
-    throw new Error("flow.flowVizMode: invalid");
-  }
   const nums = [
-    "flowAlpha",
-    "flowNoiseScale",
     "flowDt",
     "flowSpeed",
     "flowVMax",
@@ -161,17 +151,12 @@ function validateFlow(v: unknown): LaplacianFlowSnapshot {
   for (const k of nums) {
     if (!isFiniteNum(v[k])) throw new Error(`flow.${k}: invalid`);
   }
-  if (typeof v.flowGridPoints !== "boolean") throw new Error("flow.flowGridPoints: expected boolean");
   return {
-    flowAlpha: v.flowAlpha as number,
-    flowNoiseScale: v.flowNoiseScale as number,
-    flowGridPoints: v.flowGridPoints,
     flowDt: v.flowDt as number,
     flowSpeed: v.flowSpeed as number,
     flowVMax: v.flowVMax as number,
     flowOpacity: v.flowOpacity as number,
     flowAgeMax: v.flowAgeMax as number,
-    flowVizMode,
     flowParticleCount: v.flowParticleCount as number,
     flowTrailSteps: v.flowTrailSteps as number,
     flowTrailWidth: v.flowTrailWidth as number,
