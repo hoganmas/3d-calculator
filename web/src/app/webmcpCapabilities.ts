@@ -36,7 +36,7 @@ const TOOL_CATALOG = [
   {
     name: "laplacian_list_expressions",
     readOnly: true,
-    summary: "All expression rows (id, latex, enabled, role, colors, warnings).",
+    summary: "All expression rows (id, latex, enabled, colors, warnings).",
   },
   {
     name: "laplacian_list_params",
@@ -50,7 +50,7 @@ const TOOL_CATALOG = [
   },
   {
     name: "laplacian_set_expression",
-    summary: "Patch a row by id (latex, enabled, role, color, color2). Refits on latex change.",
+    summary: "Patch a row by id (latex, enabled, color, color2). Refits on latex change.",
   },
   {
     name: "laplacian_add_expression",
@@ -137,7 +137,7 @@ export function buildCapabilities() {
         {
           form: "(Fx,Fy,Fz), \\grad f, \\nabla f, \\curl(Fx,Fy,Fz), or \\nabla\\times(Fx,Fy,Fz)",
           kind: "flow",
-          description: "Vector field → IBFV dye advection (role flow or auto-detected tuple/grad/curl).",
+          description: "Vector field → IBFV dye advection (auto-detected tuple/grad/curl).",
         },
         {
           form: "\\laplacian f, \\nabla^2 f, \\Delta f, \\div(Fx,Fy,Fz), or \\nabla\\cdot(Fx,Fy,Fz)",
@@ -158,14 +158,6 @@ export function buildCapabilities() {
             "Definite integral of a scalar field; integrated axes become constant (broadcast in volume).",
         },
       ],
-      roles: {
-        auto: "Infer cloud / isosurface / flow from syntax.",
-        cloud: "Force volumetric cloud rendering.",
-        isosurface: "Force isosurface manifold.",
-        flow: "Force vector IBFV flow visualization.",
-        density: "Legacy alias for cloud.",
-        constraint: "Legacy alias for isosurface.",
-      },
       freeSymbols:
         "Any identifier not a known function becomes a parameter (auto row inserted). Param names must match /^[A-Za-z][A-Za-z0-9_]*$/ on the LHS of name=value (e.g. a, u, d — not y1 which parses as subscript). Reserved spatial: x, y, z, r, theta, phi, rho.",
       polarCoords: {

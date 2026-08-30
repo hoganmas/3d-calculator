@@ -3,22 +3,11 @@
  * Parameter rows (`a = …`) share values across all field expressions.
  */
 
-import type { ExprItem, ExprRole, LayerRole, ExprKind } from "../types/models.js";
+import type { ExprItem, LayerRole, ExprKind } from "../types/models.js";
 import { isVectorFieldLatex } from "../math/fitVector.js";
 import type { SymbolRegistry } from "./symbols.js";
 
-export type { ExprItem, ExprRole, AnimMode } from "../types/models.js";
-
-const LEGACY_EXPR_ROLES: Record<string, ExprRole> = {
-  density: "cloud",
-  constraint: "isosurface",
-};
-
-/** Map stored/MCP role strings to current primitive names. */
-export function normalizeExprRole(role: string | undefined): ExprRole {
-  if (!role) return "auto";
-  return LEGACY_EXPR_ROLES[role] ?? (role as ExprRole);
-}
+export type { ExprItem, AnimMode } from "../types/models.js";
 
 let nextId = 1;
 
@@ -284,7 +273,6 @@ export function createExprItem(
     color: grad.color,
     color2: grad.color2,
     colors: grad.colors,
-    role: normalizeExprRole(init.role as string | undefined),
     enabled: init.enabled !== false,
     sliderMin,
     sliderMax,
@@ -412,7 +400,7 @@ export function moveExpr(id: string, beforeId: string | null) {
 }
 
 /**
- * Merge row `id` into the one above (concat LaTeX). Keeps the upper row's color/role.
+ * Merge row `id` into the one above (concat LaTeX). Keeps the upper row's color.
  * @returns {{ id: string, caretOffset: number } | null}
  */
 export function mergeExprIntoPrevious(id: string) {
@@ -456,7 +444,6 @@ export function splitExprAt(id: string, leftLatex: string, rightLatex: string) {
 export function updateExpr(id: string, patch: Partial<ExprItem>) {
   const row = items.find((e) => e.id === id);
   if (!row) return null;
-  if (patch.role != null) patch.role = normalizeExprRole(patch.role as string);
   Object.assign(row, patch);
   if (patch.colors != null || patch.color != null || patch.color2 != null) {
     const g = gradientFromPatch(row, patch);
@@ -495,18 +482,13 @@ export function hexToRgb01(hex: string) {
   return n.map((v) => v / 255);
 }
 
-/**
- * Effective role from expression kind and optional vector syntax.
- */
-export function resolveExprRole(
-  role: ExprRole,
+/** Infer render layer from expression kind and LaTeX syntax. */
+export function inferLayerRole(
   kind: ExprKind,
   latex?: string,
   registry?: SymbolRegistry,
 ): LayerRole {
-  const r = normalizeExprRole(role as string);
   if (kind === "parameter") return "parameter";
-  if (r === "cloud" || r === "isosurface" || r === "flow") return r;
-  if (r === "auto" && latex && isVectorFieldLatex(latex, registry)) return "flow";
+  if (latex && isVectorFieldLatex(latex, registry)) return "flow";
   return kind === "constraint" ? "isosurface" : "cloud";
 }

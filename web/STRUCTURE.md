@@ -23,7 +23,7 @@ src/
     idct.ts                 Separable Chebyshev IDCT → dens grid (+ grad)
     limits.ts               MAX_DEG and shared math constants
   model/
-    expressions.ts          Expression list state, colors, roles
+    expressions.ts          Expression list state, colors
     params.ts               Free-parameter values + animation
     keyframes.ts            Animated-param keyframe cache + GPU blend
   render/

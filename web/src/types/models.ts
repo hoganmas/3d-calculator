@@ -1,6 +1,5 @@
 /** Shared domain types for Laplacian (expressions → bake → GPU). */
 
-export type ExprRole = "auto" | "cloud" | "isosurface" | "flow";
 export type AnimMode = "pingpong" | "loop";
 export type ExprKind = "parameter" | "alias" | "funcdef" | "constraint" | "definition" | "bare";
 export type DeclSymbolKind = "parameter" | "alias" | "funcdef";
@@ -27,7 +26,6 @@ export interface ExprItem {
   color: string;
   color2: string;
   colors: string[];
-  role: ExprRole;
   enabled: boolean;
   sliderMin: number;
   sliderMax: number;

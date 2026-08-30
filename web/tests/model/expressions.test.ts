@@ -14,12 +14,11 @@ import {
   moveExpr,
   nextExprGradient,
   normalizeGradColors,
-  normalizeExprRole,
+  inferLayerRole,
   removeExpr,
   removeExprSilent,
   replaceExprWarnings,
   resolveExprGradient,
-  resolveExprRole,
   selectExpr,
   setExpressions,
   setExpressionsOnChange,
@@ -30,23 +29,19 @@ import {
 import { SymbolRegistry } from "../../src/model/symbols.ts";
 import "../helpers/setup-dom.ts";
 import { layerRgbFromItem } from "../../src/app/compile.ts";
-import {
-  clearExpressions,
-  listExpressions,
-  setExpressions,
-  updateExpr,
-} from "../../src/model/expressions.ts";
 import { assert, assertNear } from "../helpers/assert.ts";
 import { runSuite } from "../helpers/runner.ts";
 
 export async function run() {
   return runSuite("model / expressions", [
     {
-      name: "normalizeExprRole maps legacy density/constraint",
+      name: "inferLayerRole infers from syntax",
       fn: () => {
-        assert(normalizeExprRole("density") === "cloud", "density→cloud");
-        assert(normalizeExprRole("constraint") === "isosurface", "constraint→iso");
-        assert(normalizeExprRole("flow") === "flow", "flow passthrough");
+        const reg = new SymbolRegistry();
+        assert(inferLayerRole("field", "(-y,x,0)", reg) === "flow", "vector→flow");
+        assert(inferLayerRole("constraint", "x^2", reg) === "isosurface", "constraint");
+        const param = classifyExpr("a=1");
+        assert(inferLayerRole(param.kind) === "parameter", "param row");
       },
     },
     {
@@ -214,16 +209,6 @@ export async function run() {
         ]);
         removeExpr("e2");
         assert(listExpressions().length >= 2, "trailing blank kept");
-      },
-    },
-    {
-      name: "resolveExprRole infers flow from vector latex",
-      fn: () => {
-        const reg = new SymbolRegistry();
-        assert(resolveExprRole("auto", "field", "(-y,x,0)", reg) === "flow", "vector→flow");
-        assert(resolveExprRole("auto", "constraint", "x^2", reg) === "isosurface", "constraint");
-        const param = classifyExpr("a=1");
-        assert(resolveExprRole("auto", param.kind) === "parameter", "param row");
       },
     },
     {

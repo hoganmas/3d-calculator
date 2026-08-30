@@ -1,6 +1,6 @@
 import { classifyExpr, compileExpr, expandDefinitions } from "../../src/math/fit.ts";
 import { compileVectorExpr, isVectorFieldLatex } from "../../src/math/fitVector.ts";
-import { resolveExprRole } from "../../src/model/expressions.ts";
+import { inferLayerRole } from "../../src/model/expressions.ts";
 import { SymbolRegistry, isDeclSymbolKind } from "../../src/model/symbols.ts";
 import { assert, assertNear } from "../helpers/assert.ts";
 import { runSuite } from "../helpers/runner.ts";
@@ -211,7 +211,7 @@ export async function run() {
       fn: () => {
         const classified = classifyExpr(String.raw`T=x^2+y^2`);
         assert(classified.kind === "alias", "alias kind");
-        const role = resolveExprRole("auto", classified.kind, classified.compileLatex);
+        const role = inferLayerRole(classified.kind, classified.compileLatex);
         assert(role === "cloud", "alias body role");
         const compiled = compileExpr(classified.compileLatex);
         assert(compiled.usesSpace, "uses space");
@@ -223,7 +223,7 @@ export async function run() {
       fn: () => {
         const classified = classifyExpr(String.raw`f(x)=\sin(x)+y`);
         assert(classified.kind === "funcdef", "funcdef kind");
-        const role = resolveExprRole("auto", classified.kind, classified.compileLatex);
+        const role = inferLayerRole(classified.kind, classified.compileLatex);
         assert(role === "cloud", "funcdef body role");
         const compiled = compileExpr(classified.compileLatex);
         assert(compiled.usesSpace, "uses space");
@@ -276,7 +276,7 @@ export async function run() {
       name: "vector alias declaration graphs as flow",
       fn: () => {
         const classified = classifyExpr(String.raw`V=(x,y,0)`);
-        const role = resolveExprRole("auto", classified.kind, classified.compileLatex);
+        const role = inferLayerRole(classified.kind, classified.compileLatex);
         assert(role === "flow", "vector alias auto role");
         const compiled = compileVectorExpr(classified.compileLatex);
         assert(compiled.usesSpace, "uses space");
@@ -289,7 +289,7 @@ export async function run() {
           { kind: "funcdef", name: "f", rhs: String.raw`(-y,x,0)`, args: ["x", "y", "z"] },
         ]);
         const classified = classifyExpr(String.raw`\del \times f`);
-        const role = resolveExprRole("auto", classified.kind, classified.compileLatex, registry);
+        const role = inferLayerRole(classified.kind, classified.compileLatex, registry);
         assert(role === "flow", "curl row is flow");
         const compiled = compileVectorExpr(classified.compileLatex, registry);
         assert(compiled.kind === "curl", "curl compiles");
@@ -304,7 +304,7 @@ export async function run() {
           { kind: "funcdef", name: "f", rhs: String.raw`(-y,x,0)`, args: ["x", "y", "z"] },
         ]);
         const classified = classifyExpr(String.raw`\del \times f`);
-        const role = resolveExprRole("auto", classified.kind, classified.compileLatex, registry);
+        const role = inferLayerRole(classified.kind, classified.compileLatex, registry);
         assert(role === "flow", "del cross f auto role");
         const compiled = compileVectorExpr(classified.compileLatex, registry);
         assert(compiled.kind === "curl", "curl field");

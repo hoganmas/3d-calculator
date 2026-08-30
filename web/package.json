@@ -18,7 +18,8 @@
     "test:coverage": "c8 tsx tests/run.mjs",
     "test:coverage:flow": "c8 tsx tests/run.mjs flow",
     "bench:lobatto": "tsx scripts/bench-lobatto-accuracy.mjs",
-    "bench:lobatto:quick": "tsx scripts/bench-lobatto-accuracy.mjs --quick"
+    "bench:lobatto:quick": "tsx scripts/bench-lobatto-accuracy.mjs --quick",
+    "test:bench:exprShare": "tsx tests/run.mjs exprShare.bench"
   },
   "dependencies": {
     "@cortex-js/compute-engine": "^0.119.0",

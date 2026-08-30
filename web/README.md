@@ -53,7 +53,7 @@ Optional dev CLI: `node scripts/webmcp-relay-call.mjs laplacian_setup_lava_lamp`
 
 ## Controls
 
-- **Expressions** — Enter splits / adds a row. Free symbols get a slider on that same row; write `a=…` for an explicit parameter equation. `A=B` → isosurface; bare / `f=…` → cloud; `(Fx,Fy,Fz)` or `\grad f` → flow. Use the row role button (A/C/I/F) to override.
+- **Expressions** — Enter splits / adds a row. Free symbols get a slider on that same row; write `a=…` for an explicit parameter equation. `A=B` → isosurface; bare / `f=…` → cloud; `(Fx,Fy,Fz)` or `\grad f` → flow.
 - **Focus view** (crosshair icon, header) — reset camera to the default view.
 - **Setup MCP** (chain icon, header) — copy server config for the current page.
 - **Settings** (gear) — appearance (theme), preset, poly deg / scale / steps / box size, march downscale, diagnostics.

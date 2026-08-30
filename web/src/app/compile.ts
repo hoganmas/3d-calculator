@@ -16,7 +16,7 @@ import {
   clearExpressions,
   updateExprSilent,
   hexToRgb01,
-  resolveExprRole,
+  inferLayerRole,
   replaceExprWarnings,
   removeExprSilent,
   resolveExprGradient,
@@ -113,7 +113,7 @@ export function collectParamReferences() {
         continue;
       }
       const fieldLatex = classified.compileLatex;
-      const role = resolveExprRole(item.role, classified.kind, fieldLatex, registry);
+      const role = inferLayerRole(classified.kind, fieldLatex, registry);
       const compiled =
         role === "flow"
           ? compileVectorExpr(fieldLatex, registry)
@@ -198,7 +198,7 @@ export function compileAllExprs(opts: CompileOpts = {}): CompileAllResult {
     }
 
     const fieldLatex = classified.compileLatex;
-    const role = resolveExprRole(item.role, classified.kind, fieldLatex, registry);
+    const role = inferLayerRole(classified.kind, fieldLatex, registry);
 
     if (role === "flow") {
       try {

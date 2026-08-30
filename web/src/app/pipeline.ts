@@ -50,7 +50,7 @@ import { reseedFlowDyeBuffers } from "../render/webgpu/flowIbfv.js";
 import { reseedFlowParticles } from "../render/webgpu/flowParticles.js";
 import { compileExpr, classifyExpr } from "../math/fit.js";
 import { fitVectorField } from "../math/fitVector.js";
-import { listExpressions, resolveExprRole } from "../model/expressions.js";
+import { listExpressions, inferLayerRole } from "../model/expressions.js";
 import { els, viewportSize } from "./dom.js";
 import { state, FIT_DEBOUNCE_MS } from "./state.js";
 import type {
@@ -974,7 +974,7 @@ export function handleColorChange() {
         continue;
       }
       const fieldLatex = classified.compileLatex;
-      const role = resolveExprRole(item.role, classified.kind, fieldLatex);
+      const role = inferLayerRole(classified.kind, fieldLatex);
       const rgb = layerRgbFromItem(item);
       if (role === "isosurface") isoCols.push(rgb);
       else if (role === "flow") flowCols.push(rgb);

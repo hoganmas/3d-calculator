@@ -4,7 +4,7 @@ import {
   compileVectorExpr,
   isVectorFieldLatex,
 } from "../../src/math/fitVector.ts";
-import { resolveExprRole } from "../../src/model/expressions.ts";
+import { inferLayerRole } from "../../src/model/expressions.ts";
 import { assert, assertNear } from "../helpers/assert.ts";
 import { runSuite } from "../helpers/runner.ts";
 
@@ -31,7 +31,7 @@ function assertScalarRoute(latex: string) {
   const classified = classifyExpr(latex);
   assert(!isVectorFieldLatex(latex), `should not infer flow: ${latex}`);
   assert(
-    resolveExprRole("auto", classified.kind, classified.compileLatex) !== "flow",
+    inferLayerRole(classified.kind, classified.compileLatex) !== "flow",
     `role should not be flow: ${latex}`,
   );
   try {

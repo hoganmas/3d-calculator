@@ -1414,7 +1414,7 @@ function compileDivergenceExpr(
 }
 
 /**
- * Flow-field syntax must use compileVectorExpr / flow role — not scalar compileExpr.
+ * Flow-field syntax must use compileVectorExpr — not scalar compileExpr.
  * Cheap pre-check avoids CE "Tuple + \\grad" console noise.
  */
 function isLikelyFlowLatex(raw: string): boolean {
@@ -1468,7 +1468,7 @@ export function compileExpr(
   }
 
   if (isLikelyFlowLatex(expandedRaw)) {
-    throw new Error("Vector field — use flow role (tuple, \\grad, or \\curl)");
+    throw new Error("Vector field — use tuple, \\grad, or \\curl syntax");
   }
 
   const normalized = normalizeForCe(expandedRaw);
@@ -1634,11 +1634,11 @@ export const PRESETS: Record<string, PresetDef> = {
   },
   swirl: {
     label: "Flow swirl",
-    expressions: [{ latex: String.raw`(-y, x, 0)`, role: "flow" }],
+    expressions: [{ latex: String.raw`(-y, x, 0)` }],
   },
   swirlGrad: {
     label: "Flow (grad r²)",
-    expressions: [{ latex: String.raw`\grad(x^2+y^2+z^2)`, role: "flow" }],
+    expressions: [{ latex: String.raw`\grad(x^2+y^2+z^2)` }],
   },
   lavalamp: {
     label: "Lava lamp (animated blobs)",

@@ -6,7 +6,7 @@ import {
 import { compileVectorExpr } from "../math/fitVector.js";
 import {
   listExpressions,
-  resolveExprRole,
+  inferLayerRole,
   insertExprAt,
 } from "../model/expressions.js";
 import {
@@ -105,7 +105,7 @@ export function collectPendingParamsForExpr(item: ExprItem): string[] {
       }
     } else {
       const fieldLatex = classified.compileLatex;
-      const role = resolveExprRole(item.role, classified.kind, fieldLatex, registry);
+      const role = inferLayerRole(classified.kind, fieldLatex, registry);
       const compiled =
         role === "flow"
           ? compileVectorExpr(fieldLatex, registry)

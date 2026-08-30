@@ -115,7 +115,6 @@ export async function run() {
             id: "e1",
             latex: String.raw`\curl(b x, b y, 0)`,
             enabled: true,
-            role: "flow",
           },
         ]);
         const pending = collectPendingParamsForExpr(listExpressions()[0]!);

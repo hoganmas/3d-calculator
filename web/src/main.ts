@@ -29,6 +29,7 @@ import { initTearDebug } from "./app/tearDebug.js";
 import { initStartupProfile, startupBegin, startupEnd, startupMark } from "./app/startupProfile.js";
 import {
   initAutosave,
+  persistNow,
   restoreAutosave,
   scheduleAutosave,
   setAutosaveError,
@@ -40,6 +41,10 @@ import {
   shareDocument,
   canShareFiles,
 } from "./app/persistence/files.js";
+import {
+  applyExpressionsFromFragment,
+  copyExpressionShareLink,
+} from "./app/persistence/exprShare.js";
 
 initSplash();
 initKeyframeLoadBar();
@@ -119,9 +124,22 @@ async function bootstrap() {
   warmClipGpuInit("boot-early");
   startRenderLoop();
 
-  startupBegin("boot.restore-autosave");
-  const restored = await restoreAutosave();
-  startupEnd("boot.restore-autosave", { restored });
+  let restored = false;
+  try {
+    restored = await applyExpressionsFromFragment(location.hash);
+    if (restored) {
+      syncExprCompileState();
+      await persistNow();
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    setAutosaveError(`Could not load shared expressions: ${msg}`);
+  }
+  if (!restored) {
+    startupBegin("boot.restore-autosave");
+    restored = await restoreAutosave();
+    startupEnd("boot.restore-autosave", { restored });
+  }
 
   if (!restored) {
     startupBegin("boot.init-compile");
@@ -147,6 +165,13 @@ async function bootstrap() {
 function initProjectActions() {
   els.downloadScene?.addEventListener("click", () => {
     downloadDocument(exportCurrentDocument());
+  });
+
+  els.copyExprLink?.addEventListener("click", () => {
+    void copyExpressionShareLink(els.copyExprLink ?? undefined).catch((e) => {
+      const msg = e instanceof Error ? e.message : String(e);
+      setAutosaveError(msg);
+    });
   });
 
   els.shareScene?.addEventListener("click", async () => {
