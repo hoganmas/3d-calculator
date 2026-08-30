@@ -1560,6 +1560,9 @@ export const PRESETS: Record<string, PresetDef> = {
     label: "z = sin(x + 2πt) cos(y)",
     expressions: [
       {
+        latex: String.raw`z=\sin\left(x+2\pi t\right)\cos\left(y\right)`,
+      },
+      {
         latex: "t=0",
         autoParam: true,
         sliderMin: 0,
@@ -1568,9 +1571,6 @@ export const PRESETS: Record<string, PresetDef> = {
         sliderAnimating: true,
         sliderAnimMode: "loop",
         sliderPhase: 0,
-      },
-      {
-        latex: String.raw`y=\sin\left(x+2\pi t\right)\cos\left(z\right)`,
       },
     ],
     params: {

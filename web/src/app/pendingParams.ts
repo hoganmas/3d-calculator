@@ -161,7 +161,8 @@ export function pendingParamErrorMessage(names: string[]): string | null {
 
 /** Insert missing `name=value` expression rows at the bottom (sorted) without UI notify. */
 export function ensureParamExprRows(names: string[]) {
-  const missing = [...new Set(names)].filter(Boolean).sort();
+  const defined = collectDefinedParamNames();
+  const missing = [...new Set(names)].filter((n) => n && !defined.has(n)).sort();
   if (!missing.length) return false;
   for (const name of missing) {
     const seed = state.pendingParamSeed[name] ?? {};

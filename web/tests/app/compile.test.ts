@@ -222,8 +222,9 @@ export async function run() {
         applyPreset("sincos");
         const rows = listExpressions().filter((e) => String(e.latex || "").trim());
         assert(rows.length >= 2, "preset rows");
-        assert(rows.some((r) => r.latex.includes("sin")), "field row");
-        assert(rows.some((r) => r.latex.startsWith("t=")), "param row");
+        assert(rows[0]!.latex.includes("sin"), "field row first");
+        assert(rows[1]!.latex.startsWith("t="), "param row second");
+        assert(rows.filter((r) => r.latex.startsWith("t=")).length === 1, "single t row");
       },
     },
     {
