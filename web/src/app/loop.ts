@@ -38,6 +38,7 @@ import { hudText, refreshMetricsDump } from "./hud.js";
 import { isSplashContentReady, markSplashFrameReady } from "./splash.js";
 import { startupMark } from "./startupProfile.js";
 import { syncKeyframeLoadBar } from "./keyframeLoadBar.js";
+import { tickPerfAdapt } from "./perfAdapt.js";
 
 let splashFrameReported = false;
 
@@ -106,6 +107,7 @@ function frame(rafNow: number) {
     state.loopFps = (state.loopFpsFrames * 1000) / winMs;
     state.loopFpsFrames = 0;
     state.loopFpsLast = t0;
+    tickPerfAdapt(t0);
     if (els.hud) els.hud.textContent = hudText();
     refreshMetricsDump();
   }

@@ -107,6 +107,10 @@ export function applyQualityFromState(opts: { refit?: boolean; reseedFlow?: bool
   }
 }
 
+export function markQualityUserOverride() {
+  state.qualityUserOverrideAt = performance.now();
+}
+
 export function initProdSettingsUi() {
   if (isProdUi()) {
     document.documentElement.dataset.prodUi = "true";
@@ -140,6 +144,7 @@ export function wireQualityControls(onChange: () => void) {
     else if (kind === "scalar") state.scalarQuality = q;
     else if (kind === "surface") state.surfaceQuality = q;
     else state.vectorQuality = q;
+    markQualityUserOverride();
     applyQualityFromState();
     onChange();
   };

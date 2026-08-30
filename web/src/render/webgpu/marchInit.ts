@@ -14,6 +14,8 @@ import { syncClipGpuWorldGrid } from "./gridOverlay.js";
 import { attachMarchCanvas, bindMarchCanvasContext } from "./marchCanvas.js";
 import { isClipBakeGpuReady, isClipGpuUploadReady } from "./marchReadiness.js";
 import { startupBegin, startupEnd, startupMark } from "../../app/startupProfile.js";
+import { state } from "../../app/state.js";
+import { detectDeviceTier, webGpuPowerPreference } from "../../app/deviceTier.js";
 
 let marchPipelinesPromise: Promise<boolean> | null = null;
 
@@ -70,11 +72,23 @@ export async function initClipBakeGpu(
   gpu.initPromise = (async () => {
     startupBegin("gpu.init");
     try {
-      if (!navigator.gpu) { gpu.initFailed = true; return false; }
+      if (!navigator.gpu) {
+        gpu.initFailed = true;
+        state.webGpuFailed = true;
+        return false;
+      }
       startupBegin("gpu.init.adapter");
-      const adapter = await navigator.gpu.requestAdapter();
+      const tier = detectDeviceTier();
+      state.deviceTier = tier;
+      const adapter = await navigator.gpu.requestAdapter({
+        powerPreference: webGpuPowerPreference(tier),
+      });
       startupEnd("gpu.init.adapter", { ok: !!adapter });
-      if (!adapter) { gpu.initFailed = true; return false; }
+      if (!adapter) {
+        gpu.initFailed = true;
+        state.webGpuFailed = true;
+        return false;
+      }
       gpu.timestampsSupported = adapter.features.has("timestamp-query");
       const requiredFeatures: GPUFeatureName[] = gpu.timestampsSupported ? ["timestamp-query"] : [];
       startupBegin("gpu.init.device");
@@ -139,6 +153,7 @@ export async function initClipBakeGpu(
     } catch (e) {
       console.warn("[clipBakeGpu] init failed", e);
       gpu.initFailed = true;
+      state.webGpuFailed = true;
       gpu.device = null;
       resetPipelinesOnDeviceLost();
       startupEnd("gpu.init", { source, ok: false, error: String(e) });

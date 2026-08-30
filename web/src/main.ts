@@ -6,7 +6,7 @@ import { mountExprList } from "./ui/expr-sidebar/mount.js";
 import { setExpressionsOnChange } from "./model/expressions.js";
 import { anyParamAnimating, ensureParamAnimationFromExprs } from "./model/params.js";
 import { syncExprCompileState, getExpressionErrorReport } from "./app/hud.js";
-import { initDom, els, initPanelResize, initPanelToggle } from "./app/dom.js";
+import { initDom, els, initPanelResize, initPanelToggle, refreshPanelToggleChrome } from "./app/dom.js";
 import { initScene, bindClipUniforms, resetCameraView } from "./app/scene.js";
 import { initCompile, applyPreset } from "./app/compile.js";
 import {
@@ -20,6 +20,8 @@ import { clipUniforms, initWebglFallback, ensureSceneGpuUpload, warmClipGpuInit 
 import { initPresentation, resize, bindHudText } from "./app/presentation.js";
 import { hudText, copyMetricsToClipboard } from "./app/hud.js";
 import { initProdSettingsUi } from "./app/quality.js";
+import { applyBootPerfTier } from "./app/perfAdapt.js";
+import { detectDeviceTier } from "./app/deviceTier.js";
 import { startRenderLoop } from "./app/loop.js";
 import { state } from "./app/state.js";
 import { initWebMCP } from "./app/webmcp.js";
@@ -47,6 +49,7 @@ initTearDebug();
 initStartupProfile();
 initTheme();
 initDom();
+state.deviceTier = detectDeviceTier();
 initProdSettingsUi();
 initWebglFallback();
 bindClipUniforms(clipUniforms);
@@ -139,6 +142,8 @@ async function bootstrap() {
     initCompile();
     startupEnd("boot.init-compile");
   }
+  applyBootPerfTier(restored);
+  refreshPanelToggleChrome();
   ensureParamAnimationFromExprs();
   state.exprListApi?.render();
   markSplashSidebarReady();

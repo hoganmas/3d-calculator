@@ -8,6 +8,7 @@ import { state } from "./state.js";
 import { renderer } from "./scene.js";
 import { clipUniforms, useGpuClipPath } from "./webglFallback.js";
 import { isProdUi } from "./quality.js";
+import { perfAdaptHudSuffix } from "./perfAdapt.js";
 import {
   isoMarchDownscale,
   marchDownscale,
@@ -113,7 +114,7 @@ export function hudText() {
       lastErrorReport && lastErrorReport.errorCount > 0
         ? ` · ${lastErrorReport.errorCount} expr err`
         : "";
-    return `laplaci · ${hudFpsText()}${errHint}`;
+    return `laplaci · ${hudFpsText()}${perfAdaptHudSuffix(performance.now())}${errHint}`;
   }
   const w = els.viewport.clientWidth;
   const h = Math.max(els.viewport.clientHeight, 1);

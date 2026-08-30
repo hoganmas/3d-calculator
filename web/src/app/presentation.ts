@@ -295,5 +295,13 @@ export function initPresentation() {
   els.boxSize.addEventListener("change", syncBoundsSlider);
 
   window.addEventListener("resize", resize);
+  initVisualViewportResize();
   resize();
+}
+
+function initVisualViewportResize() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  vv.addEventListener("resize", resize);
+  vv.addEventListener("scroll", resize);
 }

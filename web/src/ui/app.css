@@ -25,11 +25,11 @@
       #panel {
         position: absolute;
         z-index: 5;
-        top: var(--panel-inset);
-        left: var(--panel-inset);
-        bottom: var(--panel-inset);
+        top: calc(var(--panel-inset) + var(--safe-top));
+        left: calc(var(--panel-inset) + var(--safe-left));
+        bottom: calc(var(--panel-inset) + var(--safe-bottom));
         width: var(--panel-w);
-        max-width: calc(100vw - 2 * var(--panel-inset));
+        max-width: calc(100vw - 2 * var(--panel-inset) - var(--safe-left) - var(--safe-right));
         padding: 14px 16px 18px;
         overflow: auto;
         display: flex;
@@ -1157,9 +1157,10 @@
         backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
         -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
         color: var(--text);
-        max-width: min(440px, calc(100vw - 28px));
+        max-width: min(440px, calc(100vw - 28px - var(--safe-left) - var(--safe-right)));
         width: 100%;
         max-height: min(88vh, 720px);
+        margin: max(14px, var(--safe-top)) auto max(14px, var(--safe-bottom));
         overflow: hidden;
         box-shadow: var(--glass-shadow-dialog), var(--glass-fresnel);
       }
@@ -1412,9 +1413,9 @@
       .viewport-toolbar {
         position: absolute;
         z-index: 3;
-        top: calc(var(--panel-inset) + var(--panel-cover-h) + 8px);
+        top: calc(var(--panel-inset) + var(--panel-cover-h) + var(--safe-top) + 8px);
         left: calc(
-          var(--panel-inset) + var(--panel-cover-w) + 4px + 12px * (1 - var(--panel-progress))
+          var(--panel-inset) + var(--panel-cover-w) + var(--safe-left) + 4px + 12px * (1 - var(--panel-progress))
         );
         display: flex;
         align-items: center;
@@ -1428,9 +1429,9 @@
       #hud {
         position: absolute;
         left: calc(
-          var(--panel-inset) + var(--panel-cover-w) + 4px + 12px * (1 - var(--panel-progress))
+          var(--panel-inset) + var(--panel-cover-w) + var(--safe-left) + 4px + 12px * (1 - var(--panel-progress))
         );
-        bottom: 12px;
+        bottom: calc(12px + var(--safe-bottom));
         font-size: 11px;
         color: var(--muted);
         pointer-events: none;
@@ -1557,32 +1558,53 @@
       }
       @media (max-width: 800px) {
         #panel {
-          top: var(--panel-inset);
-          left: var(--panel-inset);
-          right: var(--panel-inset);
+          top: calc(var(--panel-inset) + var(--safe-top));
+          left: calc(var(--panel-inset) + var(--safe-left));
+          right: calc(var(--panel-inset) + var(--safe-right));
           bottom: auto;
           width: auto;
           height: var(--panel-h);
-          max-height: calc(100vh - var(--panel-inset) - 160px);
+          max-height: calc(100vh - var(--panel-inset) - var(--safe-top) - var(--safe-bottom) - 160px);
         }
         #panelResize {
-          top: calc(var(--panel-inset) + var(--panel-h) - 6px);
-          left: var(--panel-inset);
-          right: var(--panel-inset);
+          top: calc(var(--panel-inset) + var(--panel-h) + var(--safe-top) - 6px);
+          left: calc(var(--panel-inset) + var(--safe-left));
+          right: calc(var(--panel-inset) + var(--safe-right));
           bottom: auto;
           width: auto;
           height: 12px;
           cursor: row-resize;
         }
         .viewport-toolbar {
-          top: calc(var(--panel-inset) + var(--panel-cover-h) + 12px);
-          left: calc(var(--panel-inset) + 4px);
+          top: calc(var(--panel-inset) + var(--panel-cover-h) + var(--safe-top) + 12px);
+          left: calc(var(--panel-inset) + var(--safe-left) + 4px);
         }
         #hud {
-          left: calc(var(--panel-inset) + 4px);
+          left: calc(var(--panel-inset) + var(--safe-left) + 4px);
         }
         .kf-load-bar {
-          left: calc(var(--panel-inset) + 4px);
-          bottom: 48px;
+          left: calc(var(--panel-inset) + var(--safe-left) + 4px);
+          bottom: calc(48px + var(--safe-bottom));
+        }
+      }
+
+      @media (max-width: 480px) {
+        .settings-dialog .row3 {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (pointer: coarse) {
+        .icon-btn {
+          width: 44px;
+          height: 44px;
+        }
+        .expr-param-play,
+        .expr-param-anim-opts {
+          width: 44px;
+          height: 44px;
+        }
+        html[data-panel-layout="horizontal"] #panelResize {
+          height: 20px;
         }
       }

@@ -325,6 +325,12 @@ function runPanelTransition(onResize: () => void) {
 }
 
 /** Toggle sidebar visibility (wide left dock or narrow top strip). */
+export function refreshPanelToggleChrome() {
+  const btn = els.togglePanel;
+  if (btn) syncPanelToggleChrome(btn);
+}
+
+/** Toggle sidebar visibility (wide left dock or narrow top strip). */
 export function initPanelToggle(onResize: () => void) {
   const btn = els.togglePanel;
   if (!btn) return;
