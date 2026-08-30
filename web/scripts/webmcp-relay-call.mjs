@@ -1,13 +1,13 @@
 /**
- * Call a Laplaci WebMCP tool via the local relay WITHOUT opening new browser tabs.
+ * Call a Laplacian WebMCP tool via the local relay WITHOUT opening new browser tabs.
  *
  * Usage:
- *   node scripts/webmcp-relay-call.mjs laplaci_setup_lava_lamp
- *   node scripts/webmcp-relay-call.mjs laplaci_get_state '{}'
- *   node scripts/webmcp-relay-call.mjs laplaci_set_render_settings '{"boxSize":6}'
+ *   node scripts/webmcp-relay-call.mjs laplacian_setup_lava_lamp
+ *   node scripts/webmcp-relay-call.mjs laplacian_get_state '{}'
+ *   node scripts/webmcp-relay-call.mjs laplacian_set_render_settings '{"boxSize":6}'
  *
  * Prerequisite: ONE tab already open at http://127.0.0.1:5173/3d-calculator/?webmcp=1
- * Your MCP client’s laplaci-webmcp server must be running (or this script starts its own relay).
+ * Your MCP client’s laplacian-webmcp server must be running (or this script starts its own relay).
  */
 import { spawn } from "node:child_process";
 

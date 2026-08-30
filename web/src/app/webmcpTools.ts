@@ -1,5 +1,5 @@
 /**
- * Laplaci WebMCP tools — imperative registrations wrapping app/model APIs.
+ * Laplacian WebMCP tools — imperative registrations wrapping app/model APIs.
  */
 import { PRESETS } from "../math/fit.js";
 import {
@@ -36,7 +36,7 @@ import { buildCapabilities } from "./webmcpCapabilities.js";
 
 const PRESET_KEYS = Object.keys(PRESETS);
 
-const CAPS_HINT = "Call laplaci_get_capabilities for full preset list, LaTeX syntax, limits, and tool reference.";
+const CAPS_HINT = "Call laplacian_get_capabilities for full preset list, LaTeX syntax, limits, and tool reference.";
 
 export type ToolResult = { ok: true; data: unknown } | { ok: false; error: string };
 
@@ -170,7 +170,7 @@ type ToolDef = {
 function tools(): ToolDef[] {
   return [
     {
-      name: "laplaci_get_capabilities",
+      name: "laplacian_get_capabilities",
       description:
         "Complete reference for MCP agents: all presets (keys, labels, latex, param seeds), LaTeX/expression syntax, spatial symbols, animation modes, render setting limits, tool catalog, and WebMCP setup notes. Read this first.",
       readOnly: true,
@@ -178,7 +178,7 @@ function tools(): ToolDef[] {
       execute: async () => ok(buildCapabilities()),
     },
     {
-      name: "laplaci_get_state",
+      name: "laplacian_get_state",
       description: `Snapshot of expressions, parameters, render settings, selection, and compile meta. ${CAPS_HINT}`,
       readOnly: true,
       inputSchema: { type: "object", properties: {} },
@@ -197,7 +197,7 @@ function tools(): ToolDef[] {
         }),
     },
     {
-      name: "laplaci_get_metrics",
+      name: "laplacian_get_metrics",
       description: "Diagnostics metrics report (same as Settings → Diagnostics). Read-only.",
       readOnly: true,
       inputSchema: { type: "object", properties: {} },
@@ -207,7 +207,7 @@ function tools(): ToolDef[] {
       },
     },
     {
-      name: "laplaci_get_compile_status",
+      name: "laplacian_get_compile_status",
       description: "Run compile sync and return ok/error plus structured expression errors.",
       readOnly: true,
       inputSchema: { type: "object", properties: {} },
@@ -235,7 +235,7 @@ function tools(): ToolDef[] {
       },
     },
     {
-      name: "laplaci_get_expression_errors",
+      name: "laplacian_get_expression_errors",
       description:
         "Structured report of expression compile warnings, parameter errors, and global compile failures. Runs compile sync first.",
       readOnly: true,
@@ -247,14 +247,14 @@ function tools(): ToolDef[] {
       },
     },
     {
-      name: "laplaci_list_expressions",
+      name: "laplacian_list_expressions",
       description: "List all expression rows with id, latex, enabled, warnings.",
       readOnly: true,
       inputSchema: { type: "object", properties: {} },
       execute: async () => ok({ expressions: listExpressions().map(serializeExpr) }),
     },
     {
-      name: "laplaci_list_params",
+      name: "laplacian_list_params",
       description: "List named parameters with values, ranges, animation state.",
       readOnly: true,
       inputSchema: { type: "object", properties: {} },
@@ -262,14 +262,14 @@ function tools(): ToolDef[] {
         ok({ params: listParamNames().map((n) => serializeParam(n)).filter(Boolean) }),
     },
     {
-      name: "laplaci_get_render_settings",
+      name: "laplacian_get_render_settings",
       description: "Read poly deg, scale, steps, box size, march downscale, iso interpolation, preset.",
       readOnly: true,
       inputSchema: { type: "object", properties: {} },
       execute: async () => ok(getRenderSettingsSnapshot()),
     },
     {
-      name: "laplaci_set_expression",
+      name: "laplacian_set_expression",
       description:
         "Update an expression row by id. Triggers Chebyshev refit when latex changes. May take seconds on large deg.",
       inputSchema: {
@@ -302,7 +302,7 @@ function tools(): ToolDef[] {
       },
     },
     {
-      name: "laplaci_add_expression",
+      name: "laplacian_add_expression",
       description: "Insert a new expression row. Triggers refit when latex is non-empty.",
       inputSchema: {
         type: "object",
@@ -328,7 +328,7 @@ function tools(): ToolDef[] {
       },
     },
     {
-      name: "laplaci_remove_expression",
+      name: "laplacian_remove_expression",
       description: "Remove an expression row by id. Triggers refit.",
       inputSchema: {
         type: "object",
@@ -344,7 +344,7 @@ function tools(): ToolDef[] {
       },
     },
     {
-      name: "laplaci_apply_preset",
+      name: "laplacian_apply_preset",
       description: `Load a built-in preset by key. Keys: ${PRESET_KEYS.join(", ")}. Triggers full Chebyshev refit. ${CAPS_HINT}`,
       inputSchema: {
         type: "object",
@@ -352,7 +352,7 @@ function tools(): ToolDef[] {
           preset: {
             type: "string",
             enum: PRESET_KEYS,
-            description: "Preset key — see laplaci_get_capabilities for labels and latex.",
+            description: "Preset key — see laplacian_get_capabilities for labels and latex.",
           },
         },
         required: ["preset"],
@@ -373,7 +373,7 @@ function tools(): ToolDef[] {
       },
     },
     {
-      name: "laplaci_setup_lava_lamp",
+      name: "laplacian_setup_lava_lamp",
       description:
         "Demo/test: load the animated 3-blob lava-lamp preset (9 drifting position params), start all animations, and tune render settings for smooth volume view. Equivalent to apply_preset lavalamp + start all param animations.",
       inputSchema: {
@@ -390,7 +390,7 @@ function tools(): ToolDef[] {
         setupLavaLamp({ tuneRender: input.tuneRender !== false }),
     },
     {
-      name: "laplaci_set_param",
+      name: "laplacian_set_param",
       description: "Set a named parameter value. Stops animation unless keepAnimating is true.",
       inputSchema: {
         type: "object",
@@ -413,7 +413,7 @@ function tools(): ToolDef[] {
       },
     },
     {
-      name: "laplaci_set_param_range",
+      name: "laplacian_set_param_range",
       description: "Set min/max slider range for a parameter.",
       inputSchema: {
         type: "object",
@@ -437,7 +437,7 @@ function tools(): ToolDef[] {
       },
     },
     {
-      name: "laplaci_set_param_animation",
+      name: "laplacian_set_param_animation",
       description: "Start, stop, or toggle parameter slider animation.",
       inputSchema: {
         type: "object",
@@ -473,7 +473,7 @@ function tools(): ToolDef[] {
       },
     },
     {
-      name: "laplaci_set_all_param_animation",
+      name: "laplacian_set_all_param_animation",
       description:
         "Start or stop slider animation on every non-driven parameter. Use after loading animated presets (pulse, twist, lavalamp).",
       inputSchema: {
@@ -494,7 +494,7 @@ function tools(): ToolDef[] {
       },
     },
     {
-      name: "laplaci_set_render_settings",
+      name: "laplacian_set_render_settings",
       description:
         "Update render/fit settings (deg, scale, steps, box size, march downscale). deg/box trigger refit.",
       inputSchema: {
@@ -510,7 +510,7 @@ function tools(): ToolDef[] {
       execute: async (input) => setRenderSettings(input),
     },
     {
-      name: "laplaci_reset_camera",
+      name: "laplacian_reset_camera",
       description: "Reset orbit camera to the default view.",
       inputSchema: { type: "object", properties: {} },
       execute: async () => resetCamera(),
@@ -518,8 +518,8 @@ function tools(): ToolDef[] {
   ];
 }
 
-/** Register all Laplaci tools; abort `signal` to unregister. */
-export async function registerLaplaciTools(signal: AbortSignal) {
+/** Register all Laplacian tools; abort `signal` to unregister. */
+export async function registerLaplacianTools(signal: AbortSignal) {
   const ctx = document.modelContext;
   if (!ctx?.registerTool) {
     console.warn("[WebMCP] document.modelContext.registerTool unavailable");
@@ -548,6 +548,6 @@ export async function registerLaplaciTools(signal: AbortSignal) {
     );
     count++;
   }
-  console.info(`[WebMCP] Registered ${count} Laplaci tools`);
+  console.info(`[WebMCP] Registered ${count} Laplacian tools`);
   return count;
 }

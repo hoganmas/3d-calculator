@@ -1,11 +1,11 @@
 /**
- * Download, import, and share Laplaci scene documents.
+ * Download, import, and share Laplacian scene documents.
  */
 import {
   applyDocument,
   serializeDocument,
   validateDocument,
-  type LaplaciDocument,
+  type LaplacianDocument,
 } from "./document.js";
 import { persistNow } from "./autosave.js";
 
@@ -22,7 +22,7 @@ export function canShareFiles(): boolean {
   }
 }
 
-export function downloadDocument(doc?: LaplaciDocument, filename = "scene.lap.json") {
+export function downloadDocument(doc?: LaplacianDocument, filename = "scene.lap.json") {
   const payload = doc ?? serializeDocument();
   const json = JSON.stringify(payload, null, 2);
   const blob = new Blob([json], { type: "application/json" });
@@ -37,7 +37,7 @@ export function downloadDocument(doc?: LaplaciDocument, filename = "scene.lap.js
   URL.revokeObjectURL(url);
 }
 
-export async function readDocumentFromFile(file: File): Promise<LaplaciDocument> {
+export async function readDocumentFromFile(file: File): Promise<LaplacianDocument> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(await file.text());
@@ -53,7 +53,7 @@ export async function importDocumentFromFile(file: File) {
   await persistNow();
 }
 
-export async function shareDocument(doc?: LaplaciDocument): Promise<boolean> {
+export async function shareDocument(doc?: LaplacianDocument): Promise<boolean> {
   const payload = doc ?? serializeDocument();
   const json = JSON.stringify(payload, null, 2);
   const blob = new Blob([json], { type: "application/json" });
@@ -61,13 +61,13 @@ export async function shareDocument(doc?: LaplaciDocument): Promise<boolean> {
   if (typeof navigator.share === "function" && navigator.canShare?.({ files: [file] })) {
     await navigator.share({
       files: [file],
-      title: payload.meta?.title ?? "Laplaci scene",
+      title: payload.meta?.title ?? "Laplacian scene",
     });
     return true;
   }
   return false;
 }
 
-export function exportCurrentDocument(): LaplaciDocument {
+export function exportCurrentDocument(): LaplacianDocument {
   return serializeDocument();
 }

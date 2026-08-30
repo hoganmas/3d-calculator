@@ -1,4 +1,4 @@
-/** Shared domain types for Laplaci (expressions → bake → GPU). */
+/** Shared domain types for Laplacian (expressions → bake → GPU). */
 
 export type AnimMode = "pingpong" | "loop";
 export type ExprKind = "parameter" | "alias" | "funcdef" | "constraint" | "definition" | "bare";

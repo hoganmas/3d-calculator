@@ -27,7 +27,7 @@ export function getWidgetOriginsForRelay(origin = getPageOrigin()): string {
 
 export function buildMcpConfig(origin = getPageOrigin()): {
   mcpServers: {
-    "laplaci-webmcp": {
+    "laplacian-webmcp": {
       command: string;
       args: string[];
     };
@@ -35,7 +35,7 @@ export function buildMcpConfig(origin = getPageOrigin()): {
 } {
   return {
     mcpServers: {
-      "laplaci-webmcp": {
+      "laplacian-webmcp": {
         command: "npx",
         args: [
           "-y",
@@ -53,7 +53,7 @@ export function buildMcpConfigJson(origin = getPageOrigin()): string {
 }
 
 export function setupDismissStorageKey(origin = getPageOrigin()): string {
-  return `laplaci-webmcp-setup-dismissed:${origin}`;
+  return `laplacian-webmcp-setup-dismissed:${origin}`;
 }
 
 export function dismissSetupPrompt(origin = getPageOrigin()) {

@@ -1,4 +1,4 @@
-/** Diagnostic logging for iso/keyframe buffer tearing. Enable via ?tearDebug=1 or window.__laplaciTearDebug = true */
+/** Diagnostic logging for iso/keyframe buffer tearing. Enable via ?tearDebug=1 or window.__laplacianTearDebug = true */
 
 const MAX_EVENTS = 200;
 const events: { t: number; event: string; data: Record<string, unknown> }[] = [];
@@ -11,8 +11,8 @@ function computeEnabled(): boolean {
   try {
     return (
       new URLSearchParams(window.location.search).has("tearDebug") ||
-      localStorage.getItem("laplaciTearDebug") === "1" ||
-      (window as Window & { __laplaciTearDebug?: boolean }).__laplaciTearDebug === true
+      localStorage.getItem("laplacianTearDebug") === "1" ||
+      (window as Window & { __laplacianTearDebug?: boolean }).__laplacianTearDebug === true
     );
   } catch {
     return false;
@@ -27,8 +27,8 @@ export function isTearDebugEnabled(): boolean {
 export function setTearDebugEnabled(on: boolean): void {
   enabled = on;
   if (typeof window === "undefined") return;
-  if (on) localStorage.setItem("laplaciTearDebug", "1");
-  else localStorage.removeItem("laplaciTearDebug");
+  if (on) localStorage.setItem("laplacianTearDebug", "1");
+  else localStorage.removeItem("laplacianTearDebug");
   console.log(`[tear] debug ${on ? "enabled" : "disabled"}`);
 }
 
@@ -84,17 +84,17 @@ export function initTearDebug(): void {
   if (typeof window === "undefined") return;
   if (enabled === null) enabled = computeEnabled();
   const w = window as Window & {
-    __laplaciTearDebug?: boolean | (() => ReturnType<typeof getTearDebugSnapshot>);
-    __laplaciTear?: () => ReturnType<typeof getTearDebugSnapshot>;
-    __laplaciKeyframes?: () => Promise<{
+    __laplacianTearDebug?: boolean | (() => ReturnType<typeof getTearDebugSnapshot>);
+    __laplacianTear?: () => ReturnType<typeof getTearDebugSnapshot>;
+    __laplacianKeyframes?: () => Promise<{
       load: unknown;
       layers: unknown;
       tear: ReturnType<typeof getTearDebugSnapshot>;
     }>;
   };
-  w.__laplaciTear = getTearDebugSnapshot;
-  w.__laplaciTearDebug = w.__laplaciTearDebug === true ? true : getTearDebugSnapshot;
-  w.__laplaciKeyframes = async () => {
+  w.__laplacianTear = getTearDebugSnapshot;
+  w.__laplacianTearDebug = w.__laplacianTearDebug === true ? true : getTearDebugSnapshot;
+  w.__laplacianKeyframes = async () => {
     const kf = await import("../model/keyframes.js");
     return {
       load: kf.getKeyframeLoadSummary(),
@@ -104,8 +104,8 @@ export function initTearDebug(): void {
   };
   if (isTearDebugEnabled()) {
     console.log(
-      '[tear] debug ON — filter console with "[tear]", copy logs via copy(JSON.stringify(window.__laplaciTear())); ' +
-        "keyframe stall probe: await window.__laplaciKeyframes()",
+      '[tear] debug ON — filter console with "[tear]", copy logs via copy(JSON.stringify(window.__laplacianTear())); ' +
+        "keyframe stall probe: await window.__laplacianKeyframes()",
     );
   }
 }

@@ -21,8 +21,8 @@ function computeEnabled(): boolean {
   try {
     return (
       new URLSearchParams(window.location.search).has("startupProfile") ||
-      localStorage.getItem("laplaciStartupProfile") === "1" ||
-      (window as Window & { __laplaciStartupProfile?: boolean }).__laplaciStartupProfile === true
+      localStorage.getItem("laplacianStartupProfile") === "1" ||
+      (window as Window & { __laplacianStartupProfile?: boolean }).__laplacianStartupProfile === true
     );
   } catch {
     return false;
@@ -37,8 +37,8 @@ export function isStartupProfilingActive(): boolean {
 export function setStartupProfilingEnabled(on: boolean): void {
   enabled = on;
   if (typeof window === "undefined") return;
-  if (on) localStorage.setItem("laplaciStartupProfile", "1");
-  else localStorage.removeItem("laplaciStartupProfile");
+  if (on) localStorage.setItem("laplacianStartupProfile", "1");
+  else localStorage.removeItem("laplacianStartupProfile");
 }
 
 function pushMark(name: string, detail?: Record<string, unknown>, durationMs?: number): void {
@@ -144,15 +144,15 @@ export function initStartupProfile(): void {
   if (enabled === null) enabled = computeEnabled();
   startupMark("boot.module-loaded");
   const w = window as Window & {
-    __laplaciStartup?: () => ReturnType<typeof getStartupProfileSnapshot>;
-    __laplaciStartupReport?: () => void;
-    __laplaciStartupProfile?: boolean;
+    __laplacianStartup?: () => ReturnType<typeof getStartupProfileSnapshot>;
+    __laplacianStartupReport?: () => void;
+    __laplacianStartupProfile?: boolean;
   };
-  w.__laplaciStartup = getStartupProfileSnapshot;
-  w.__laplaciStartupReport = () => startupReport("manual");
+  w.__laplacianStartup = getStartupProfileSnapshot;
+  w.__laplacianStartupReport = () => startupReport("manual");
   if (isStartupProfilingActive()) {
     console.log(
-      "[startup] profiling ON — timeline on splash dismiss; copy via JSON.stringify(window.__laplaciStartup())",
+      "[startup] profiling ON — timeline on splash dismiss; copy via JSON.stringify(window.__laplacianStartup())",
     );
   }
 }

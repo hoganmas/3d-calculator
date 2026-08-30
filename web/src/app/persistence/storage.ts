@@ -1,9 +1,9 @@
 /**
  * IndexedDB two-slot write-ahead autosave storage.
  */
-import { validateDocument, type LaplaciDocument } from "./documentSchema.js";
+import { validateDocument, type LaplacianDocument } from "./documentSchema.js";
 
-export const DB_NAME = "laplaci-autosave";
+export const DB_NAME = "laplacian-autosave";
 const STORE_NAME = "records";
 const DB_VERSION = 1;
 
@@ -143,7 +143,7 @@ function slotKey(slot: StorageSlot): "slotA" | "slotB" {
   return slot === "A" ? "slotA" : "slotB";
 }
 
-function tryParseSlot(json: string | null, expectedChecksum?: string): LaplaciDocument | null {
+function tryParseSlot(json: string | null, expectedChecksum?: string): LaplacianDocument | null {
   if (!json) return null;
   if (expectedChecksum && checksumOf(json) !== expectedChecksum) return null;
   try {
@@ -176,7 +176,7 @@ export async function writeDocument(json: string, revision: number, savedAt?: st
   });
 }
 
-export async function readDocument(): Promise<LaplaciDocument | null> {
+export async function readDocument(): Promise<LaplacianDocument | null> {
   const store = await getBackend();
   const headRaw = await store.get("head");
   if (!headRaw) return null;
