@@ -1557,7 +1557,7 @@ export function compileExpr(
 /** Preset densities as LaTeX (shown in the MathLive field). */
 export const PRESETS: Record<string, PresetDef> = {
   sincos: {
-    label: "y = sin(x + 2πt) cos(z)",
+    label: "z = sin(x + 2πt) cos(y)",
     expressions: [
       {
         latex: "t=0",

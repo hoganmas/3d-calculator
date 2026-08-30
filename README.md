@@ -2,7 +2,7 @@
 
 Multi-expression **3D polynomial calculator** in the browser. Enter math with MathLive, fit each expression to a Chebyshev polynomial, IDCT to a density volume, then ray-march manifolds (isosurfaces) and density clouds (Beer–Lambert) with shared free parameters.
 
-**Live demo:** [hoganmas.github.io/3d-calculator](https://hoganmas.github.io/3d-calculator/)
+**Live demo:** [laplaci.com](https://laplaci.com/)
 
 ## Quick start
 

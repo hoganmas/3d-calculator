@@ -110,7 +110,7 @@ import {
 
   onMount(() => {
     if (!mfEl) return;
-    configureMathField(mfEl);
+    configureMathField(mfEl, isParamDef ? "Parameter definition" : "Math expression");
     setFieldLatex(mfEl, item.latex || "");
   });
 
@@ -324,6 +324,7 @@ import {
         bind:this={mfEl}
         class="expr-field"
         class:invalid={!!rowError}
+        aria-label={isParamDef ? "Parameter definition" : "Math expression"}
         title={rowError ?? undefined}
         onfocus={onMfFocus}
         onblur={onMfBlur}

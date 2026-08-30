@@ -125,7 +125,18 @@ export function latexAroundCaret(mf: MathfieldElement) {
   return { left: full.slice(0, pos), right: full.slice(pos), pos };
 }
 
-export function configureMathField(mf: MathfieldElement) {
+export function configureMathField(mf: MathfieldElement, label = "Math expression") {
+  mf.setAttribute("aria-label", label);
+  const syncKeyboardSinkLabel = () => {
+    const sink = mf.shadowRoot?.querySelector<HTMLElement>(".ML__keyboard-sink");
+    if (sink && sink.getAttribute("aria-label") !== label) {
+      sink.setAttribute("aria-label", label);
+    }
+  };
+  syncKeyboardSinkLabel();
+  queueMicrotask(syncKeyboardSinkLabel);
+  requestAnimationFrame(syncKeyboardSinkLabel);
+  mf.addEventListener("focusin", syncKeyboardSinkLabel);
   mf.setAttribute("math-virtual-keyboard-policy", "manual");
   mf.setAttribute("virtual-keyboard-mode", "off");
   mf.setAttribute("smart-fence", "");

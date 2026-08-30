@@ -2,7 +2,7 @@
 
 Multi-expression 3D polynomial calculator (Three.js + WebGPU).
 
-**Live demo:** [hoganmas.github.io/3d-calculator](https://hoganmas.github.io/3d-calculator/)
+**Live demo:** [laplaci.com](https://laplaci.com/)
 
 **Pipeline:** Fit each expression with a Chebyshev polynomial → IDCT dens volume → draw manifolds (opaque isosurfaces) then density clouds (Beer–Lambert), with shared free parameters.
 
@@ -32,7 +32,7 @@ See [`tests/README.md`](tests/README.md) for layout. Integration smoke tests (`t
 
 ## Build
 
-Production build uses `base: /3d-calculator/` for GitHub Pages project hosting:
+Production build uses `base: /` for deployment at [laplaci.com](https://laplaci.com/):
 
 ```bash
 npm run build

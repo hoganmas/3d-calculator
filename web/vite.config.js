@@ -19,7 +19,7 @@ function resolveTsFromJs() {
 }
 
 export default defineConfig({
-  base: "/3d-calculator/",
+  base: "/",
   plugins: [svelte(), resolveTsFromJs()],
   optimizeDeps: {
     // Pre-bundle large ESM deps added after first dev start (avoids 504 Outdated Optimize Dep).

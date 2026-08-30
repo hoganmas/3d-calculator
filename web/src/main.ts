@@ -45,6 +45,7 @@ import {
   applyExpressionsFromFragment,
   copyExpressionShareLink,
 } from "./app/persistence/exprShare.js";
+import { installOgCapture } from "./app/ogCapture.js";
 
 initSplash();
 initKeyframeLoadBar();
@@ -157,6 +158,9 @@ async function bootstrap() {
     uploadFit({ fromAnim: anyParamAnimating() });
   }, 0);
   startupEnd("boot.bootstrap");
+  if (new URLSearchParams(location.search).has("ogCapture")) {
+    installOgCapture();
+  }
 }
 
 function initProjectActions() {

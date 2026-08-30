@@ -4,7 +4,7 @@ import { allKeyframesComplete, hasActiveKeyframeCaches, keyframesSplashReady } f
 import { startupMark, startupReport } from "./startupProfile.js";
 
 const SPLASH_TIMEOUT_MS = 15_000;
-const SPLASH_EXIT_MS = 400;
+const SPLASH_EXIT_MS = 950;
 
 let splashEl: HTMLElement | null = null;
 let timeoutId = 0;
@@ -54,12 +54,12 @@ function fadeSplashOut() {
 
 function beginSplashExit(svg: SVGSVGElement) {
   svg.classList.add("splash-exit");
-  for (const el of svg.querySelectorAll(".splash-nabla-sweep, .splash-two-stroke, .splash-two-layer")) {
+  for (const el of svg.querySelectorAll(".splash-nabla-sweep, .splash-two-stroke, .splash-two-reveal, .splash-two-layer")) {
     el.getAnimations().forEach((anim) => anim.cancel());
     if (el instanceof SVGElement) el.style.animation = "none";
   }
   void svg.getBoundingClientRect();
-  for (const el of svg.querySelectorAll(".splash-nabla-sweep, .splash-two-stroke, .splash-two-layer")) {
+  for (const el of svg.querySelectorAll(".splash-nabla-sweep, .splash-two-stroke, .splash-two-reveal, .splash-two-layer")) {
     if (el instanceof SVGElement) el.style.removeProperty("animation");
   }
 }

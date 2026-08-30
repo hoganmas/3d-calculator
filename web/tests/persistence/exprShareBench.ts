@@ -14,7 +14,7 @@ import {
 } from "../../src/app/persistence/exprShareCodec.ts";
 import type { ExprItem } from "../../src/types/models.ts";
 
-const SAMPLE_ORIGIN = "https://hoganmas.github.io/3d-calculator/";
+const SAMPLE_ORIGIN = "https://laplaci.com/";
 
 export type BenchStrategyId =
   | "compact-raw"
