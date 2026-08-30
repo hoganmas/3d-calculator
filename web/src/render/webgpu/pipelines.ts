@@ -9,6 +9,7 @@ import {
   getAxisLabelShader,
   getFxaaShader,
   getSsaoShader,
+  getBlitShader,
 } from "./shaders/compose.js";
 
 export interface PipelineBuildResult {
@@ -29,7 +30,7 @@ export async function ensurePipelinesForDegree(_deg: number): Promise<PipelineBu
   if (!gpu.device) return false;
   if (
     gpu.isoPipeline && gpu.beerPipeline && gpu.fxaaPipeline && gpu.ssaoPipeline &&
-    gpu.gridPipeline && gpu.labelPipeline &&
+    gpu.gridPipeline && gpu.labelPipeline && gpu.blitPipeline &&
     gpu.builtEpoch === PIPELINE_EPOCH
   ) {
     return {};
@@ -37,13 +38,14 @@ export async function ensurePipelinesForDegree(_deg: number): Promise<PipelineBu
 
   startupBegin("gpu.pipelines.compile-shaders");
   gpu.canvasFormat = navigator.gpu.getPreferredCanvasFormat();
-  const [isoMod, beerMod, gridMod, labelMod, fxaaMod, ssaoMod] = await Promise.all([
+  const [isoMod, beerMod, gridMod, labelMod, fxaaMod, ssaoMod, blitMod] = await Promise.all([
     compileChecked("iso", getIsoShader(MAX_GRAD_STOPS)),
     compileChecked("beer", getBeerShader(MAX_GRAD_STOPS, MAX_DENS_LAYERS)),
     compileChecked("grid", getGridShader()),
     compileChecked("axisLabel", getAxisLabelShader()),
     compileChecked("fxaa", getFxaaShader()),
     compileChecked("ssao", getSsaoShader()),
+    compileChecked("blit", getBlitShader()),
   ]);
   startupEnd("gpu.pipelines.compile-shaders");
 
@@ -187,12 +189,38 @@ export async function ensurePipelinesForDegree(_deg: number): Promise<PipelineBu
     if (err) throw new Error(`fxaa: ${err.message}`);
   }
 
+  device.pushErrorScope("validation");
+  const nextBlit = device.createRenderPipeline({
+    layout: "auto",
+    vertex: { module: blitMod, entryPoint: "vsMain" },
+    fragment: {
+      module: blitMod,
+      entryPoint: "fsMain",
+      targets: [{ format: gpu.canvasFormat, blend: blendPremul }],
+    },
+    primitive: { topology: "triangle-list" },
+  });
+  {
+    const err = await device.popErrorScope();
+    if (err) throw new Error(`blit: ${err.message}`);
+  }
+
+  if (!gpu.blitSampler) {
+    gpu.blitSampler = device.createSampler({
+      magFilter: "linear",
+      minFilter: "linear",
+      addressModeU: "clamp-to-edge",
+      addressModeV: "clamp-to-edge",
+    });
+  }
+
   gpu.isoPipeline = nextIso;
   gpu.beerPipeline = nextBeer;
   gpu.gridPipeline = nextGrid;
   gpu.labelPipeline = nextLabel;
   gpu.ssaoPipeline = nextSsao;
   gpu.fxaaPipeline = nextFxaa;
+  gpu.blitPipeline = nextBlit;
   gpu.builtEpoch = PIPELINE_EPOCH;
   gpu.labelAtlasDirty = true;
   startupEnd("gpu.pipelines.create");

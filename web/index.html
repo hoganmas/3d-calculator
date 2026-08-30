@@ -310,7 +310,10 @@
             <div class="row3">
               <label>poly deg<input id="deg" type="number" min="2" max="128" step="1" value="32" /></label>
               <label>scale<input id="scale" type="number" min="0.1" max="20" step="0.1" value="2.5" /></label>
-              <label>steps<input id="steps" type="number" min="8" max="96" step="4" value="16" /></label>
+              <label>vol steps<input id="steps" type="number" min="8" max="96" step="4" value="16" title="Beer / scalar volume ray-march steps" /></label>
+            </div>
+            <div class="row3">
+              <label>iso steps<input id="isoSteps" type="number" min="16" max="192" step="4" value="32" title="Iso-surface ray-march steps" /></label>
             </div>
           </section>
 
@@ -318,15 +321,26 @@
             <p class="settings-section-title">Rendering</p>
             <label class="march-slider-label">
               <span class="march-slider-head">
-                <span>march downscale</span>
+                <span>vol downscale</span>
                 <span id="marchScaleLabel" class="march-scale-badge">1×</span>
               </span>
               <div class="march-slider-wrap">
                 <div class="march-slider-ticks" id="marchSliderTicks" aria-hidden="true"></div>
                 <div class="march-liquid-track">
-                  <input id="marchDownscale" class="ui-slider" type="range" min="1" max="16" step="1" value="2" />
+                  <input id="marchDownscale" class="ui-slider" type="range" min="1" max="16" step="1" value="2" title="Beer / scalar volume march resolution divisor" />
                 </div>
                 <div class="march-slider-labels" id="marchSliderLabels" aria-hidden="true"></div>
+              </div>
+            </label>
+            <label class="march-slider-label">
+              <span class="march-slider-head">
+                <span>iso downscale</span>
+                <span id="isoMarchScaleLabel" class="march-scale-badge">1×</span>
+              </span>
+              <div class="march-slider-wrap">
+                <div class="march-liquid-track">
+                  <input id="isoMarchDownscale" class="ui-slider" type="range" min="1" max="16" step="1" value="2" title="Iso-surface march resolution divisor" />
+                </div>
               </div>
             </label>
           </section>

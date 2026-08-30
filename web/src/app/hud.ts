@@ -9,8 +9,10 @@ import { renderer } from "./scene.js";
 import { clipUniforms, useGpuClipPath } from "./webglFallback.js";
 import { isProdUi } from "./quality.js";
 import {
+  isoMarchDownscale,
   marchDownscale,
   marchFramebufferSize,
+  volumeFramebufferSize,
 } from "./presentation.js";
 import { compileAllExprs, fmtParamNum } from "./compile.js";
 import {
@@ -144,11 +146,15 @@ export function buildMetricsReport() {
     `deg             ${state.fitDeg}`,
     `scale           ${clipUniforms.uScale.value}`,
     `steps           ${clipUniforms.uSteps.value}`,
+    `iso_steps       ${clipUniforms.uIsoSteps.value}`,
     `box_size        ${2 * clipUniforms.uHalf.value}`,
-    `march_downscale ${marchDownscale()}×`,
-    `march_resolution ${(100 / marchDownscale()).toFixed(1)}%`,
+    `vol_downscale   ${marchDownscale()}×`,
+    `iso_downscale   ${isoMarchDownscale()}×`,
+    `vol_resolution  ${(100 / marchDownscale()).toFixed(1)}%`,
+    `iso_resolution  ${(100 / isoMarchDownscale()).toFixed(1)}%`,
     `viewport        ${fbW}×${fbH}`,
-    `march_fb_req    ${marchFramebufferSize().mw}×${marchFramebufferSize().mh}`,
+    `iso_fb_req      ${marchFramebufferSize().mw}×${marchFramebufferSize().mh}`,
+    `vol_fb_req      ${volumeFramebufferSize().mw}×${volumeFramebufferSize().mh}`,
     `gpu_march_fb    ${p.marchFbW && p.marchFbH ? `${p.marchFbW}×${p.marchFbH}` : "—"}`,
     `loop_fps        ${Math.round(state.loopFps)}`,
     `loop_ms         ${state.frameDtSmooth.toFixed(2)}`,

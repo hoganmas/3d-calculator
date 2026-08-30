@@ -108,6 +108,28 @@ export async function run() {
       },
     },
     {
+      name: "render.isoSteps defaults to steps when omitted",
+      fn: () => {
+        const raw = sampleDoc();
+        const render = { ...raw.render } as Record<string, unknown>;
+        delete render.isoSteps;
+        render.steps = 24;
+        const parsed = validateDocument({ ...raw, render });
+        assert(parsed.render.isoSteps === 24, "isoSteps defaults to steps");
+      },
+    },
+    {
+      name: "render.isoMarchDownscale defaults to marchDownscale when omitted",
+      fn: () => {
+        const raw = sampleDoc();
+        const render = { ...raw.render } as Record<string, unknown>;
+        delete render.isoMarchDownscale;
+        render.marchDownscale = 4;
+        const parsed = validateDocument({ ...raw, render });
+        assert(parsed.render.isoMarchDownscale === 4, "isoMarchDownscale defaults to marchDownscale");
+      },
+    },
+    {
       name: "revision is preserved from payload",
       fn: () => {
         const a = validateDocument(sampleDoc(1));

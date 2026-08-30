@@ -13,18 +13,23 @@ import { state } from "./state.js";
 import {
   inferQualityFromSettings,
   qualityToDeg,
+  qualityToIsoMarchDownscale,
+  qualityToIsoSteps,
   qualityToMarchDownscale,
   qualityToParticleCount,
-  qualityToSteps,
   qualityToTrailSteps,
+  qualityToVolumeSteps,
 } from "./qualityMapping.js";
 
 export {
   qualityToDeg,
+  qualityToIsoMarchDownscale,
+  qualityToIsoSteps,
   qualityToMarchDownscale,
   qualityToParticleCount,
   qualityToSteps,
   qualityToTrailSteps,
+  qualityToVolumeSteps,
 } from "./qualityMapping.js";
 
 export function isProdUi(): boolean {
@@ -42,10 +47,14 @@ export function syncQualitySliderDom() {
 /** Infer prod slider positions from current underlying render settings. */
 export function syncQualitySlidersFromSettings() {
   if (!isProdUi()) return;
+  const volumeSteps = Number(els.steps.value) || 16;
+  const volDown = Number(els.marchDownscale.value) || 1;
   const inferred = inferQualityFromSettings({
-    marchDownscale: Number(els.marchDownscale.value) || 1,
+    marchDownscale: volDown,
+    isoMarchDownscale: Number(els.isoMarchDownscale?.value) || volDown,
     deg: Number(els.deg.value) || state.fitDeg,
-    steps: Number(els.steps.value) || 16,
+    steps: volumeSteps,
+    isoSteps: Number(els.isoSteps?.value) || volumeSteps,
     flowParticleCount: state.flowParticleCount,
     flowTrailSteps: state.flowTrailSteps,
   });
@@ -60,7 +69,9 @@ export function applyQualityFromState(opts: { refit?: boolean; reseedFlow?: bool
   if (!isProdUi()) return;
 
   const marchDownscale = qualityToMarchDownscale(state.scalarQuality);
-  const steps = qualityToSteps(state.surfaceQuality);
+  const isoMarchDownscale = qualityToIsoMarchDownscale(state.surfaceQuality);
+  const volumeSteps = qualityToVolumeSteps(state.scalarQuality);
+  const isoSteps = qualityToIsoSteps(state.surfaceQuality);
   const deg = qualityToDeg(state.precisionQuality);
   const particles = qualityToParticleCount(state.vectorQuality);
   const trailSteps = qualityToTrailSteps(state.vectorQuality);
@@ -70,8 +81,10 @@ export function applyQualityFromState(opts: { refit?: boolean; reseedFlow?: bool
   const prevTrailSteps = state.flowTrailSteps;
 
   els.deg.value = String(deg);
-  els.steps.value = String(steps);
+  els.steps.value = String(volumeSteps);
+  if (els.isoSteps) els.isoSteps.value = String(isoSteps);
   els.marchDownscale.value = String(marchDownscale);
+  if (els.isoMarchDownscale) els.isoMarchDownscale.value = String(isoMarchDownscale);
   state.flowParticleCount = particles;
   state.flowTrailSteps = trailSteps;
   if (els.flowParticleCount) els.flowParticleCount.value = String(particles);

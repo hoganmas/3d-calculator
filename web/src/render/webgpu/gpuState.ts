@@ -32,6 +32,7 @@ export interface GpuState {
   canvasFormat: GPUTextureFormat;
   isoPipeline: GPURenderPipeline | null;
   beerPipeline: GPURenderPipeline | null;
+  blitPipeline: GPURenderPipeline | null;
   fxaaPipeline: GPURenderPipeline | null;
   ssaoPipeline: GPURenderPipeline | null;
   gridPipeline: GPURenderPipeline | null;
@@ -72,7 +73,12 @@ export interface GpuState {
   sceneColorAoTex: GPUTexture | null;
   sceneColorAoW: number;
   sceneColorAoH: number;
+  /** Beer / volume march color (may differ in resolution from iso scene). */
+  volColorTex: GPUTexture | null;
+  volColorW: number;
+  volColorH: number;
   fxaaSampler: GPUSampler | null;
+  blitSampler: GPUSampler | null;
   sceneConstraints: GpuSceneConstraint[];
   densPacked: boolean;
   densGradStops: RgbTriplet[][];
@@ -123,6 +129,7 @@ export const gpu: GpuState = {
   canvasFormat: "bgra8unorm",
   isoPipeline: null,
   beerPipeline: null,
+  blitPipeline: null,
   fxaaPipeline: null,
   ssaoPipeline: null,
   gridPipeline: null,
@@ -161,7 +168,11 @@ export const gpu: GpuState = {
   sceneColorAoTex: null,
   sceneColorAoW: 0,
   sceneColorAoH: 0,
+  volColorTex: null,
+  volColorW: 0,
+  volColorH: 0,
   fxaaSampler: null,
+  blitSampler: null,
   sceneConstraints: [],
   densPacked: false,
   densGradStops: [],
@@ -201,11 +212,12 @@ export const gpu: GpuState = {
   flowParticlesPerLayer: 0,
 };
 
-export const PIPELINE_EPOCH = 76;
+export const PIPELINE_EPOCH = 77;
 export const labelVertScratch = new Float32Array(18 * 6);
 
 export function resetPipelinesOnDeviceLost(): void {
   gpu.isoPipeline = gpu.beerPipeline = gpu.fxaaPipeline = gpu.ssaoPipeline = null;
+  gpu.blitPipeline = null;
   gpu.gridPipeline = gpu.labelPipeline = null;
   gpu.flowParticlesPipeline = null;
   gpu.flowParticlesParamBuf = null;

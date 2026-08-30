@@ -68,8 +68,10 @@ export async function setRenderSettings(patch: {
   deg?: number;
   scale?: number;
   steps?: number;
+  isoSteps?: number;
   boxSize?: number;
   marchDownscale?: number;
+  isoMarchDownscale?: number;
 }) {
   let refit = false;
   if (patch.deg != null && Number.isFinite(patch.deg)) {
@@ -89,8 +91,19 @@ export async function setRenderSettings(patch: {
     els.steps.value = String(Math.round(patch.steps));
     applyRenderHyperparams();
   }
+  if (patch.isoSteps != null && Number.isFinite(patch.isoSteps)) {
+    if (els.isoSteps) els.isoSteps.value = String(Math.round(patch.isoSteps));
+    applyRenderHyperparams();
+  }
   if (patch.marchDownscale != null && Number.isFinite(patch.marchDownscale)) {
     els.marchDownscale.value = String(Math.round(patch.marchDownscale));
+    syncMarchSlider();
+    state.clipDirty = true;
+  }
+  if (patch.isoMarchDownscale != null && Number.isFinite(patch.isoMarchDownscale)) {
+    if (els.isoMarchDownscale) {
+      els.isoMarchDownscale.value = String(Math.round(patch.isoMarchDownscale));
+    }
     syncMarchSlider();
     state.clipDirty = true;
   }
@@ -494,15 +507,17 @@ function tools(): ToolDef[] {
     {
       name: "laplacian_set_render_settings",
       description:
-        "Update render/fit settings (deg, scale, steps, box size, march downscale). deg/box trigger refit.",
+        "Update render/fit settings (deg, scale, steps, isoSteps, box size, vol/iso downscale). deg/box trigger refit.",
       inputSchema: {
         type: "object",
         properties: {
           deg: { type: "number" },
           scale: { type: "number" },
-          steps: { type: "number" },
+          steps: { type: "number", description: "Beer / scalar volume ray-march steps (8–96)." },
+          isoSteps: { type: "number", description: "Iso-surface ray-march steps (16–192)." },
           boxSize: { type: "number" },
-          marchDownscale: { type: "number" },
+          marchDownscale: { type: "number", description: "Beer / scalar volume march resolution divisor." },
+          isoMarchDownscale: { type: "number", description: "Iso-surface march resolution divisor." },
         },
       },
       execute: async (input) => setRenderSettings(input),

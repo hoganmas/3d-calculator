@@ -98,11 +98,21 @@ function readMarchDownscale() {
   return Math.min(MARCH_DOWNSCALE_MAX, Math.max(MARCH_DOWNSCALE_MIN, n));
 }
 
+function readIsoMarchDownscale() {
+  if (!els.isoMarchDownscale) return readMarchDownscale();
+  const n = Math.round(Number(els.isoMarchDownscale.value) || 1);
+  return Math.min(MARCH_DOWNSCALE_MAX, Math.max(MARCH_DOWNSCALE_MIN, n));
+}
+
 export function syncMarchSlider() {
   const n = readMarchDownscale();
   if (els.marchDownscale) els.marchDownscale.value = String(n);
   if (els.marchScaleLabel) els.marchScaleLabel.textContent = `${n}×`;
   syncLiquidThumb(els.marchDownscale);
+  const isoN = readIsoMarchDownscale();
+  if (els.isoMarchDownscale) els.isoMarchDownscale.value = String(isoN);
+  if (els.isoMarchScaleLabel) els.isoMarchScaleLabel.textContent = `${isoN}×`;
+  syncLiquidThumb(els.isoMarchDownscale);
   return n;
 }
 
@@ -116,8 +126,14 @@ export function syncShowGridAxesUi() {
   btn.dataset.tooltip = label;
 }
 
+/** Volume (Beer) march downscale. */
 export function marchDownscale() {
   return readMarchDownscale();
+}
+
+/** Iso-surface march downscale. */
+export function isoMarchDownscale() {
+  return readIsoMarchDownscale();
 }
 
 /** CSS px covered by the floating sidebar along the dock axis (0 on narrow full-width layouts). */
@@ -169,14 +185,27 @@ export function applyCameraComposition(vw: number, vh: number) {
   }
 }
 
-/** Raymarch internal resolution scale (display canvas stays full viewport). */
+/** Iso / compose raymarch resolution (display canvas stays full viewport). */
 export function marchResolutionScale() {
+  return 1 / isoMarchDownscale();
+}
+
+export function volumeResolutionScale() {
   return 1 / marchDownscale();
 }
 
 export function marchFramebufferSize() {
   const { vw, vh } = viewportSize();
   const s = marchResolutionScale();
+  return {
+    mw: Math.max(1, Math.round(vw * s)),
+    mh: Math.max(1, Math.round(vh * s)),
+  };
+}
+
+export function volumeFramebufferSize() {
+  const { vw, vh } = viewportSize();
+  const s = volumeResolutionScale();
   return {
     mw: Math.max(1, Math.round(vw * s)),
     mh: Math.max(1, Math.round(vh * s)),
@@ -250,10 +279,18 @@ export function initPresentation() {
     const wrap = els.marchDownscale.closest(".march-liquid-track") || els.marchDownscale.closest(".march-slider-wrap");
     if (wrap instanceof HTMLElement) mountLiquidThumb(wrap, els.marchDownscale);
   }
+  if (els.isoMarchDownscale) {
+    const wrap =
+      els.isoMarchDownscale.closest(".march-liquid-track") ||
+      els.isoMarchDownscale.closest(".march-slider-wrap");
+    if (wrap instanceof HTMLElement) mountLiquidThumb(wrap, els.isoMarchDownscale);
+  }
   syncMarchSlider();
 
   els.marchDownscale?.addEventListener("input", markMarchDirty);
   els.marchDownscale?.addEventListener("change", markMarchDirty);
+  els.isoMarchDownscale?.addEventListener("input", markMarchDirty);
+  els.isoMarchDownscale?.addEventListener("change", markMarchDirty);
   els.boxSize.addEventListener("input", syncBoundsSlider);
   els.boxSize.addEventListener("change", syncBoundsSlider);
 

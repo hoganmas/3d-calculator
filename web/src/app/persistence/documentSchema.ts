@@ -14,8 +14,13 @@ export interface LaplacianRenderSnapshot {
   deg: number;
   scale: number;
   steps: number;
+  /** Iso-surface ray-march steps; defaults to `steps` when omitted (legacy docs). */
+  isoSteps: number;
   boxSize: number;
+  /** Beer / scalar volume march resolution divisor. */
   marchDownscale: number;
+  /** Iso-surface march resolution divisor; defaults to `marchDownscale` when omitted. */
+  isoMarchDownscale: number;
   showGridAxes: boolean;
   preset: string;
 }
@@ -114,11 +119,27 @@ function validateRender(v: unknown): LaplacianRenderSnapshot {
   if (scale <= 0) throw new Error("render.scale: invalid");
   if (!isFiniteNum(steps)) throw new Error("render.steps: out of range");
   if (steps < 8 || steps > 96) throw new Error("render.steps: out of range");
+  let isoSteps = v.isoSteps;
+  if (isoSteps == null) {
+    isoSteps = steps;
+  } else {
+    if (!isFiniteNum(isoSteps)) throw new Error("render.isoSteps: out of range");
+    if (isoSteps < 16 || isoSteps > 192) throw new Error("render.isoSteps: out of range");
+  }
   if (!isFiniteNum(boxSize)) throw new Error("render.boxSize: invalid");
   if (boxSize <= 0) throw new Error("render.boxSize: invalid");
   if (!isFiniteNum(marchDownscale)) throw new Error("render.marchDownscale: out of range");
   if (marchDownscale < 1 || marchDownscale > 16) {
     throw new Error("render.marchDownscale: out of range");
+  }
+  let isoMarchDownscale = v.isoMarchDownscale;
+  if (isoMarchDownscale == null) {
+    isoMarchDownscale = marchDownscale;
+  } else {
+    if (!isFiniteNum(isoMarchDownscale)) throw new Error("render.isoMarchDownscale: out of range");
+    if (isoMarchDownscale < 1 || isoMarchDownscale > 16) {
+      throw new Error("render.isoMarchDownscale: out of range");
+    }
   }
   const showGridAxes = v.showGridAxes;
   if (showGridAxes != null && typeof showGridAxes !== "boolean") {
@@ -129,8 +150,10 @@ function validateRender(v: unknown): LaplacianRenderSnapshot {
     deg: deg as number,
     scale: scale as number,
     steps: steps as number,
+    isoSteps: isoSteps as number,
     boxSize: boxSize as number,
     marchDownscale: marchDownscale as number,
+    isoMarchDownscale: isoMarchDownscale as number,
     showGridAxes: showGridAxes !== false,
     preset,
   };

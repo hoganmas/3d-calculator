@@ -5,6 +5,7 @@ import gridWgsl from "./grid.wgsl?raw";
 import axisLabelWgsl from "./axisLabel.wgsl?raw";
 import fxaaWgsl from "./fxaa.wgsl?raw";
 import ssaoWgsl from "./ssao.wgsl?raw";
+import blitWgsl from "./blit.wgsl?raw";
 import flowParticlesWgsl from "./flowParticles.wgsl?raw";
 import { MAX_GRAD_STOPS } from "../../../model/expressions.js";
 import { MAX_FLOW_TRAIL_STEPS } from "../../../math/fitVector.js";
@@ -49,6 +50,10 @@ export function getFxaaShader(): string {
 
 export function getSsaoShader(): string {
   return ssaoWgsl;
+}
+
+export function getBlitShader(): string {
+  return blitWgsl;
 }
 
 export function getFlowParticlesShader(): string {
