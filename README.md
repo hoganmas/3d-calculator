@@ -1,4 +1,4 @@
-# Laplacian
+# Laplaci
 
 Multi-expression **3D polynomial calculator** in the browser. Enter math with MathLive, fit each expression to a Chebyshev polynomial, IDCT to a density volume, then ray-march manifolds (isosurfaces) and density clouds (Beer–Lambert) with shared free parameters.
 
@@ -35,7 +35,7 @@ Pipeline notes: [`research/poly/notes/cheb-idct-volume.md`](research/poly/notes/
 ## Layout
 
 ```
-web/                Laplacian app — see [web/STRUCTURE.md](web/STRUCTURE.md)
+web/                Laplaci app — see [web/STRUCTURE.md](web/STRUCTURE.md)
 research/
   gaussian/         Gaussian-mixture transmittance experiments (Python)
   poly/             Polynomial density / transmittance track (Python + notes)

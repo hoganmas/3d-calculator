@@ -2,7 +2,7 @@
   "name": "3d-calculator",
   "private": true,
   "version": "0.1.0",
-  "description": "Laplacian — multi-expression 3D polynomial calculator (Chebyshev fit → IDCT → WebGPU march)",
+  "description": "Laplaci — multi-expression 3D polynomial calculator (Chebyshev fit → IDCT → WebGPU march)",
   "homepage": "https://hoganmas.github.io/3d-calculator/",
   "type": "module",
   "scripts": {

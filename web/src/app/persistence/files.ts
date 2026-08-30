@@ -61,7 +61,7 @@ export async function shareDocument(doc?: LaplacianDocument): Promise<boolean> {
   if (typeof navigator.share === "function" && navigator.canShare?.({ files: [file] })) {
     await navigator.share({
       files: [file],
-      title: payload.meta?.title ?? "Laplacian scene",
+      title: payload.meta?.title ?? "Laplaci scene",
     });
     return true;
   }
