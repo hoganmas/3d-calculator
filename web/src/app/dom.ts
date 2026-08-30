@@ -21,6 +21,7 @@ export interface DomElements {
   scale: HTMLInputElement;
   steps: HTMLInputElement;
   boxSize: HTMLInputElement;
+  boundsSizeLabel: HTMLElement | null;
   marchDownscale: HTMLInputElement;
   toggleGridAxes: HTMLButtonElement | null;
   marchScaleLabel: HTMLElement | null;
@@ -50,6 +51,10 @@ export interface DomElements {
   sceneFileInput: HTMLInputElement | null;
   autosaveStatus: HTMLElement | null;
   autosaveStatusBar: HTMLElement | null;
+  scalarQuality: HTMLInputElement | null;
+  surfaceQuality: HTMLInputElement | null;
+  vectorQuality: HTMLInputElement | null;
+  precisionQuality: HTMLInputElement | null;
 }
 
 export const els: DomElements = {
@@ -59,6 +64,7 @@ export const els: DomElements = {
   scale: el("scale"),
   steps: el("steps"),
   boxSize: el("boxSize"),
+  boundsSizeLabel: document.getElementById("boundsSizeLabel"),
   marchDownscale: el("marchDownscale"),
   toggleGridAxes: document.getElementById("toggleGridAxes") as HTMLButtonElement | null,
   marchScaleLabel: document.getElementById("marchScaleLabel"),
@@ -88,6 +94,10 @@ export const els: DomElements = {
   sceneFileInput: document.getElementById("sceneFileInput") as HTMLInputElement | null,
   autosaveStatus: document.getElementById("autosaveStatus"),
   autosaveStatusBar: document.getElementById("autosaveStatusBar"),
+  scalarQuality: document.getElementById("scalarQuality") as HTMLInputElement | null,
+  surfaceQuality: document.getElementById("surfaceQuality") as HTMLInputElement | null,
+  vectorQuality: document.getElementById("vectorQuality") as HTMLInputElement | null,
+  precisionQuality: document.getElementById("precisionQuality") as HTMLInputElement | null,
 };
 
 export function viewportSize() {

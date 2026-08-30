@@ -47,6 +47,7 @@ import {
   setConstraintKeyframeBlends,
 } from "../render/webgpu/march.js";
 import { reseedFlowParticles } from "../render/webgpu/flowParticles.js";
+import { wireQualityControls } from "./quality.js";
 import { compileExpr, classifyExpr } from "../math/fit.js";
 import { fitVectorField } from "../math/fitVector.js";
 import { listExpressions, inferLayerRole } from "../model/expressions.js";
@@ -71,7 +72,7 @@ import {
   ensureSceneGpuUpload,
   presentSceneAfterGpuReady,
 } from "./webglFallback.js";
-import { resize, syncClipPresentation, syncShowGridAxesUi } from "./presentation.js";
+import { resize, syncClipPresentation, syncShowGridAxesUi, syncBoundsSlider } from "./presentation.js";
 import { clearClipGpuFrame } from "../render/webgpu/march.js";
 import {
   refreshExpressionErrorBanner,
@@ -866,10 +867,12 @@ export function wirePipelineDom() {
     autosave();
   });
   els.boxSize.addEventListener("input", () => {
+    syncBoundsSlider();
     scheduleUploadFit(200);
     autosave();
   });
   els.boxSize.addEventListener("change", () => {
+    syncBoundsSlider();
     scheduleUploadFit(0);
     autosave();
   });
@@ -935,6 +938,8 @@ export function wirePipelineDom() {
     state.flowAgeMax = Math.max(1, Math.min(120, Number(els.flowAgeMax!.value) || 30));
     autosave();
   });
+
+  wireQualityControls(autosave);
 }
 
 export function handleColorChange() {

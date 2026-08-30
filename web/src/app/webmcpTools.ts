@@ -29,7 +29,7 @@ import {
   uploadFit,
   applyRenderHyperparams,
 } from "./pipeline.js";
-import { syncMarchSlider } from "./presentation.js";
+import { syncMarchSlider, syncBoundsSlider } from "./presentation.js";
 import { camera, controls, resetCameraView } from "./scene.js";
 import { state } from "./state.js";
 import { buildCapabilities } from "./webmcpCapabilities.js";
@@ -78,6 +78,7 @@ export async function setRenderSettings(patch: {
   }
   if (patch.boxSize != null && Number.isFinite(patch.boxSize)) {
     els.boxSize.value = String(patch.boxSize);
+    syncBoundsSlider();
     refit = true;
   }
   if (patch.scale != null && Number.isFinite(patch.scale)) {

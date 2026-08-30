@@ -240,14 +240,59 @@
 
           <section class="settings-section">
             <p class="settings-section-title">Scene</p>
-            <label>
+            <label class="settings-dev-only">
               Load preset
               <select id="preset"></select>
             </label>
-            <label>box size<input id="boxSize" type="number" min="1" max="10" step="0.1" value="5" title="Full edge length of the axis-aligned cube [-S/2,S/2]³" /></label>
+            <label class="settings-slider-label">
+              <span class="settings-slider-head">
+                <span>Bounds size</span>
+                <span id="boundsSizeLabel" class="settings-value-badge">5</span>
+              </span>
+              <div class="settings-liquid-track">
+                <input
+                  id="boxSize"
+                  class="ui-slider"
+                  type="range"
+                  min="1"
+                  max="10"
+                  step="0.1"
+                  value="5"
+                  title="Full edge length of the axis-aligned cube [-S/2,S/2]³"
+                />
+              </div>
+            </label>
           </section>
 
-          <section class="settings-section">
+          <section class="settings-section settings-prod-only">
+            <p class="settings-section-title">Quality</p>
+            <label class="settings-slider-label">
+              Precision
+              <div class="settings-liquid-track">
+                <input id="precisionQuality" class="ui-slider" type="range" min="0" max="100" step="1" value="50" />
+              </div>
+            </label>
+            <label class="settings-slider-label">
+              Scalar fields
+              <div class="settings-liquid-track">
+                <input id="scalarQuality" class="ui-slider" type="range" min="0" max="100" step="1" value="50" />
+              </div>
+            </label>
+            <label class="settings-slider-label">
+              Surfaces
+              <div class="settings-liquid-track">
+                <input id="surfaceQuality" class="ui-slider" type="range" min="0" max="100" step="1" value="50" />
+              </div>
+            </label>
+            <label class="settings-slider-label">
+              Vector fields
+              <div class="settings-liquid-track">
+                <input id="vectorQuality" class="ui-slider" type="range" min="0" max="100" step="1" value="50" />
+              </div>
+            </label>
+          </section>
+
+          <section class="settings-section settings-dev-only">
             <p class="settings-section-title">Approximation</p>
             <div class="row3">
               <label>poly deg<input id="deg" type="number" min="2" max="128" step="1" value="32" /></label>
@@ -256,7 +301,7 @@
             </div>
           </section>
 
-          <section class="settings-section">
+          <section class="settings-section settings-dev-only">
             <p class="settings-section-title">Rendering</p>
             <label class="march-slider-label">
               <span class="march-slider-head">
@@ -273,7 +318,7 @@
             </label>
           </section>
 
-          <section class="settings-section">
+          <section class="settings-section settings-dev-only">
             <p class="settings-section-title">Flow (particles)</p>
             <div class="row3">
               <label>count / layer<input id="flowParticleCount" type="number" min="100" max="32000" step="100" value="1000" title="Particles per flow expression (total = count × number of flow layers)" /></label>
@@ -303,7 +348,7 @@
             <p id="autosaveStatus" class="autosave-status" data-state="saved" aria-live="polite">Saved</p>
           </section>
 
-          <section class="settings-section">
+          <section class="settings-section settings-dev-only">
             <details class="metrics-block" open>
               <summary class="metrics-head">
                 <span>Diagnostics</span>

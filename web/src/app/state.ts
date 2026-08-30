@@ -61,6 +61,12 @@ export const state = {
   flowTrailSteps: 32,
   /** Trail stroke width in pixels. */
   flowTrailWidth: 10,
+
+  /** Prod UI quality sliders (0–100). */
+  scalarQuality: 50,
+  surfaceQuality: 50,
+  vectorQuality: 50,
+  precisionQuality: 50,
 };
 
 export const FIT_DEBOUNCE_MS = 320;
@@ -71,3 +77,6 @@ export const MARCH_DOWNSCALE_MIN = 1;
 export const MARCH_DOWNSCALE_MAX = 16;
 /** Label only these notches (every integer still snaps). */
 export const MARCH_DOWNSCALE_LABELS = new Set([1, 2, 4, 8, 16]);
+
+export const BOUNDS_SIZE_MIN = 1;
+export const BOUNDS_SIZE_MAX = 10;

@@ -1207,6 +1207,41 @@
         text-transform: uppercase;
         letter-spacing: 0.04em;
       }
+      html[data-prod-ui] .settings-dev-only {
+        display: none !important;
+      }
+      html:not([data-prod-ui]) .settings-prod-only {
+        display: none !important;
+      }
+      .settings-slider-label {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-size: 13px;
+      }
+      .settings-slider-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .settings-value-badge {
+        font-size: 11px;
+        font-variant-numeric: tabular-nums;
+        color: var(--text);
+        text-transform: none;
+        letter-spacing: 0;
+      }
+      .settings-liquid-track {
+        position: relative;
+        height: 24px;
+        display: flex;
+        align-items: center;
+      }
+      .settings-liquid-track .ui-slider {
+        display: block;
+        width: 100%;
+      }
       .project-section .project-actions {
         display: flex;
         flex-wrap: wrap;

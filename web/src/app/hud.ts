@@ -7,6 +7,7 @@ import { els } from "./dom.js";
 import { state } from "./state.js";
 import { renderer } from "./scene.js";
 import { clipUniforms, useGpuClipPath } from "./webglFallback.js";
+import { isProdUi } from "./quality.js";
 import {
   marchDownscale,
   marchFramebufferSize,
@@ -105,6 +106,13 @@ function hudFpsText() {
 }
 
 export function hudText() {
+  if (isProdUi()) {
+    const errHint =
+      lastErrorReport && lastErrorReport.errorCount > 0
+        ? ` · ${lastErrorReport.errorCount} expr err`
+        : "";
+    return `laplaci · ${hudFpsText()}${errHint}`;
+  }
   const w = els.viewport.clientWidth;
   const h = Math.max(els.viewport.clientHeight, 1);
   const pr = renderer.getPixelRatio();
@@ -245,6 +253,7 @@ export function buildMetricsReport() {
 }
 
 export function refreshMetricsDump() {
+  if (isProdUi()) return;
   state.lastMetricsText = buildMetricsReport();
   if (els.metricsDump) (els.metricsDump as HTMLTextAreaElement).value = state.lastMetricsText;
 }

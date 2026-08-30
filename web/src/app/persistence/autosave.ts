@@ -204,5 +204,9 @@ export function initAutosave() {
   bindInput(els.flowParticleCount);
   bindInput(els.flowTrailSteps);
   bindInput(els.flowTrailWidth);
+  bindInput(els.scalarQuality);
+  bindInput(els.surfaceQuality);
+  bindInput(els.vectorQuality);
+  bindInput(els.precisionQuality);
   setStatus("saved");
 }
