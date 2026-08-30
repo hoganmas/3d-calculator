@@ -20,6 +20,7 @@ import {
   seedFlowTrailHist,
   sortFlowParticlesByDepth,
   syncFlowParticleTrailLife,
+  tickFlowParticleGhosts,
   updateFlowTrailHead,
   type FlowParticleLayerVel,
 } from "../../math/fitVector.js";
@@ -394,18 +395,23 @@ export function tickFlowParticles(
   t0 = performance.now();
   if (trailHist && gpu.flowTrailBuf) {
     updateFlowTrailHead(posAge, trailHist, gpu.flowParticleCount);
+    const ghostCtx = {
+      layerIds,
+      layers,
+      M: gpu.sceneM,
+      half: gpu.flowHalf,
+      gridSpacing: state.flowNoiseScale,
+      gridPoints: state.flowGridPoints,
+      frameIdx: flowParticleFrameIdx,
+      density: densityGrids,
+      densityRes: FLOW_PARTICLE_DENSITY_GRID,
+    };
+    // Advance post-death fade every frame; keep trail geometry frozen until gone.
+    tickFlowParticleGhosts(posAge, trailHist, steps, gpu.flowParticleCount, ghostCtx);
     syncFlowParticleTrailLife(posAge, trailHist, gpu.flowParticleCount, steps);
     trailPushCounter++;
     if (trailPushCounter >= TRAIL_PUSH_INTERVAL) {
-      pushFlowTrailHist(posAge, trailHist, steps, gpu.flowParticleCount, {
-        layerIds,
-        layers,
-        M: gpu.sceneM,
-        half: gpu.flowHalf,
-        frameIdx: flowParticleFrameIdx,
-        density: densityGrids,
-        densityRes: FLOW_PARTICLE_DENSITY_GRID,
-      });
+      pushFlowTrailHist(posAge, trailHist, steps, gpu.flowParticleCount, ghostCtx);
       trailPushCounter = 0;
       syncFlowParticleTrailLife(posAge, trailHist, gpu.flowParticleCount, steps);
     }

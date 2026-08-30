@@ -103,18 +103,18 @@ fn ribbonAlphaEnvelope(u: f32) -> f32 {
 }
 
 // Trail slot age encodes life phase (CPU syncFlowParticleTrailLife):
-//   age < -1  → ghost fade-out (-2 invisible .. -1 full)
-//   age < 0   → spawn fade-in (-0.5 invisible .. 0 full)
-//   age >= 0  → normal life; fade near flowAgeMax
+//   age in [-2, -1] → ghost fade-out (−1 full … −2 invisible); trail geometry frozen
+//   age in [-0.5, 0) → spawn fade-in
+//   age >= 0 → live (full opacity; decay happens after death as a ghost)
 fn trailLifeAlpha(age: f32) -> f32 {
-  if (age < -1.0) {
+  // Ghost range includes −1 (full). Must not fall through to spawn branch.
+  if (age <= -1.0) {
     return smoothstep(-2.0, -1.0, age);
   }
   if (age < 0.0) {
     return smoothstep(-0.5, 0.0, age);
   }
-  let t = age / max(u.flowAgeMax, 1e-3);
-  return 1.0 - smoothstep(0.78, 1.0, t);
+  return 1.0;
 }
 
 // Trail centerline tangent: from newest toward older samples (trail behind the head).

@@ -1128,16 +1128,24 @@ export const FLOW_TRAIL_BACKFILL_STEP_SCALE = 0.12;
 /** Seconds of alpha fade-in after respawn (trail slot age in [-0.5, 0)). */
 export const FLOW_TRAIL_SPAWN_FADE_SEC = 0.35;
 
-const GHOST_TRAIL_AGE_MIN = -2;
-const GHOST_TRAIL_AGE_MAX = -1;
+/** Extra frames of post-death trail linger (frozen geometry + alpha fade). */
+export const FLOW_TRAIL_GHOST_LINGER_SCALE = 3;
+
+const GHOST_TRAIL_AGE_FULL = -1;
+const GHOST_TRAIL_AGE_GONE = -2;
 const SPAWN_TRAIL_AGE_MIN = -0.5;
 
-/** Map ghost countdown (negative speed slot) to shader trail-life age. */
+/** Map ghost countdown (negative speed slot) to shader trail-life age.
+ *  Countdown starts near −trailSteps·linger and rises toward −0.5.
+ *  Shader: −1 = full opacity, −2 = invisible.
+ */
 export function flowGhostTrailLifeAge(countdown: number, trailSteps: number): number {
-  const start = -Math.max(2, trailSteps);
-  const ghostAlpha = (countdown + 0.5) / (start + 0.5);
-  const t = Math.max(0, Math.min(1, ghostAlpha));
-  return GHOST_TRAIL_AGE_MIN + t * (GHOST_TRAIL_AGE_MAX - GHOST_TRAIL_AGE_MIN);
+  const start = -Math.max(2, trailSteps * FLOW_TRAIL_GHOST_LINGER_SCALE);
+  // progress 0 at death (full), 1 when fade completes (invisible)
+  const denom = -0.5 - start;
+  const progress = denom !== 0 ? (countdown - start) / denom : 1;
+  const t = Math.max(0, Math.min(1, progress));
+  return GHOST_TRAIL_AGE_FULL + t * (GHOST_TRAIL_AGE_GONE - GHOST_TRAIL_AGE_FULL);
 }
 
 /** Map particle age after respawn to shader trail-life age (fade-in). */
@@ -1148,8 +1156,9 @@ export function flowSpawnTrailLifeAge(particleAge: number): number {
 }
 
 /**
- * Encode ghost fade / spawn fade into trail slot ages for GPU alpha.
- * Call each frame after updateFlowTrailHead.
+ * Encode ghost / spawn fade into trail slot ages for GPU alpha.
+ * Ghost trails keep their frozen geometry; only the age channel changes.
+ * Call once per frame after updateFlowTrailHead.
  */
 export function syncFlowParticleTrailLife(
   posAge: Float32Array,
@@ -1174,6 +1183,44 @@ export function syncFlowParticleTrailLife(
       for (let j = 0; j < trailSteps; j++) {
         trailHist[ho + j * FLOW_TRAIL_SLOT_STRIDE + 3] = lifeAge;
       }
+    }
+  }
+}
+
+/**
+ * Advance post-death trail fade each frame (geometry stays frozen).
+ * Respawn only after the trail has fully faded out.
+ */
+export function tickFlowParticleGhosts(
+  posAge: Float32Array,
+  trailHist: Float32Array,
+  trailSteps: number,
+  count: number,
+  pushCtx?: FlowTrailPushContext | null,
+): void {
+  if (trailSteps < 2) return;
+  for (let i = 0; i < count; i++) {
+    if (!isFlowParticleGhost(posAge, i)) continue;
+    const po = i * FLOW_PARTICLE_STRIDE;
+    posAge[po + 4] = posAge[po + 4]! + 1;
+    if (posAge[po + 4]! >= -0.5 && pushCtx) {
+      const layer = pushCtx.layerIds[i]!;
+      const layerDensity = flowParticleDensityForLayer(pushCtx.density ?? null, layer);
+      respawnParticle(
+        posAge,
+        i,
+        layer,
+        pushCtx.half,
+        pushCtx.gridSpacing,
+        pushCtx.gridPoints,
+        pushCtx.frameIdx,
+        trailHist,
+        trailSteps,
+        layerDensity,
+        pushCtx.densityRes ?? FLOW_PARTICLE_DENSITY_GRID,
+        pushCtx.layers,
+        pushCtx.M,
+      );
     }
   }
 }
@@ -1206,37 +1253,15 @@ export function isFlowParticleGhost(posAge: Float32Array, i: number): boolean {
   return posAge[i * FLOW_PARTICLE_STRIDE + 4]! < -0.5;
 }
 
-/** Begin post-death trail fade; trail history is left intact. */
+/** Begin post-death trail fade; trail history is left intact (frozen). */
 export function beginFlowParticleGhost(
   posAge: Float32Array,
   i: number,
   trailSteps: number,
 ): void {
   const o = i * FLOW_PARTICLE_STRIDE;
-  posAge[o + 4] = -Math.max(2, trailSteps);
-}
-
-function pushFlowTrailHistGhostSlot(
-  trailHist: Float32Array,
-  trailSteps: number,
-  i: number,
-): void {
-  const ho = flowTrailBaseIndex(i);
-  for (let j = trailSteps - 1; j >= 1; j--) {
-    const dst = ho + j * FLOW_TRAIL_SLOT_STRIDE;
-    const src = ho + (j - 1) * FLOW_TRAIL_SLOT_STRIDE;
-    trailHist[dst] = trailHist[src]!;
-    trailHist[dst + 1] = trailHist[src + 1]!;
-    trailHist[dst + 2] = trailHist[src + 2]!;
-    trailHist[dst + 3] = trailHist[src + 3]!;
-    trailHist[dst + 4] = trailHist[src + 4]!;
-  }
-  const s1 = ho + FLOW_TRAIL_SLOT_STRIDE;
-  trailHist[ho] = trailHist[s1]!;
-  trailHist[ho + 1] = trailHist[s1 + 1]!;
-  trailHist[ho + 2] = trailHist[s1 + 2]!;
-  trailHist[ho + 3] = trailHist[s1 + 3]!;
-  trailHist[ho + 4] = trailHist[s1 + 4]!;
+  // Linger long enough that the frozen ribbon stays visible while alpha fades.
+  posAge[o + 4] = -Math.max(2, trailSteps * FLOW_TRAIL_GHOST_LINGER_SCALE);
 }
 
 /** Move particles out of overcrowded cells into sparse regions. */
@@ -1441,33 +1466,12 @@ export function pushFlowTrailHist(
   trailHist: Float32Array,
   trailSteps: number,
   count: number,
-  pushCtx?: FlowTrailPushContext | null,
+  _pushCtx?: FlowTrailPushContext | null,
 ): void {
   if (trailSteps < 2) return;
   for (let i = 0; i < count; i++) {
-    if (isFlowParticleGhost(posAge, i)) {
-      pushFlowTrailHistGhostSlot(trailHist, trailSteps, i);
-      const po = i * FLOW_PARTICLE_STRIDE;
-      posAge[po + 4] = posAge[po + 4]! + 1;
-      if (posAge[po + 4]! >= -0.5 && pushCtx) {
-        const layer = pushCtx.layerIds[i]!;
-        const layerDensity = flowParticleDensityForLayer(pushCtx.density ?? null, layer);
-        respawnParticle(
-          posAge,
-          i,
-          layer,
-          pushCtx.half,
-          pushCtx.frameIdx,
-          trailHist,
-          trailSteps,
-          layerDensity,
-          pushCtx.densityRes ?? FLOW_PARTICLE_DENSITY_GRID,
-          pushCtx.layers,
-          pushCtx.M,
-        );
-      }
-      continue;
-    }
+    // Ghosts keep a frozen trail; fade/respawn is handled by tickFlowParticleGhosts.
+    if (isFlowParticleGhost(posAge, i)) continue;
     const po = i * FLOW_PARTICLE_STRIDE;
     const ho = flowTrailBaseIndex(i);
     for (let j = trailSteps - 1; j >= 1; j--) {

@@ -21,6 +21,7 @@ import {
   flowGhostTrailLifeAge,
   flowSpawnTrailLifeAge,
   syncFlowParticleTrailLife,
+  tickFlowParticleGhosts,
   updateFlowTrailHead,
   sampleVelGridAt,
   seedFlowParticles,
@@ -165,6 +166,12 @@ export async function run() {
         const layerIds = new Uint32Array([0]);
         const trailSteps = 2;
         const trailHist = new Float32Array(MAX_FLOW_TRAIL_STEPS * FLOW_PARTICLE_STRIDE);
+        trailHist[0] = 1;
+        trailHist[1] = 2;
+        trailHist[2] = 3;
+        trailHist[5] = 4;
+        trailHist[6] = 5;
+        trailHist[7] = 6;
         beginFlowParticleGhost(posAge, 0, trailSteps);
         const pushCtx = {
           layerIds,
@@ -173,9 +180,15 @@ export async function run() {
           half: 1,
           frameIdx: 0,
         };
-        pushFlowTrailHist(posAge, trailHist, trailSteps, 1, pushCtx);
-        assert(isFlowParticleGhost(posAge, 0), "still fading after first push");
-        pushFlowTrailHist(posAge, trailHist, trailSteps, 1, pushCtx);
+        // Trail stays frozen while ghost ticks; only fades via life age.
+        tickFlowParticleGhosts(posAge, trailHist, trailSteps, 1, pushCtx);
+        assert(isFlowParticleGhost(posAge, 0), "still fading after first tick");
+        assert(Math.abs(trailHist[0]! - 1) < 1e-6, "ghost keeps frozen trail head");
+        assert(Math.abs(trailHist[5]! - 4) < 1e-6, "ghost keeps frozen trail body");
+        const linger = Math.max(2, trailSteps * 3);
+        for (let k = 0; k < linger; k++) {
+          tickFlowParticleGhosts(posAge, trailHist, trailSteps, 1, pushCtx);
+        }
         assert(!isFlowParticleGhost(posAge, 0), "respawned after fade");
         assert(posAge[3]! < 0.5, "fresh age after respawn");
       },
@@ -184,7 +197,8 @@ export async function run() {
       name: "flowGhostTrailLifeAge fades from full to invisible",
       fn: () => {
         const steps = 8;
-        const start = flowGhostTrailLifeAge(-steps, steps);
+        const startCountdown = -steps * 3;
+        const start = flowGhostTrailLifeAge(startCountdown, steps);
         const end = flowGhostTrailLifeAge(-0.5, steps);
         assert(start > -1.01 && start < -0.99, "ghost starts at full visibility age");
         assert(end < -1.9, "ghost ends near invisible age");
@@ -211,6 +225,15 @@ export async function run() {
         syncFlowParticleTrailLife(posAge, trailHist, 1, 4);
         assert(trailHist[3]! < -0.99 && trailHist[3]! > -1.01, "ghost head age encoded");
         assert(trailHist[8]! < -0.99, "ghost slot 1 age encoded");
+      },
+    },
+    {
+      name: "ghost trail stays visible mid-fade",
+      fn: () => {
+        const steps = 8;
+        const mid = flowGhostTrailLifeAge(-steps * 3 * 0.5, steps);
+        // Mid countdown should map near −1.5 → shader alpha ~0.5
+        assert(mid < -1.2 && mid > -1.8, "mid ghost age partially faded");
       },
     },
     {
