@@ -1,6 +1,9 @@
 /**
  * Runtime values for named parameters defined in the expression list (`a = …`).
  * RHS may reference other params.
+ *
+ * `min`/`max` are animation (and slider) bounds only — the static value from
+ * LaTeX / seed may sit outside that range and is used as-is when not animating.
  */
 
 import { compileParamLatex, classifyExpr } from "../math/fit.js";
@@ -63,8 +66,7 @@ function makeParam(name: string, init: ParamInit = {}): ParamState {
   let min = Number.isFinite(init.min) ? (init.min as number) : DEFAULT_MIN;
   let max = Number.isFinite(init.max) ? (init.max as number) : DEFAULT_MAX;
   if (max < min) [min, max] = [max, min];
-  let value = Number.isFinite(init.value) ? (init.value as number) : DEFAULT_VALUE;
-  value = Math.min(max, Math.max(min, value));
+  const value = Number.isFinite(init.value) ? (init.value as number) : DEFAULT_VALUE;
   const span = Math.max(1e-9, max - min);
   const step =
     Number.isFinite(init.step) && (init.step as number) > 0
@@ -213,7 +215,7 @@ export function applyParamSeed(seed: Record<string, ParamInit>) {
     const next = makeParam(name, { ...cur, ...init, latex: cur.latex, exprId: cur.exprId });
     if (Number.isFinite(init.value) && (typeof init.latex !== "string" || !init.latex.trim())) {
       next.latex = formatParamDefLatex(name, init.value as number);
-      next.value = Math.min(next.max, Math.max(next.min, init.value as number));
+      next.value = init.value as number;
     }
     if (init.animating === undefined && init.animate === undefined) next.animating = cur.animating;
     if (!Number.isFinite(init.phase)) next.phase = cur.phase;
@@ -231,8 +233,7 @@ export function updateParam(name: string, patch: Partial<ParamState>) {
   let min = Number.isFinite(patch.min) ? (patch.min as number) : cur.min;
   let max = Number.isFinite(patch.max) ? (patch.max as number) : cur.max;
   if (max < min) [min, max] = [max, min];
-  let value = Number.isFinite(patch.value) ? (patch.value as number) : cur.value;
-  value = Math.min(max, Math.max(min, value));
+  const value = Number.isFinite(patch.value) ? (patch.value as number) : cur.value;
   let latex = typeof patch.latex === "string" ? patch.latex : cur.latex;
   if (Number.isFinite(patch.value) && patch.latex === undefined) {
     latex = formatParamDefLatex(name, value);
@@ -265,7 +266,7 @@ export function setParamValue(
 ) {
   const cur = params.get(name);
   if (!cur) return null;
-  const v = Math.min(cur.max, Math.max(cur.min, Number(value)));
+  const v = Number(value);
   if (!Number.isFinite(v)) return cur;
   const next = {
     ...cur,
@@ -296,7 +297,7 @@ export function recompileParam(name: string) {
       animating: driven ? false : cur.animating,
     };
     if (compiled.isConstant && compiled.constantValue != null) {
-      next.value = Math.min(next.max, Math.max(next.min, compiled.constantValue));
+      next.value = compiled.constantValue;
     }
     params.set(name, next);
     return true;
@@ -350,10 +351,9 @@ export function evalParamEquations() {
       try {
         const v = c.eval(scope);
         if (!Number.isFinite(v)) continue;
-        const clamped = Math.min(p.max, Math.max(p.min, v));
-        scope[name] = clamped;
-        if (Math.abs(clamped - p.value) > 1e-12) {
-          params.set(name, { ...p, value: clamped });
+        scope[name] = v;
+        if (Math.abs(v - p.value) > 1e-12) {
+          params.set(name, { ...p, value: v });
           changed = true;
           passChanged = true;
         }

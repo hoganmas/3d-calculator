@@ -219,6 +219,14 @@ import {
     if (ev.defaultPrevented) return;
     ev.preventDefault();
     ev.stopPropagation();
+    const latex = readFieldLatex(mfEl);
+    updateExpr(item.id, { latex });
+    // Parameter declarations: Enter confirms the value instead of splitting a new row.
+    if (isParameterRow(latex)) {
+      onExprChange();
+      mfEl.blur?.();
+      return;
+    }
     const { left, right } = latexAroundCaret(mfEl);
     updateExpr(item.id, { latex: left });
     const split = splitExprAt(item.id, left, right);

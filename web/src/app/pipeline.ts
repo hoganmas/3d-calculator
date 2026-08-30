@@ -75,7 +75,7 @@ import {
 import { resize, syncClipPresentation, syncShowGridAxesUi } from "./presentation.js";
 import { clearClipGpuFrame } from "../render/webgpu/march.js";
 import {
-  setErr,
+  refreshExpressionErrorBanner,
   setExprCompileOk,
   syncExprCompileState,
   refreshMetricsDump,
@@ -186,7 +186,6 @@ export function uploadFit(
   const progressive = !!opts.progressive;
   startupBegin("uploadFit");
   startupMark("uploadFit.begin", { fromAnim, progressive, fitDeg: opts.fitDeg });
-  setErr("");
   try {
     const boxSize = Number(els.boxSize.value);
     const uiDeg = Number(els.deg.value);
@@ -207,6 +206,7 @@ export function uploadFit(
     const { layers } = compileAllExprs({ rebuildUi: false });
     startupEnd("uploadFit.compile", { layerCount: layers.length });
     setExprCompileOk(true);
+    refreshExpressionErrorBanner(true, null);
 
     // Keyframe identity uses UI target deg — never progressive step deg (pause ladder
     // would otherwise wipe animation caches on every intermediate fitDeg).
@@ -798,7 +798,7 @@ export function uploadFit(
     } catch {
       setExprCompileOk(false);
     }
-    setErr(e instanceof Error ? e.message : String(e));
+    refreshExpressionErrorBanner(false, message);
     if (!state.lastSceneBake) {
       state.lastSceneBake = {
         cloudLayers: [],

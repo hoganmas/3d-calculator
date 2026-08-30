@@ -13,7 +13,6 @@ import {
   phaseForValue,
   recompileParam,
   setParamValue,
-  setParamValue,
   stopParamAnimation,
   syncParamsFromDefinitions,
   tickParamAnimation,
@@ -174,6 +173,59 @@ export async function run() {
         syncParamsFromDefinitions([{ name: "a", latex: "a=((", exprId: "e1" }]);
         assert(recompileParam("a") === false, "failed compile");
         assert(!!getParam("a")?.error, "error stored");
+      },
+    },
+    {
+      name: "static value may sit outside animation bounds",
+      fn: () => {
+        resetParams();
+        syncParamsFromDefinitions([
+          {
+            name: "a",
+            latex: "a=0.01",
+            exprId: "e1",
+            min: 0.5,
+            max: 1,
+            value: 0.01,
+            animating: false,
+          },
+        ]);
+        assertNear(getParamValues().a ?? NaN, 0.01, 1e-12, "value kept outside [min,max]");
+        assertNear(getParam("a")!.min, 0.5, 1e-12, "anim min unchanged");
+        assertNear(getParam("a")!.max, 1, 1e-12, "anim max unchanged");
+
+        updateParam("a", { min: 0.6, max: 0.9 });
+        assertNear(getParamValues().a ?? NaN, 0.01, 1e-12, "bounds change does not clamp value");
+
+        setParamValue("a", 0.02, { stopAnim: true, rewriteLatex: true });
+        assertNear(getParamValues().a ?? NaN, 0.02, 1e-12, "setParamValue allows out-of-range");
+        assert(getParam("a")!.latex.includes("0.02"), "latex rewritten");
+      },
+    },
+    {
+      name: "recompile keeps constant value outside animation bounds",
+      fn: () => {
+        resetParams();
+        syncParamsFromDefinitions([
+          { name: "a", latex: "a=0.01", exprId: "e1", min: 0.5, max: 1, value: 0.01 },
+        ]);
+        assert(recompileParam("a"), "recompile ok");
+        assertNear(getParamValues().a ?? NaN, 0.01, 1e-12, "constant outside bounds");
+      },
+    },
+    {
+      name: "driven eval may produce values outside animation bounds",
+      fn: () => {
+        resetParams();
+        setExpressions([
+          { id: "e1", latex: "b=1", enabled: true },
+          { id: "e2", latex: "a=2b", enabled: true },
+        ]);
+        compileAllExprs({ rebuildUi: false });
+        updateParam("a", { min: 0.5, max: 1 });
+        setParamValue("b", 0.01, { stopAnim: true, rewriteLatex: false });
+        evalParamEquations();
+        assertNear(getParamValues().a ?? NaN, 0.02, 1e-9, "driven a=2b outside bounds");
       },
     },
     {
