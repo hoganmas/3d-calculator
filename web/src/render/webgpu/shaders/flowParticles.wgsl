@@ -75,13 +75,12 @@ fn trailSpeed(pIdx: u32, slot: u32) -> f32 {
   return trailHist[trailSlotBase(pIdx, slot) + 4u];
 }
 
-fn boxFade(world: vec3f) -> f32 {
+fn boxClipAlpha(world: vec3f) -> f32 {
   let half = u.half;
-  let ox = max(abs(world.x) - half, 0.0);
-  let oy = max(abs(world.y) - half, 0.0);
-  let oz = max(abs(world.z) - half, 0.0);
-  let outside = length(vec3f(ox, oy, oz));
-  return 1.0 - smoothstep(0.0, half * 0.4, outside);
+  let m = max(max(abs(world.x), abs(world.y)), abs(world.z));
+  // Hard clip at the fit-box faces (hairline AA). Particles may still advect outside;
+  // only the portion inside the box is shaded.
+  return 1.0 - smoothstep(half, half * 1.012, m);
 }
 
 // slot 0 = newest (leading edge), slot N-1 = oldest (trailing edge); u=0 newest, u=1 oldest.
@@ -234,7 +233,7 @@ fn vsMain(
   let rgb = speedColor(spd, flowIdx);
   let lifeAge = mix(pNew.w, pOld.w, tAlong);
   let lifeFade = trailLifeAlpha(lifeAge);
-  let alpha = u.flowOpacity * max(ribbonAlphaEnvelope(ribbonPos), widthMix * 0.15) * boxFade(world) * lifeFade * segFade;
+  let alpha = u.flowOpacity * max(ribbonAlphaEnvelope(ribbonPos), widthMix * 0.15) * boxClipAlpha(world) * lifeFade * segFade;
 
   o.clip = clipPos;
   o.world = worldOffset;
@@ -247,6 +246,11 @@ fn vsMain(
 fn fsMain(in: VSOut) -> @location(0) vec4f {
   if (in.color.a < 1e-6) { discard; }
 
+  // Clip any ribbon surface that lies outside the fit box.
+  let half = u.half;
+  let m = max(max(abs(in.world.x), abs(in.world.y)), abs(in.world.z));
+  if (m > half * 1.012) { discard; }
+
   let edge = abs(in.uv.x);
   if (edge > 1.0) { discard; }
   let widthSoft = 1.0 - smoothstep(0.55, 1.0, edge);
@@ -256,7 +260,7 @@ fn fsMain(in: VSOut) -> @location(0) vec4f {
   let ndcY = 1.0 - 2.0 * in.clip.y / fbH;
   let xy1 = vec3f(ndcX, ndcY, 1.0);
   let rd = vec3f(dot(u.m0.xyz, xy1), dot(u.m1.xyz, xy1), dot(u.m2.xyz, xy1));
-  let ro = u.ro; let half = u.half;
+  let ro = u.ro;
   let invRd = vec3f(
     select(1e15, 1.0 / rd.x, abs(rd.x) >= 1e-15),
     select(1e15, 1.0 / rd.y, abs(rd.y) >= 1e-15),
@@ -277,5 +281,8 @@ fn fsMain(in: VSOut) -> @location(0) vec4f {
   let isoD = textureLoad(occlTex, vec2i(mx, my), 0).r;
   if (myD >= isoD - 1e-4) { discard; }
 
-  return vec4f(in.color.rgb * widthSoft, in.color.a * widthSoft);
+  // Soften alpha right at the clip plane to reduce stair-steps.
+  let boxEdge = 1.0 - smoothstep(half, half * 1.012, m);
+  let a = in.color.a * widthSoft * boxEdge;
+  return vec4f(in.color.rgb * widthSoft * boxEdge, a);
 }
