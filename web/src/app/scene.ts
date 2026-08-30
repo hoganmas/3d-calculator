@@ -37,7 +37,10 @@ applyClipGpuTheme(themeColors);
 export const scene = new THREE.Scene();
 scene.add(lavaBg.mesh);
 export const camera = new THREE.PerspectiveCamera(50, 1, 0.05, 100);
-camera.position.set(5.2, 4.0, 6.8);
+/** World axes: +x right, +y forward, +z up. */
+camera.up.set(0, 0, 1);
+export const DEFAULT_CAMERA_POSITION = new THREE.Vector3(5.2, 6.8, 4.0);
+camera.position.copy(DEFAULT_CAMERA_POSITION);
 
 export const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -154,14 +157,14 @@ export function rebuildWorldGrid(half: number) {
   const major = tc.gridMajor;
   const minor = tc.gridMinor;
 
-  const gridXZ = new THREE.GridHelper(size, divisions, major, minor);
-  styleGrid(gridXZ, 0.55);
-  worldGrid.add(gridXZ);
+  const gridFloor = new THREE.GridHelper(size, divisions, major, minor);
+  gridFloor.rotation.x = -Math.PI / 2;
+  styleGrid(gridFloor, 0.55);
+  worldGrid.add(gridFloor);
 
-  const gridXY = new THREE.GridHelper(size, divisions, major, minor);
-  gridXY.rotation.x = Math.PI / 2;
-  styleGrid(gridXY, 0.35);
-  worldGrid.add(gridXY);
+  const gridXZ = new THREE.GridHelper(size, divisions, major, minor);
+  styleGrid(gridXZ, 0.35);
+  worldGrid.add(gridXZ);
 
   const gridYZ = new THREE.GridHelper(size, divisions, major, minor);
   gridYZ.rotation.z = Math.PI / 2;
@@ -200,6 +203,14 @@ export function rebuildWorldGrid(half: number) {
 
   // WebGPU path draws the same grid against iso depth (no texture copy).
   syncClipGpuWorldGrid(h);
+}
+
+export function resetCameraView() {
+  camera.up.set(0, 0, 1);
+  camera.position.copy(DEFAULT_CAMERA_POSITION);
+  controls.target.set(0, 0, 0);
+  controls.update();
+  state.clipDirty = true;
 }
 
 /** Fit / march use half-extent h; UI “box size” is full edge length S = 2h. */

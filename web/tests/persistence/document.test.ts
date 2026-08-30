@@ -39,7 +39,7 @@ function sampleDoc(revision = 1): LaplacianDocument {
       flowTrailWidth: 10,
     },
     camera: {
-      position: [5.2, 4.0, 6.8],
+      position: [5.2, 6.8, 4.0],
       target: [0, 0, 0],
     },
   };

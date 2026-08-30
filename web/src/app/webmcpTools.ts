@@ -30,7 +30,7 @@ import {
   applyRenderHyperparams,
 } from "./pipeline.js";
 import { syncMarchSlider } from "./presentation.js";
-import { camera, controls } from "./scene.js";
+import { camera, controls, resetCameraView } from "./scene.js";
 import { state } from "./state.js";
 import { buildCapabilities } from "./webmcpCapabilities.js";
 
@@ -102,10 +102,7 @@ export async function setRenderSettings(patch: {
 }
 
 export function resetCamera() {
-  camera.position.set(5.2, 4.0, 6.8);
-  controls.target.set(0, 0, 0);
-  controls.update();
-  state.clipDirty = true;
+  resetCameraView();
   return ok({
     position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
     target: { x: controls.target.x, y: controls.target.y, z: controls.target.z },

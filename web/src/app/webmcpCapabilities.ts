@@ -110,7 +110,7 @@ export function buildCapabilities() {
 
   return {
     app: {
-      name: "Laplacian",
+      name: "Laplaci",
       description:
         "Multi-expression 3D polynomial calculator. Scalar fields → density clouds or isosurfaces; vector fields → IBFV dye advection. Shared named parameters animate over time via slider keyframes.",
       pipeline:

@@ -89,8 +89,8 @@ export function syncClipGpuWorldGrid(half: number): void {
       }
     }
   };
-  emitPlane("xz", 0.55);
-  emitPlane("xy", 0.35);
+  emitPlane("xy", 0.55);
+  emitPlane("xz", 0.35);
   emitPlane("yz", 0.35);
 
   const axisLen = extent + 0.25;

@@ -1,4 +1,4 @@
-# Laplacian
+# Laplaci
 
 Multi-expression 3D polynomial calculator (Three.js + WebGPU).
 
