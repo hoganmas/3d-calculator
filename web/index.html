@@ -89,17 +89,20 @@
           </div>
         </div>
 
-        <div id="exprList" class="expr-list" aria-label="Expressions"></div>
+        <div class="panel-body">
+          <div id="exprList" class="expr-list" aria-label="Expressions"></div>
 
-        <div id="err"></div>
-        <p
-          id="autosaveStatusBar"
-          class="autosave-status autosave-status-bar"
-          data-state="saved"
-          aria-live="polite"
-        >
-          Saved
-        </p>
+          <div id="panelStatus" class="panel-status" aria-live="polite">
+            <p
+              id="autosaveStatusBar"
+              class="autosave-status autosave-status-bar"
+              data-state="saved"
+            >
+              Saved
+            </p>
+            <div id="err" class="panel-status-err" hidden></div>
+          </div>
+        </div>
       </aside>
       <div
         id="panelResize"

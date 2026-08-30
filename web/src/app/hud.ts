@@ -36,6 +36,17 @@ export function setErr(msg: string) {
   els.err.hidden = !msg;
 }
 
+/** Update the panel error banner from current compile warnings (does not recompile). */
+export function refreshExpressionErrorBanner(
+  compileOk = true,
+  globalError: string | null = null,
+): ExpressionErrorReport {
+  const report = collectExpressionErrors(compileOk, globalError);
+  lastErrorReport = report;
+  setErr(formatExpressionErrors(report));
+  return report;
+}
+
 /** Highlight expression fields when compile fails (preserve duplicate-var warnings). */
 export function setExprCompileOk(ok: boolean) {
   els.exprList?.querySelectorAll(".expr-field").forEach((mf) => {
@@ -58,18 +69,13 @@ export function syncExprCompileState() {
   try {
     compileAllExprs({ rebuildUi: true });
     setExprCompileOk(true);
-    const report = collectExpressionErrors(true, null);
-    lastErrorReport = report;
-    const banner = formatExpressionErrors(report);
-    setErr(banner);
+    const report = refreshExpressionErrorBanner(true, null);
     if (report.errorCount) logExpressionErrors(report);
     return true;
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     setExprCompileOk(false);
-    const report = collectExpressionErrors(false, message);
-    lastErrorReport = report;
-    setErr(formatExpressionErrors(report) || message);
+    const report = refreshExpressionErrorBanner(false, message);
     logExpressionErrors(report);
     console.error("[expressions] compile failed:", message);
     return false;

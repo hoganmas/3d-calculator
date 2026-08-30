@@ -1216,6 +1216,13 @@
         flex: 1 1 auto;
         min-width: 5.5rem;
       }
+      .panel-body {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        min-height: 0;
+        min-width: 0;
+      }
       .autosave-status {
         margin: 0;
         font-size: 11px;
@@ -1232,12 +1239,65 @@
         color: var(--err);
       }
       .autosave-status-bar {
-        margin-top: auto;
-        padding-top: 8px;
-        border-top: 1px solid var(--stroke);
         font-size: 11px;
         font-variant-numeric: tabular-nums;
         flex-shrink: 0;
+      }
+      .panel-status {
+        display: flex;
+        flex-direction: row;
+        align-items: flex-start;
+        gap: 12px;
+        flex-shrink: 0;
+        margin-top: auto;
+        padding-top: 8px;
+        border-top: 1px solid var(--stroke);
+      }
+      .panel-status-err,
+      #err.panel-status-err {
+        flex: 1 1 auto;
+        min-width: 0;
+        margin-left: auto;
+        color: var(--err);
+        font-size: 11px;
+        min-height: 0;
+        white-space: pre-wrap;
+        line-height: 1.35;
+        text-align: right;
+      }
+      .panel-status-err[hidden],
+      #err.panel-status-err[hidden] {
+        display: none;
+      }
+      html[data-panel-layout="horizontal"] #panel {
+        overflow: hidden;
+      }
+      html[data-panel-layout="horizontal"] .panel-body {
+        position: relative;
+        min-height: 0;
+      }
+      html[data-panel-layout="horizontal"] #exprList {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 56px;
+      }
+      html[data-panel-layout="horizontal"] .panel-status {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 4;
+        margin: 0 calc(-1 * 16px) calc(-1 * 18px);
+        padding: 10px 16px 14px;
+        border-top: 1px solid var(--glass-stroke);
+        background: color-mix(in srgb, var(--glass-bg-strong) 90%, transparent);
+        backdrop-filter: blur(18px) saturate(1.35);
+        -webkit-backdrop-filter: blur(18px) saturate(1.35);
+        box-shadow:
+          0 -10px 28px rgba(12, 4, 28, 0.28),
+          inset 0 1px 0 var(--glass-highlight);
       }
       .settings-dialog label {
         display: flex;
@@ -1401,13 +1461,6 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-      }
-      #err {
-        color: var(--err);
-        font-size: 12px;
-        min-height: 1.2em;
-        white-space: pre-wrap;
-        line-height: 1.35;
       }
       .march-slider-head {
         display: flex;
