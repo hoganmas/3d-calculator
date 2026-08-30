@@ -14,6 +14,7 @@ import {
   redistributeOvercrowdedFlowParticles,
   flowSpeedPercentileMinMax,
   flowTrailBaseIndex,
+  isFlowParticleGhost,
   resolveFlowParticleColorRange,
   sampleVelGridAt,
   seedFlowParticles,
@@ -543,6 +544,7 @@ function refreshAllTrailSpeeds(
     const vel = layers[layer];
     if (!vel) continue;
     const o = i * FLOW_PARTICLE_STRIDE;
+    if (isFlowParticleGhost(posAge, i)) continue;
     const [vx, vy, vz] = sampleVelGridAt(
       vel.fx, vel.fy, vel.fz, M, half,
       posAge[o]!, posAge[o + 1]!, posAge[o + 2]!,

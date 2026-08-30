@@ -1291,6 +1291,13 @@ export function redistributeOvercrowdedFlowParticles(
     const layerDensity = flowParticleDensityForLayer(density, layer);
     const grid = layerDensity ?? (!Array.isArray(density) ? density : null);
     if (!grid || grid[ci]! <= threshold) continue;
+    // Prefer ghost-fade + later respawn so trails don't pop. Instant teleport
+    // only when there is no trail buffer to fade.
+    if (trailHist && trailSteps >= 2) {
+      beginFlowParticleGhost(posAge, i, trailSteps);
+      if (grid[ci]! > 0) grid[ci] = (grid[ci]! - 1) as number;
+      continue;
+    }
     const picked = pickLowDensitySpawn(
       grid, res, half, i, layer, frameIdx,
     );

@@ -402,6 +402,40 @@ export async function run() {
       },
     },
     {
+      name: "redistributeOvercrowdedFlowParticles ghosts trails instead of popping",
+      fn: () => {
+        const count = 8;
+        const trailSteps = 4;
+        const posAge = new Float32Array(count * FLOW_PARTICLE_STRIDE);
+        const layerIds = new Uint32Array(count);
+        const trailHist = new Float32Array(count * MAX_FLOW_TRAIL_STEPS * FLOW_PARTICLE_STRIDE);
+        for (let i = 0; i < count; i++) {
+          posAge[i * FLOW_PARTICLE_STRIDE] = 0;
+          posAge[i * FLOW_PARTICLE_STRIDE + 1] = 0;
+          posAge[i * FLOW_PARTICLE_STRIDE + 2] = 0;
+          posAge[i * FLOW_PARTICLE_STRIDE + 3] = 1;
+          posAge[i * FLOW_PARTICLE_STRIDE + 4] = 1;
+          layerIds[i] = 0;
+          trailHist[i * MAX_FLOW_TRAIL_STEPS * FLOW_PARTICLE_STRIDE] = 0.25;
+        }
+        redistributeOvercrowdedFlowParticles(
+          posAge, layerIds, count, 1, 0.5, false, 0, trailHist, trailSteps,
+        );
+        let ghosts = 0;
+        let preserved = 0;
+        for (let i = 0; i < count; i++) {
+          if (isFlowParticleGhost(posAge, i)) {
+            ghosts++;
+            if (Math.abs(trailHist[i * MAX_FLOW_TRAIL_STEPS * FLOW_PARTICLE_STRIDE]! - 0.25) < 1e-6) {
+              preserved++;
+            }
+          }
+        }
+        assert(ghosts >= 1, "overcrowded particles entered ghost fade");
+        assert(preserved === ghosts, "ghost redistribute kept frozen trails");
+      },
+    },
+    {
       name: "sortFlowParticlesByDepth without depthKeys array",
       fn: () => {
         const posAge = new Float32Array([
