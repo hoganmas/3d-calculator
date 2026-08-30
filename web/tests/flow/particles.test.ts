@@ -18,6 +18,9 @@ import {
   resolveFlowParticleColorRangeFast,
   resetFlowTrailHistSlot,
   seedFlowTrailHist,
+  flowGhostTrailLifeAge,
+  flowSpawnTrailLifeAge,
+  syncFlowParticleTrailLife,
   updateFlowTrailHead,
   sampleVelGridAt,
   seedFlowParticles,
@@ -175,6 +178,39 @@ export async function run() {
         pushFlowTrailHist(posAge, trailHist, trailSteps, 1, pushCtx);
         assert(!isFlowParticleGhost(posAge, 0), "respawned after fade");
         assert(posAge[3]! < 0.5, "fresh age after respawn");
+      },
+    },
+    {
+      name: "flowGhostTrailLifeAge fades from full to invisible",
+      fn: () => {
+        const steps = 8;
+        const start = flowGhostTrailLifeAge(-steps, steps);
+        const end = flowGhostTrailLifeAge(-0.5, steps);
+        assert(start > -1.01 && start < -0.99, "ghost starts at full visibility age");
+        assert(end < -1.9, "ghost ends near invisible age");
+      },
+    },
+    {
+      name: "flowSpawnTrailLifeAge ramps from invisible to full",
+      fn: () => {
+        const start = flowSpawnTrailLifeAge(0);
+        const mid = flowSpawnTrailLifeAge(0.175);
+        const end = flowSpawnTrailLifeAge(0.35);
+        assert(start < -0.49, "spawn starts invisible");
+        assert(mid > -0.26 && mid < -0.24, "spawn mid fade");
+        assert(end === 0.35, "spawn ends at real age");
+      },
+    },
+    {
+      name: "syncFlowParticleTrailLife writes ghost ages into trail",
+      fn: () => {
+        const posAge = new Float32Array(5);
+        beginFlowParticleGhost(posAge, 0, 4);
+        const trailHist = new Float32Array(MAX_FLOW_TRAIL_STEPS * FLOW_PARTICLE_STRIDE);
+        trailHist[3] = 12;
+        syncFlowParticleTrailLife(posAge, trailHist, 1, 4);
+        assert(trailHist[3]! < -0.99 && trailHist[3]! > -1.01, "ghost head age encoded");
+        assert(trailHist[8]! < -0.99, "ghost slot 1 age encoded");
       },
     },
     {

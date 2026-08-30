@@ -102,6 +102,21 @@ fn ribbonAlphaEnvelope(u: f32) -> f32 {
   return width * tailFade;
 }
 
+// Trail slot age encodes life phase (CPU syncFlowParticleTrailLife):
+//   age < -1  → ghost fade-out (-2 invisible .. -1 full)
+//   age < 0   → spawn fade-in (-0.5 invisible .. 0 full)
+//   age >= 0  → normal life; fade near flowAgeMax
+fn trailLifeAlpha(age: f32) -> f32 {
+  if (age < -1.0) {
+    return smoothstep(-2.0, -1.0, age);
+  }
+  if (age < 0.0) {
+    return smoothstep(-0.5, 0.0, age);
+  }
+  let t = age / max(u.flowAgeMax, 1e-3);
+  return 1.0 - smoothstep(0.78, 1.0, t);
+}
+
 // Trail centerline tangent: from newest toward older samples (trail behind the head).
 fn trailTangent(pNew: vec3f, pOld: vec3f) -> vec3f {
   let t = pOld - pNew;
@@ -169,7 +184,11 @@ fn vsMain(
   let pNew = trailPosAge(particleIdx, slotNew);
   let pOld = trailPosAge(particleIdx, slotOld);
   let segLen = length(pNew.xyz - pOld.xyz);
-  if (segLen > u.maxSegLen) { return o; }
+  var segFade = 1.0;
+  if (segLen > u.maxSegLen * 0.75) {
+    segFade = 1.0 - smoothstep(u.maxSegLen * 0.85, u.maxSegLen * 1.05, segLen);
+  }
+  if (segFade < 1e-4 && slotNew != 0u) { return o; }
   if (segLen < 1e-5 && slotNew != 0u) { return o; }
 
   let corner = SEG_QUAD[vi % 6u];
@@ -213,7 +232,9 @@ fn vsMain(
   let spdOld = trailSpeed(particleIdx, slotOld);
   let spd = mix(spdNew, spdOld, tAlong);
   let rgb = speedColor(spd, flowIdx);
-  let alpha = u.flowOpacity * max(ribbonAlphaEnvelope(ribbonPos), widthMix * 0.15) * boxFade(world);
+  let lifeAge = mix(pNew.w, pOld.w, tAlong);
+  let lifeFade = trailLifeAlpha(lifeAge);
+  let alpha = u.flowOpacity * max(ribbonAlphaEnvelope(ribbonPos), widthMix * 0.15) * boxFade(world) * lifeFade * segFade;
 
   o.clip = clipPos;
   o.world = worldOffset;

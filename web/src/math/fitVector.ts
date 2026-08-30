@@ -1125,6 +1125,59 @@ export function pickLowDensitySpawn(
 /** One trail-sample spacing for spawn backfill (≈ dt × push interval at default settings). */
 export const FLOW_TRAIL_BACKFILL_STEP_SCALE = 0.12;
 
+/** Seconds of alpha fade-in after respawn (trail slot age in [-0.5, 0)). */
+export const FLOW_TRAIL_SPAWN_FADE_SEC = 0.35;
+
+const GHOST_TRAIL_AGE_MIN = -2;
+const GHOST_TRAIL_AGE_MAX = -1;
+const SPAWN_TRAIL_AGE_MIN = -0.5;
+
+/** Map ghost countdown (negative speed slot) to shader trail-life age. */
+export function flowGhostTrailLifeAge(countdown: number, trailSteps: number): number {
+  const start = -Math.max(2, trailSteps);
+  const ghostAlpha = (countdown + 0.5) / (start + 0.5);
+  const t = Math.max(0, Math.min(1, ghostAlpha));
+  return GHOST_TRAIL_AGE_MIN + t * (GHOST_TRAIL_AGE_MAX - GHOST_TRAIL_AGE_MIN);
+}
+
+/** Map particle age after respawn to shader trail-life age (fade-in). */
+export function flowSpawnTrailLifeAge(particleAge: number): number {
+  if (particleAge >= FLOW_TRAIL_SPAWN_FADE_SEC) return particleAge;
+  const t = particleAge / FLOW_TRAIL_SPAWN_FADE_SEC;
+  return SPAWN_TRAIL_AGE_MIN + t * -SPAWN_TRAIL_AGE_MIN;
+}
+
+/**
+ * Encode ghost fade / spawn fade into trail slot ages for GPU alpha.
+ * Call each frame after updateFlowTrailHead.
+ */
+export function syncFlowParticleTrailLife(
+  posAge: Float32Array,
+  trailHist: Float32Array,
+  count: number,
+  trailSteps: number,
+): void {
+  if (trailSteps < 2) return;
+  for (let i = 0; i < count; i++) {
+    const po = i * FLOW_PARTICLE_STRIDE;
+    const ho = flowTrailBaseIndex(i);
+    if (isFlowParticleGhost(posAge, i)) {
+      const lifeAge = flowGhostTrailLifeAge(posAge[po + 4]!, trailSteps);
+      for (let j = 0; j < trailSteps; j++) {
+        trailHist[ho + j * FLOW_TRAIL_SLOT_STRIDE + 3] = lifeAge;
+      }
+      continue;
+    }
+    const particleAge = posAge[po + 3]!;
+    if (particleAge < FLOW_TRAIL_SPAWN_FADE_SEC) {
+      const lifeAge = flowSpawnTrailLifeAge(particleAge);
+      for (let j = 0; j < trailSteps; j++) {
+        trailHist[ho + j * FLOW_TRAIL_SLOT_STRIDE + 3] = lifeAge;
+      }
+    }
+  }
+}
+
 function applyParticleSpawn(
   posAge: Float32Array,
   i: number,
@@ -1142,7 +1195,10 @@ function applyParticleSpawn(
   posAge[o + 2] = pz;
   posAge[o + 3] = 0;
   posAge[o + 4] = speed;
-  resetFlowTrailHistSlot(trailHist, trailSteps, i, px, py, pz, 0, speed, vel);
+  resetFlowTrailHistSlot(
+    trailHist, trailSteps, i, px, py, pz,
+    flowSpawnTrailLifeAge(0), speed, vel,
+  );
 }
 
 /** True while a particle is fading its trail after death (speed slot holds negative countdown). */
@@ -1361,7 +1417,10 @@ export function updateFlowTrailHead(
     trailHist[ho] = posAge[po]!;
     trailHist[ho + 1] = posAge[po + 1]!;
     trailHist[ho + 2] = posAge[po + 2]!;
-    trailHist[ho + 3] = posAge[po + 3]!;
+    const particleAge = posAge[po + 3]!;
+    trailHist[ho + 3] = particleAge < FLOW_TRAIL_SPAWN_FADE_SEC
+      ? flowSpawnTrailLifeAge(particleAge)
+      : particleAge;
     trailHist[ho + 4] = posAge[po + 4]!;
   }
 }

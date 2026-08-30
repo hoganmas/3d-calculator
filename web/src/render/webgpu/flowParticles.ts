@@ -19,6 +19,7 @@ import {
   seedFlowParticles,
   seedFlowTrailHist,
   sortFlowParticlesByDepth,
+  syncFlowParticleTrailLife,
   updateFlowTrailHead,
   type FlowParticleLayerVel,
 } from "../../math/fitVector.js";
@@ -393,6 +394,7 @@ export function tickFlowParticles(
   t0 = performance.now();
   if (trailHist && gpu.flowTrailBuf) {
     updateFlowTrailHead(posAge, trailHist, gpu.flowParticleCount);
+    syncFlowParticleTrailLife(posAge, trailHist, gpu.flowParticleCount, steps);
     trailPushCounter++;
     if (trailPushCounter >= TRAIL_PUSH_INTERVAL) {
       pushFlowTrailHist(posAge, trailHist, steps, gpu.flowParticleCount, {
@@ -405,6 +407,7 @@ export function tickFlowParticles(
         densityRes: FLOW_PARTICLE_DENSITY_GRID,
       });
       trailPushCounter = 0;
+      syncFlowParticleTrailLife(posAge, trailHist, gpu.flowParticleCount, steps);
     }
   }
   const trailMs = performance.now() - t0;
