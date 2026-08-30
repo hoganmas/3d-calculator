@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" fill="none">
-  <rect width="1200" height="630" fill="#1a1228"/>
-  <rect x="80" y="80" width="1040" height="470" rx="32" fill="#241833" stroke="#3d2d52" stroke-width="2"/>
-  <circle cx="220" cy="315" r="72" fill="#e8b4ff" fill-opacity="0.12"/>
-  <circle cx="980" cy="180" r="96" fill="#7c5cff" fill-opacity="0.16"/>
-  <text x="600" y="280" text-anchor="middle" font-family="system-ui, sans-serif" font-size="72" font-weight="700" fill="#f5eef8" letter-spacing="-1">laplaci</text>
-  <text x="600" y="360" text-anchor="middle" font-family="system-ui, sans-serif" font-size="32" fill="#c9b8d9">3D polynomial calculator</text>
-  <text x="600" y="420" text-anchor="middle" font-family="system-ui, sans-serif" font-size="22" fill="#9a86b0">Chebyshev fit · WebGPU ray marching</text>
-</svg>

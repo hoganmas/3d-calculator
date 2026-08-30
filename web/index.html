@@ -3,40 +3,40 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Laplaci — 3D Polynomial Calculator</title>
+    <title>laplaci — 3D Graphing Calculator</title>
     <meta
       name="description"
-      content="Laplaci is a browser-based 3D polynomial calculator. Enter math expressions, fit Chebyshev polynomials, and ray-march isosurfaces and density clouds with WebGPU."
+      content="laplaci is a browser-based 3D graphing calculator. Enter math expressions and visualize scalar fields, vector fields, and 2D manifolds in a 3D space."
     />
     <meta name="theme-color" content="#1a1228" />
     <link rel="canonical" href="https://laplaci.com/" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://laplaci.com/" />
-    <meta property="og:title" content="Laplaci — 3D Polynomial Calculator" />
+    <meta property="og:title" content="laplaci — 3D Graphing Calculator" />
     <meta
       property="og:description"
-      content="Enter math expressions and visualize 3D manifolds and density clouds in the browser with WebGPU."
+      content="A 3D graphing calculator in your browser. Enter math expressions and visualize scalar fields, vector fields, and surfaces."
     />
-    <meta property="og:image" content="https://laplaci.com/og-image.svg" />
+    <meta property="og:image" content="https://laplaci.com/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Laplaci — 3D Polynomial Calculator" />
+    <meta name="twitter:title" content="laplaci — 3D Graphing Calculator" />
     <meta
       name="twitter:description"
-      content="Enter math expressions and visualize 3D manifolds and density clouds in the browser with WebGPU."
+      content="A 3D graphing calculator in your browser. Enter math expressions and visualize scalar fields, vector fields, and surfaces."
     />
-    <meta name="twitter:image" content="https://laplaci.com/og-image.svg" />
+    <meta name="twitter:image" content="https://laplaci.com/og-image.png" />
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
         "@type": "WebApplication",
-        "name": "Laplaci",
+        "name": "laplaci",
         "url": "https://laplaci.com/",
-        "description": "Multi-expression 3D polynomial calculator with Chebyshev fit and WebGPU ray marching.",
+        "description": "3D graphing calculator",
         "applicationCategory": "DesignApplication",
         "operatingSystem": "Any",
-        "browserRequirements": "Requires WebGPU or WebGL",
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
       }
     </script>
@@ -62,9 +62,8 @@
   <body>
     <noscript>
       <p>
-        Laplaci is a browser-based 3D polynomial calculator. Enter mathematical expressions to
-        visualize isosurfaces and density clouds using Chebyshev polynomial fitting and WebGPU ray
-        marching. JavaScript is required to run the app.
+        laplaci is a browser-based 3D graphing calculator. Enter mathematical expressions to
+        visualize scalar fields, vector fields, and 2D manifolds in a 3D space.
       </p>
     </noscript>
     <div id="splash" role="status" aria-live="polite" aria-busy="true">
@@ -82,6 +81,7 @@
             id="splashKfTrack"
             class="kf-load-track"
             role="progressbar"
+            aria-label="Loading animation"
             aria-valuemin="0"
             aria-valuemax="100"
             aria-valuetext="Loading animation"
@@ -200,6 +200,7 @@
             id="kfLoadTrack"
             class="kf-load-track"
             role="progressbar"
+            aria-label="Loading animation"
             aria-valuemin="0"
             aria-valuemax="100"
             aria-valuetext="Loading animation"
@@ -341,7 +342,7 @@
         </header>
         <div class="settings-body">
           <p class="webmcp-setup-lead">
-            Laplaci lets external agents help you write expressions and tune render settings.
+            laplaci lets external agents help you write expressions and tune render settings.
             Opening this panel enables MCP in the current tab (Chrome may ask for permission).
             Bookmark with <strong>?webmcp=1</strong> to skip re-enabling after reload.
           </p>
