@@ -7,7 +7,7 @@ import { setExpressionsOnChange } from "./model/expressions.js";
 import { anyParamAnimating, ensureParamAnimationFromExprs } from "./model/params.js";
 import { syncExprCompileState, getExpressionErrorReport } from "./app/hud.js";
 import { initDom, els, initPanelResize, initPanelToggle } from "./app/dom.js";
-import { initScene, bindClipUniforms, controls, camera } from "./app/scene.js";
+import { initScene, bindClipUniforms, resetCameraView } from "./app/scene.js";
 import { initCompile, applyPreset } from "./app/compile.js";
 import {
   scheduleUploadFit,
@@ -102,10 +102,7 @@ async function bootstrap() {
   });
 
   els.reset.addEventListener("click", () => {
-    camera.position.set(5.2, 4.0, 6.8);
-    controls.target.set(0, 0, 0);
-    controls.update();
-    state.clipDirty = true;
+    resetCameraView();
     scheduleAutosave();
   });
 
