@@ -85,11 +85,18 @@ function frame(rafNow: number) {
       tickGpuKeyframeBlends();
       if (t0 - state.lastAnimFitAt >= ANIM_FIT_MIN_MS) {
         state.lastAnimFitAt = t0;
-        if (state.fitTimer) {
-          clearTimeout(state.fitTimer);
-          state.fitTimer = 0;
+        // Don't cancel a pending structural (latex) refit — anim would starve it.
+        const pendingStructural =
+          !!state.fitTimer && !state.pendingFitOpts?.fromAnim;
+        if (pendingStructural) {
+          // Keep the timer; GPU keyframe blends above still run this frame.
+        } else {
+          if (state.fitTimer) {
+            clearTimeout(state.fitTimer);
+            state.fitTimer = 0;
+          }
+          uploadFit({ fromAnim: true });
         }
-        uploadFit({ fromAnim: true });
       }
     }
   }

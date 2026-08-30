@@ -311,8 +311,13 @@ export function uploadFit(
           ? L.vectorCompiled!.freeParams.some((p) => dirty.has(p))
           : L.compiled!.freeParams.some((p) => dirty.has(p)));
       // Structural: dirty when fingerprint changed. Anim: dirty when params depend.
+      // Content dirtiness must still force a refit during anim — otherwise latex edits
+      // on layers unrelated to the animating param(s) reuse stale dens forever
+      // (anim ticks also cancel the scheduled structural uploadFit).
       const contentDirty = layerBakeFingerprints.get(L.item.id) !== fp;
-      const depends = fromAnim ? !dirty || paramDepends : contentDirty;
+      const depends = fromAnim
+        ? contentDirty || !dirty || paramDepends
+        : contentDirty;
       const prev = sceneMetaOk && !depends ? prevById.get(L.item.id) : null;
       const prevHasKf =
         prev && Array.isArray(prev.keyframes) && prev.keyframes.length > 0;
@@ -378,7 +383,8 @@ export function uploadFit(
           cheb = prev.cheb;
           fitRel = prev.fitRel ?? fitRel;
         }
-        commitLayerFp(L.item.id, fp);
+        // Only stamp fingerprint when dens matches content — never while contentDirty.
+        if (!contentDirty) commitLayerFp(L.item.id, fp);
         continue;
       }
 
