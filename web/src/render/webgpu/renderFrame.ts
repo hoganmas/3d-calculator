@@ -13,7 +13,7 @@ import {
 } from "./uniforms.js";
 import { packGridParams, syncClipGpuWorldGrid, uploadAxisLabelBillboards } from "./gridOverlay.js";
 import { state } from "../../app/state.js";
-import { ensureMarchTargets, resizeClipGpuCanvas } from "./marchCanvas.js";
+import { ensureMarchTargets, ensureVolumeTargets, resizeClipGpuCanvas } from "./marchCanvas.js";
 import { noteGpuPresent, scheduleStampReadback } from "./marchProfile.js";
 import { hasFlowGpuLayers } from "./flowGpu.js";
 import {
@@ -39,6 +39,8 @@ function buildRaySetup(
   half: number;
   marchW: number;
   marchH: number;
+  volW: number;
+  volH: number;
   outW: number;
   outH: number;
 } | null {
@@ -56,17 +58,20 @@ function buildRaySetup(
 
   const marchW = Math.max(1, fbW | 0);
   const marchH = Math.max(1, fbH | 0);
+  const volW = Math.max(1, (params.volFbW ?? 0) || marchW);
+  const volH = Math.max(1, (params.volFbH ?? 0) || marchH);
   const outW = Math.max(1, (displayW | 0) || marchW);
   const outH = Math.max(1, (displayH | 0) || marchH);
 
   resizeClipGpuCanvas(outW, outH);
   ensureMarchTargets(marchW, marchH);
+  ensureVolumeTargets(volW, volH);
   syncClipGpuWorldGrid(h);
 
   const targets = acquireMarchTargets();
   if (!targets) return null;
 
-  return { handles, targets, ro, dirMatrix, half: h, marchW, marchH, outW, outH };
+  return { handles, targets, ro, dirMatrix, half: h, marchW, marchH, volW, volH, outW, outH };
 }
 
 function clearMarchTargets(
@@ -229,9 +234,9 @@ function drawSsaoPass(
 function drawBeerPass(
   handles: MarchGpuHandles,
   targets: MarchTargets,
-  sceneView: GPUTextureView,
-  marchW: number,
-  marchH: number,
+  volColorView: GPUTextureView,
+  volW: number,
+  volH: number,
   Mgrid: number,
   steps: number,
   half: number,
@@ -247,8 +252,8 @@ function drawBeerPass(
     drawParamBufBeer,
     0,
     packDrawParamsBeer(
-      marchW,
-      marchH,
+      volW,
+      volH,
       Mgrid,
       steps,
       half,
@@ -272,11 +277,45 @@ function drawBeerPass(
   const enc = device.createCommandEncoder();
   const pass = enc.beginRenderPass({
     colorAttachments: [
-      { view: sceneView, loadOp: "load", storeOp: "store" },
+      {
+        view: volColorView,
+        loadOp: "clear",
+        clearValue: { r: 0, g: 0, b: 0, a: 0 },
+        storeOp: "store",
+      },
       { view: occlSurfView, loadOp: "clear", clearValue: { r: 1, g: 0, b: 0, a: 1 }, storeOp: "store" },
     ],
   });
   pass.setPipeline(beerPipeline);
+  pass.setBindGroup(0, bg);
+  pass.draw(3);
+  pass.end();
+  device.queue.submit([enc.finish()]);
+}
+
+function compositeVolumeOntoScene(
+  handles: MarchGpuHandles,
+  targets: MarchTargets,
+  sceneView: GPUTextureView,
+): void {
+  if (!gpu.blitPipeline || !gpu.blitSampler) return;
+  const { device } = handles;
+  const bg = device.createBindGroup({
+    layout: gpu.blitPipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: targets.volColorTex.createView() },
+      { binding: 1, resource: gpu.blitSampler },
+    ],
+  });
+  const enc = device.createCommandEncoder();
+  const pass = enc.beginRenderPass({
+    colorAttachments: [{
+      view: sceneView,
+      loadOp: "load",
+      storeOp: "store",
+    }],
+  });
+  pass.setPipeline(gpu.blitPipeline);
   pass.setBindGroup(0, bg);
   pass.draw(3);
   pass.end();
@@ -395,15 +434,20 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
   if (!setup) return false;
 
   const {
-    handles, targets, ro, dirMatrix, half, marchW, marchH, outW, outH,
+    handles, targets, ro, dirMatrix, half, marchW, marchH, volW, volH, outW, outH,
   } = setup;
   const { device, ctx, volumeBuf, colorBuf } = handles;
   const { camera, scale, steps } = params;
+  const isoSteps = Math.min(192, Math.max(16, (params.isoSteps ?? steps) | 0));
+  const volumeSteps = Math.min(96, Math.max(8, steps | 0));
   const Mgrid = gpu.sceneM;
+  const sameRes = volW === marchW && volH === marchH;
 
   gpu.profileMarchFbW = marchW;
   gpu.profileMarchFbH = marchH;
-  gpu.profileMethod = "gpu-iso+ssao+beer+grid+fxaa";
+  gpu.profileMethod = sameRes
+    ? "gpu-iso+ssao+beer+grid+fxaa"
+    : "gpu-iso+ssao+beer(volFB)+blit+grid+fxaa";
   gpu.profileGridM = Mgrid;
 
   if (gpu.scenePacked && gpu.volumeBuf) {
@@ -415,7 +459,7 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
   const swapView = ctx.getCurrentTexture().createView();
 
   clearMarchTargets(device, targets);
-  drawIsoConstraints(handles, targets, sceneView, marchW, marchH, Mgrid, steps, half, scale, ro, dirMatrix);
+  drawIsoConstraints(handles, targets, sceneView, marchW, marchH, Mgrid, isoSteps, half, scale, ro, dirMatrix);
 
   if (gpu.sceneConstraints.length > 0) {
     sceneView = drawSsaoPass(handles, targets, sceneView, marchW, marchH, half, ro, dirMatrix);
@@ -423,7 +467,46 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
 
   const ranBeer = gpu.densLayerCount > 0 && gpu.densPacked;
   if (ranBeer) {
-    drawBeerPass(handles, targets, sceneView, marchW, marchH, Mgrid, steps, half, scale, ro, dirMatrix);
+    if (sameRes) {
+      // Fast path: beer composites directly into the iso-resolution scene.
+      const occlIsoView = targets.occlIsoTex.createView();
+      const occlSurfView = targets.occlSurfTex.createView();
+      device.queue.writeBuffer(
+        handles.drawParamBufBeer,
+        0,
+        packDrawParamsBeer(
+          marchW, marchH, Mgrid, volumeSteps, half, scale,
+          gpu.densBase, gpu.densLayerCount, ro, dirMatrix, gpu.flowLayerStart,
+        ),
+      );
+      const bg = device.createBindGroup({
+        layout: handles.beerPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: handles.drawParamBufBeer } },
+          { binding: 1, resource: { buffer: volumeBuf } },
+          { binding: 2, resource: occlIsoView },
+          { binding: 3, resource: { buffer: colorBuf } },
+        ],
+      });
+      const enc = device.createCommandEncoder();
+      const pass = enc.beginRenderPass({
+        colorAttachments: [
+          { view: sceneView, loadOp: "load", storeOp: "store" },
+          { view: occlSurfView, loadOp: "clear", clearValue: { r: 1, g: 0, b: 0, a: 1 }, storeOp: "store" },
+        ],
+      });
+      pass.setPipeline(handles.beerPipeline);
+      pass.setBindGroup(0, bg);
+      pass.draw(3);
+      pass.end();
+      device.queue.submit([enc.finish()]);
+    } else {
+      drawBeerPass(
+        handles, targets, targets.volColorTex.createView(),
+        volW, volH, Mgrid, volumeSteps, half, scale, ro, dirMatrix,
+      );
+      compositeVolumeOntoScene(handles, targets, sceneView);
+    }
   }
 
   if (hasFlowGpuLayers()) {

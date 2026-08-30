@@ -28,6 +28,7 @@ import {
   compositionNdcOffsetX,
   compositionNdcOffsetY,
   marchFramebufferSize,
+  volumeFramebufferSize,
   syncClipPresentation,
   resize,
 } from "./presentation.js";
@@ -54,6 +55,7 @@ export const clipUniforms = {
   uHalf: { value: 2.5 },
   uScale: { value: 2.5 },
   uSteps: { value: 32 },
+  uIsoSteps: { value: 32 },
   uCameraPos: { value: new THREE.Vector3() },
   uDirM: { value: new THREE.Matrix3() },
   uAbsorbColor: { value: new THREE.Color(...themeColors.beerAbsorb) },
@@ -255,6 +257,7 @@ export function drawClipGpuFrame() {
   state.densSubmittedThisFrame = false;
   const { vw, vh } = viewportSize();
   const { mw, mh } = marchFramebufferSize();
+  const { mw: volMw, mh: volMh } = volumeFramebufferSize();
   if (!state.lastSceneBake || !isClipBakeGpuReady()) {
     if (isClipGpuUploadReady() && hasUploadedVolume()) {
       void scheduleMarchPipelines(state.fitDeg).then((ok) => {
@@ -277,10 +280,13 @@ export function drawClipGpuFrame() {
     half: clipUniforms.uHalf.value,
     fbW: mw,
     fbH: mh,
+    volFbW: volMw,
+    volFbH: volMh,
     displayW: vw,
     displayH: vh,
     scale: clipUniforms.uScale.value,
     steps: clipUniforms.uSteps.value | 0,
+    isoSteps: clipUniforms.uIsoSteps.value | 0,
     ndcOffsetX: compositionNdcOffsetX(vw),
     ndcOffsetY: compositionNdcOffsetY(vh),
   });

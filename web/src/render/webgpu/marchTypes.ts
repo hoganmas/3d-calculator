@@ -29,10 +29,17 @@ export interface ClipGpuProfile {
 export interface RenderClipFrameGpuParams {
   camera: PerspectiveCamera;
   half: number;
+  /** Iso / SSAO / compose framebuffer size. */
   fbW: number;
   fbH: number;
+  /** Beer / volume framebuffer size (defaults to fbW/fbH). */
+  volFbW?: number;
+  volFbH?: number;
   scale: number;
+  /** Beer / scalar-volume ray-march step count. */
   steps: number;
+  /** Iso-surface (constraint) ray-march step count. */
+  isoSteps?: number;
   ndcOffsetX?: number;
   ndcOffsetY?: number;
   displayW?: number;
@@ -71,6 +78,7 @@ export interface MarchTargets {
   occlSurfTex: GPUTexture;
   depthTex: GPUTexture;
   normalTex: GPUTexture;
+  volColorTex: GPUTexture;
 }
 
 export interface MarchRaySetup {
@@ -79,6 +87,8 @@ export interface MarchRaySetup {
   half: number;
   marchW: number;
   marchH: number;
+  volW: number;
+  volH: number;
   outW: number;
   outH: number;
 }
@@ -88,7 +98,8 @@ export function acquireMarchGpuHandles(): MarchGpuHandles | null {
     !isClipBakeGpuReady() || !gpu.ctx || !gpu.volumeBuf || !gpu.colorBuf ||
     !gpu.fxaaParamBuf || !gpu.ssaoParamBuf || !gpu.fxaaSampler || !gpu.gridParamBuf ||
     !gpu.device || !gpu.isoPipeline || !gpu.beerPipeline || !gpu.ssaoPipeline ||
-    !gpu.fxaaPipeline || !gpu.gridPipeline || !gpu.drawParamBuf || !gpu.drawParamBufBeer
+    !gpu.fxaaPipeline || !gpu.blitPipeline || !gpu.blitSampler || !gpu.gridPipeline ||
+    !gpu.drawParamBuf || !gpu.drawParamBufBeer
   ) {
     return null;
   }
@@ -118,8 +129,20 @@ export function acquireMarchTargets(): MarchTargets | null {
   const occlSurfTex = gpu.occlSurfTex;
   const depthTex = gpu.depthTex;
   const normalTex = gpu.normalTex;
-  if (!sceneColorTex || !sceneColorAoTex || !occlIsoTex || !occlSurfTex || !depthTex || !normalTex) {
+  const volColorTex = gpu.volColorTex;
+  if (
+    !sceneColorTex || !sceneColorAoTex || !occlIsoTex || !occlSurfTex ||
+    !depthTex || !normalTex || !volColorTex
+  ) {
     return null;
   }
-  return { sceneColorTex, sceneColorAoTex, occlIsoTex, occlSurfTex, depthTex, normalTex };
+  return {
+    sceneColorTex,
+    sceneColorAoTex,
+    occlIsoTex,
+    occlSurfTex,
+    depthTex,
+    normalTex,
+    volColorTex,
+  };
 }

@@ -102,8 +102,10 @@ export function getRenderSettingsSnapshot(): LaplacianRenderSnapshot {
     deg: Number(els.deg.value),
     scale: Number(els.scale.value),
     steps: Number(els.steps.value),
+    isoSteps: Number(els.isoSteps?.value ?? els.steps.value),
     boxSize: Number(els.boxSize.value),
     marchDownscale: Number(els.marchDownscale.value),
+    isoMarchDownscale: Number(els.isoMarchDownscale?.value ?? els.marchDownscale.value),
     showGridAxes: state.showGridAxes,
     preset: els.preset.value,
   };
@@ -184,9 +186,13 @@ function syncRenderDom(render: LaplacianRenderSnapshot) {
   els.deg.value = String(Math.round(render.deg));
   els.scale.value = String(render.scale);
   els.steps.value = String(Math.round(render.steps));
+  if (els.isoSteps) els.isoSteps.value = String(Math.round(render.isoSteps));
   els.boxSize.value = String(render.boxSize);
   syncBoundsSlider();
   els.marchDownscale.value = String(Math.round(render.marchDownscale));
+  if (els.isoMarchDownscale) {
+    els.isoMarchDownscale.value = String(Math.round(render.isoMarchDownscale));
+  }
   state.showGridAxes = render.showGridAxes;
   syncShowGridAxesUi();
   els.preset.value = render.preset in PRESETS ? render.preset : "sincos";

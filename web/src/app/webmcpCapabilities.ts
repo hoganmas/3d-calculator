@@ -46,7 +46,7 @@ const TOOL_CATALOG = [
   {
     name: "laplacian_get_render_settings",
     readOnly: true,
-    summary: "Read deg, scale, steps, boxSize, marchDownscale, preset key.",
+    summary: "Read deg, scale, steps, isoSteps, boxSize, marchDownscale, isoMarchDownscale, preset key.",
   },
   {
     name: "laplacian_set_expression",
@@ -86,7 +86,7 @@ const TOOL_CATALOG = [
   },
   {
     name: "laplacian_set_render_settings",
-    summary: "Patch deg/scale/steps/boxSize/marchDownscale; deg/box refit.",
+    summary: "Patch deg/scale/steps/isoSteps/boxSize/marchDownscale/isoMarchDownscale; deg/box refit.",
   },
   {
     name: "laplacian_reset_camera",
@@ -185,9 +185,11 @@ export function buildCapabilities() {
     renderSettings: {
       deg: { min: 1, max: MAX_DEG, description: "Chebyshev polynomial degree; triggers refit." },
       scale: { description: "Density falloff scale in march shader." },
-      steps: { min: 8, max: 96, description: "Ray-march step count." },
+      steps: { min: 8, max: 96, description: "Beer / scalar volume ray-march step count." },
+      isoSteps: { min: 16, max: 192, description: "Iso-surface ray-march step count." },
       boxSize: { description: "World cube half-extent multiplier; triggers refit." },
-      marchDownscale: { enum: [1, 2, 4, 8, 16], description: "March framebuffer resolution divisor." },
+      marchDownscale: { enum: [1, 2, 4, 8, 16], description: "Beer / scalar volume march resolution divisor." },
+      isoMarchDownscale: { enum: [1, 2, 4, 8, 16], description: "Iso-surface march resolution divisor." },
       preset: { enum: PRESET_KEYS, description: "Last loaded preset key (informational)." },
     },
     presets,

@@ -107,9 +107,14 @@ fn fsMain(in: VSOut) -> FSOut {
   }
 
   let far = max(tExit, half * 4.0);
-  let px = u32(clamp(floor(in.pos.x), 0.0, fbW - 1.0));
-  let py = u32(clamp(floor(in.pos.y), 0.0, fbH - 1.0));
-  let isoD = textureLoad(occlIsoTex, vec2u(px, py), 0).r;
+  // Remap this volume-res pixel into iso-occlusion texture UVs so iso/volume
+  // march resolutions can differ independently.
+  let isoDims = textureDimensions(occlIsoTex);
+  let ux = clamp(in.pos.x / fbW, 0.0, 1.0);
+  let uy = clamp(in.pos.y / fbH, 0.0, 1.0);
+  let ix = u32(min(floor(ux * f32(isoDims.x)), f32(isoDims.x) - 1.0));
+  let iy = u32(min(floor(uy * f32(isoDims.y)), f32(isoDims.y) - 1.0));
+  let isoD = textureLoad(occlIsoTex, vec2u(ix, iy), 0).r;
   if (isoD < 0.999) { tExit = min(tExit, isoD * far); }
   if (!(tExit > tEnter + 1e-6)) {
     out.color = vec4f(0.0);

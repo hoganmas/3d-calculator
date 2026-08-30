@@ -193,8 +193,10 @@ export function initAutosave() {
   bindInput(els.deg);
   bindInput(els.scale);
   bindInput(els.steps);
+  bindInput(els.isoSteps);
   bindInput(els.boxSize);
   bindInput(els.marchDownscale);
+  bindInput(els.isoMarchDownscale);
   bindInput(els.preset);
   bindInput(els.flowDt);
   bindInput(els.flowSpeed);

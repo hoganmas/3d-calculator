@@ -192,7 +192,9 @@ export function uploadFit(
     const deg = opts.fitDeg ?? uiDeg;
     const densScale = Number(els.scale.value);
     const steps = Math.min(96, Math.max(8, Number(els.steps.value) || 32));
+    const isoSteps = Math.min(192, Math.max(16, Number(els.isoSteps?.value) || steps));
     els.steps.value = String(steps);
+    if (els.isoSteps) els.isoSteps.value = String(isoSteps);
     if (!(boxSize > 0)) throw new Error("box size must be > 0");
     if (deg < 1 || deg > MAX_DEG) throw new Error(`poly deg must be 1…${MAX_DEG}`);
     const half = 0.5 * boxSize;
@@ -232,6 +234,7 @@ export function uploadFit(
       }
       clipUniforms.uScale.value = densScale;
       clipUniforms.uSteps.value = steps;
+      clipUniforms.uIsoSteps.value = isoSteps;
       setBoxSize(boxSize);
       clipQuad.visible = false;
       state.clipDirty = true;
@@ -308,8 +311,13 @@ export function uploadFit(
           ? L.vectorCompiled!.freeParams.some((p) => dirty.has(p))
           : L.compiled!.freeParams.some((p) => dirty.has(p)));
       // Structural: dirty when fingerprint changed. Anim: dirty when params depend.
+      // Content dirtiness must still force a refit during anim — otherwise latex edits
+      // on layers unrelated to the animating param(s) reuse stale dens forever
+      // (anim ticks also cancel the scheduled structural uploadFit).
       const contentDirty = layerBakeFingerprints.get(L.item.id) !== fp;
-      const depends = fromAnim ? !dirty || paramDepends : contentDirty;
+      const depends = fromAnim
+        ? contentDirty || !dirty || paramDepends
+        : contentDirty;
       const prev = sceneMetaOk && !depends ? prevById.get(L.item.id) : null;
       const prevHasKf =
         prev && Array.isArray(prev.keyframes) && prev.keyframes.length > 0;
@@ -375,7 +383,8 @@ export function uploadFit(
           cheb = prev.cheb;
           fitRel = prev.fitRel ?? fitRel;
         }
-        commitLayerFp(L.item.id, fp);
+        // Only stamp fingerprint when dens matches content — never while contentDirty.
+        if (!contentDirty) commitLayerFp(L.item.id, fp);
         continue;
       }
 
@@ -783,6 +792,7 @@ export function uploadFit(
 
     clipUniforms.uScale.value = densScale;
     clipUniforms.uSteps.value = steps;
+    clipUniforms.uIsoSteps.value = isoSteps;
     setBoxSize(boxSize);
 
     if (!progressive) resize();
@@ -821,9 +831,12 @@ export function scheduleUploadFit(delay = FIT_DEBOUNCE_MS, opts = {}) {
 export function applyRenderHyperparams() {
   const densScale = Number(els.scale.value) || 1;
   const steps = Math.min(96, Math.max(8, Number(els.steps.value) || 32));
+  const isoSteps = Math.min(192, Math.max(16, Number(els.isoSteps?.value) || steps));
   els.steps.value = String(steps);
+  if (els.isoSteps) els.isoSteps.value = String(isoSteps);
   clipUniforms.uScale.value = densScale;
   clipUniforms.uSteps.value = steps;
+  clipUniforms.uIsoSteps.value = isoSteps;
   state.clipDirty = true;
 }
 
@@ -892,8 +905,18 @@ export function wirePipelineDom() {
     applyRenderHyperparams();
     autosave();
   });
+  els.isoSteps?.addEventListener("input", () => {
+    applyRenderHyperparams();
+    autosave();
+  });
+  els.isoSteps?.addEventListener("change", () => {
+    applyRenderHyperparams();
+    autosave();
+  });
   els.marchDownscale.addEventListener("input", autosave);
   els.marchDownscale.addEventListener("change", autosave);
+  els.isoMarchDownscale?.addEventListener("input", autosave);
+  els.isoMarchDownscale?.addEventListener("change", autosave);
   syncShowGridAxesUi();
   els.toggleGridAxes?.addEventListener("click", () => {
     state.showGridAxes = !state.showGridAxes;

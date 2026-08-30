@@ -20,12 +20,15 @@ export interface DomElements {
   deg: HTMLInputElement;
   scale: HTMLInputElement;
   steps: HTMLInputElement;
+  isoSteps: HTMLInputElement | null;
   boxSize: HTMLInputElement;
   boundsSizeLabel: HTMLElement | null;
   marchDownscale: HTMLInputElement;
+  isoMarchDownscale: HTMLInputElement | null;
   toggleGridAxes: HTMLButtonElement | null;
   shareLink: HTMLButtonElement | null;
   marchScaleLabel: HTMLElement | null;
+  isoMarchScaleLabel: HTMLElement | null;
   reset: HTMLButtonElement;
   togglePanel: HTMLButtonElement | null;
   err: HTMLElement;
@@ -59,12 +62,15 @@ export const els: DomElements = {
   deg: el("deg"),
   scale: el("scale"),
   steps: el("steps"),
+  isoSteps: document.getElementById("isoSteps") as HTMLInputElement | null,
   boxSize: el("boxSize"),
   boundsSizeLabel: document.getElementById("boundsSizeLabel"),
   marchDownscale: el("marchDownscale"),
+  isoMarchDownscale: document.getElementById("isoMarchDownscale") as HTMLInputElement | null,
   toggleGridAxes: document.getElementById("toggleGridAxes") as HTMLButtonElement | null,
   shareLink: document.getElementById("shareLink") as HTMLButtonElement | null,
   marchScaleLabel: document.getElementById("marchScaleLabel"),
+  isoMarchScaleLabel: document.getElementById("isoMarchScaleLabel"),
   reset: el("reset"),
   togglePanel: document.getElementById("togglePanel") as HTMLButtonElement | null,
   err: el("err"),

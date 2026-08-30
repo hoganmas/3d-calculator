@@ -84,13 +84,32 @@ function ensureSceneColorAoTex(w: number, h: number): void {
   gpu.sceneColorAoH = h;
 }
 
+function ensureVolColorTex(w: number, h: number): void {
+  if (gpu.volColorTex && gpu.volColorW === w && gpu.volColorH === h) return;
+  destroyTexture(gpu.volColorTex);
+  if (!gpu.device) return;
+  gpu.volColorTex = gpu.device.createTexture({
+    size: [w, h],
+    format: gpu.canvasFormat,
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+  });
+  gpu.volColorW = w;
+  gpu.volColorH = h;
+}
+
+/** Iso / SSAO / compose targets at surface-quality resolution. */
 export function ensureMarchTargets(w: number, h: number): void {
   ensureOcclIsoTex(w, h);
-  ensureOcclSurfTex(w, h);
   ensureDepthTex(w, h);
   ensureNormalTex(w, h);
   ensureSceneColorTex(w, h);
   ensureSceneColorAoTex(w, h);
+}
+
+/** Beer / volume targets at scalar-quality resolution (may differ from iso). */
+export function ensureVolumeTargets(w: number, h: number): void {
+  ensureVolColorTex(w, h);
+  ensureOcclSurfTex(w, h);
 }
 
 function attachClipGpuCanvas(viewportEl: HTMLElement): HTMLCanvasElement {
