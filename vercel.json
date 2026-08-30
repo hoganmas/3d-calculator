@@ -1,0 +1,18 @@
+{
+  "buildCommand": "cd web && npm ci && npm run build",
+  "outputDirectory": "web/dist",
+  "installCommand": "npm ci && cd web && npm ci",
+  "functions": {
+    "api/og.ts": {
+      "maxDuration": 60,
+      "memory": 3008
+    },
+    "api/share.ts": {
+      "maxDuration": 10
+    }
+  },
+  "rewrites": [
+    { "source": "/s/:payload", "destination": "/api/share?payload=:payload" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ]
+}

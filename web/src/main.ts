@@ -43,6 +43,7 @@ import {
   setAutosaveError,
 } from "./app/persistence/autosave.js";
 import {
+  applyExpressionsFromFragment,
   applyExpressionsFromQuery,
   shareExpressionLink,
 } from "./app/persistence/exprShare.js";
@@ -166,10 +167,28 @@ async function bootstrap() {
       syncBoundsSlider();
       syncExprCompileState();
       await persistNow();
+      const url = new URL(location.href);
+      if (url.searchParams.has("e")) {
+        url.searchParams.delete("e");
+        history.replaceState(null, "", url.pathname + url.hash);
+      }
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     setAutosaveError(`Could not load shared expressions: ${msg}`);
+  }
+  if (!restored) {
+    try {
+      restored = await applyExpressionsFromFragment(location.hash);
+      if (restored) {
+        syncBoundsSlider();
+        syncExprCompileState();
+        await persistNow();
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setAutosaveError(`Could not load shared expressions: ${msg}`);
+    }
   }
   if (!restored) {
     startupBegin("boot.restore-autosave");

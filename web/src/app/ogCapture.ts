@@ -1,7 +1,10 @@
 /**
- * Query-param hook for scripts/render-og-image.mjs (?ogCapture=1).
+ * Query-param hook for scripts/render-og-image.mjs and /api/og (?ogCapture=1).
  */
 import { setExpressions, EXPR_GRADIENTS } from "../model/expressions.js";
+import type { ExprItem } from "../types/models.js";
+import { decodeCompactFragment } from "./persistence/exprShareCodec.js";
+import { normalizeSharePayload } from "./persistence/exprShare.js";
 import { compileAllExprs } from "./compile.js";
 import { uploadFit } from "./pipeline.js";
 import { camera, controls, resetCameraView } from "./scene.js";
@@ -23,6 +26,14 @@ function paletteAt(index: number) {
 function prepareViewport() {
   document.documentElement.dataset.panelCollapsed = "true";
   resize();
+}
+
+function applyOgFastModeFromUrl() {
+  const params = new URLSearchParams(location.search);
+  const ogDeg = Number(params.get("ogDeg"));
+  if (!Number.isFinite(ogDeg) || ogDeg < 2) return;
+  state.fitDeg = Math.round(ogDeg);
+  if (els.deg) els.deg.value = String(state.fitDeg);
 }
 
 function wait(ms: number) {
@@ -48,12 +59,23 @@ async function waitForBake(timeoutMs = 60_000) {
   throw new Error("Timed out waiting for scene bake");
 }
 
+async function loadExpressions(rows: Partial<ExprItem>[]) {
+  prepareViewport();
+  setExpressions(rows);
+  compileAllExprs({ rebuildUi: false });
+  state.exprListApi?.render();
+  if (state.fitTimer) window.clearTimeout(state.fitTimer);
+  uploadFit();
+  await waitForBake();
+}
+
 export function installOgCapture() {
+  applyOgFastModeFromUrl();
+
   const api = {
     async load(latex: string, opts: LoadOpts = {}) {
-      prepareViewport();
       const grad = paletteAt(opts.palette ?? 0);
-      setExpressions([
+      await loadExpressions([
         {
           latex,
           color: grad.color,
@@ -61,11 +83,14 @@ export function installOgCapture() {
           colors: [grad.color, grad.color2],
         },
       ]);
-      compileAllExprs({ rebuildUi: false });
-      state.exprListApi?.render();
-      if (state.fitTimer) window.clearTimeout(state.fitTimer);
-      uploadFit();
-      await waitForBake();
+    },
+    async loadExpressions(rows: Partial<ExprItem>[]) {
+      await loadExpressions(rows);
+    },
+    async loadFromSharePayload(payload: string) {
+      const rows = await decodeCompactFragment(`e=${normalizeSharePayload(payload)}`);
+      if (!rows?.length) throw new Error("Invalid share payload");
+      await loadExpressions(rows);
     },
     setCamera(position: Vec3, target: Vec3 = [0, 0, 0]) {
       camera.up.set(0, 0, 1);

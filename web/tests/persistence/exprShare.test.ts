@@ -1,10 +1,14 @@
 import { gzipSync } from "node:zlib";
 import {
+  applyExpressionsFromFragment,
   applyExpressionsFromQuery,
   buildExpressionShareUrl,
   decodeExpressionsFragment,
   encodeExpressionsFragment,
   EXPR_SHARE_VERSION,
+  fragmentFromSharePayload,
+  isValidSharePayload,
+  normalizeSharePayload,
 } from "../../src/app/persistence/exprShare.ts";
 import { listExpressions, setExpressions } from "../../src/model/expressions.ts";
 import type { ExprItem } from "../../src/types/models.ts";
@@ -186,35 +190,30 @@ export async function run() {
       },
     },
     {
-      name: "buildExpressionShareUrl puts the payload in the query string, not the hash",
+      name: "buildExpressionShareUrl produces a /s/<payload> URL, not a hash or query link",
       fn: async () => {
-        // Chat/email clients commonly route links through their own
-        // redirect for link scanning — fragments never reach that hop and
-        // get silently dropped, while query params survive it.
+        // /s/ is a Vercel serverless bot-gate (api/share.ts): crawlers get a
+        // static page with a dynamically-rendered og:image, humans get
+        // redirected into the app via ?e=. Fragments are avoided entirely —
+        // chat/email clients route links through their own redirect for
+        // link scanning, and fragments never reach that server hop.
         setExpressions([sampleExpr({ id: "e1", latex: "x^2" })]);
         const url = await buildExpressionShareUrl("https://laplaci.com/");
         const parsed = new URL(url);
         assert(parsed.hash === "", "no hash used");
-        assert(parsed.searchParams.get("e")?.startsWith(`${EXPR_SHARE_VERSION}.`), "e param set");
+        assert(parsed.search === "", "no query string used");
+        assert(parsed.pathname.startsWith(`/s/${EXPR_SHARE_VERSION}.`), "payload in /s/ path");
       },
     },
     {
-      name: "buildExpressionShareUrl preserves other existing query params",
+      name: "applyExpressionsFromQuery round-trips a /s/ payload via the ?e= redirect target",
       fn: async () => {
-        setExpressions([sampleExpr({ id: "e1", latex: "y" })]);
-        const url = await buildExpressionShareUrl("https://laplaci.com/?webmcp=1");
-        const parsed = new URL(url);
-        assert(parsed.searchParams.get("webmcp") === "1", "unrelated param survives");
-        assert(!!parsed.searchParams.get("e"), "e param still set");
-      },
-    },
-    {
-      name: "applyExpressionsFromQuery round-trips through a built share URL",
-      fn: async () => {
+        // Mirrors api/share.ts's redirect for non-crawler UAs: /?e=<payload>.
         setExpressions([sampleExpr({ id: "e1", latex: "z" })]);
-        const url = await buildExpressionShareUrl("https://laplaci.com/");
+        const shareUrl = await buildExpressionShareUrl("https://laplaci.com/");
+        const payload = new URL(shareUrl).pathname.slice("/s/".length);
         setExpressions([sampleExpr({ id: "e1", latex: "unrelated-local-state" })]);
-        const applied = await applyExpressionsFromQuery(new URL(url).search);
+        const applied = await applyExpressionsFromQuery(`?e=${payload}`);
         assert(applied, "loaded from query");
         assert(listExpressions()[0]?.latex === "z", "query content wins over prior local state");
       },
@@ -224,6 +223,35 @@ export async function run() {
       fn: async () => {
         assert((await applyExpressionsFromQuery("")) === false, "empty search");
         assert((await applyExpressionsFromQuery("?webmcp=1")) === false, "unrelated param only");
+      },
+    },
+    {
+      name: "applyExpressionsFromFragment still restores legacy #e= links",
+      fn: async () => {
+        setExpressions([sampleExpr({ id: "e1", latex: "w" })]);
+        const fragment = await encodeExpressionsFragment(listExpressions());
+        setExpressions([sampleExpr({ id: "e1", latex: "unrelated-local-state" })]);
+        const applied = await applyExpressionsFromFragment(`#${fragment}`);
+        assert(applied, "loaded from legacy fragment");
+        assert(listExpressions()[0]?.latex === "w", "fragment content wins over prior local state");
+      },
+    },
+    {
+      name: "normalizes share payload for /s/ paths",
+      fn: async () => {
+        const fragment = await encodeExpressionsFragment([sampleExpr()]);
+        const body = normalizeSharePayload(fragment);
+        assert(!body.startsWith("e="), "strips e= prefix");
+        assert(isValidSharePayload(body), "valid payload");
+        const roundTrip = await decodeExpressionsFragment(fragmentFromSharePayload(body));
+        assert(roundTrip?.rows[0]?.latex === sampleExpr().latex, "round-trip via payload");
+      },
+    },
+    {
+      name: "rejects invalid share payload",
+      fn: async () => {
+        assert(!isValidSharePayload(""), "empty");
+        assert(!isValidSharePayload("not-a-share"), "garbage");
       },
     },
   ]);
