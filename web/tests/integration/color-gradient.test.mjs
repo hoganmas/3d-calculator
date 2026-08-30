@@ -1,5 +1,5 @@
 /**
- * Playwright smoke: MCP laplacian_set_expression color/color2 updates layer gradient.
+ * Playwright smoke: MCP laplaci_set_expression color/color2 updates layer gradient.
  * Requires dev server: npm run dev
  * Run: npm run test:integration
  */
@@ -36,8 +36,8 @@ try {
     if (!ctx?.executeTool) return { error: "no modelContext.executeTool" };
     const tools = await ctx.getTools();
     const byName = (n) => tools.find((t) => t.name === n);
-    const listTool = byName("laplacian_list_expressions");
-    const setTool = byName("laplacian_set_expression");
+    const listTool = byName("laplaci_list_expressions");
+    const setTool = byName("laplaci_set_expression");
     if (!listTool || !setTool) return { error: "missing MCP tools" };
 
     const listed = unwrap(await ctx.executeTool(listTool, "{}"));
@@ -48,7 +48,7 @@ try {
     });
     if (!target?.id) target = rows.find((e) => String(e.latex || "").trim());
     if (!target?.id) {
-      const addTool = byName("laplacian_add_expression");
+      const addTool = byName("laplaci_add_expression");
       if (!addTool) return { error: "no expression row and no add tool", rows: rows.length };
       const added = unwrap(await ctx.executeTool(addTool, JSON.stringify({ latex: "x^2+y^2" })));
       target = added?.expression;

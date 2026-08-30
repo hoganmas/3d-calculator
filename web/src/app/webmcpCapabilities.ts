@@ -9,87 +9,87 @@ const PRESET_KEYS = Object.keys(PRESETS);
 
 const TOOL_CATALOG = [
   {
-    name: "laplacian_get_capabilities",
+    name: "laplaci_get_capabilities",
     readOnly: true,
     summary: "Full reference: presets, LaTeX syntax, params, render limits, all tools.",
   },
   {
-    name: "laplacian_get_state",
+    name: "laplaci_get_state",
     readOnly: true,
     summary: "Snapshot: expressions, params, render settings, selection, compile meta.",
   },
   {
-    name: "laplacian_get_metrics",
+    name: "laplaci_get_metrics",
     readOnly: true,
     summary: "Diagnostics report (Settings → Diagnostics).",
   },
   {
-    name: "laplacian_get_compile_status",
+    name: "laplaci_get_compile_status",
     readOnly: true,
     summary: "Run compile sync; return ok/error, structured errors, and layer meta.",
   },
   {
-    name: "laplacian_get_expression_errors",
+    name: "laplaci_get_expression_errors",
     readOnly: true,
     summary: "Structured expression + parameter error report (runs compile sync).",
   },
   {
-    name: "laplacian_list_expressions",
+    name: "laplaci_list_expressions",
     readOnly: true,
     summary: "All expression rows (id, latex, enabled, colors, warnings).",
   },
   {
-    name: "laplacian_list_params",
+    name: "laplaci_list_params",
     readOnly: true,
     summary: "All named parameters (value, range, speed, animation state).",
   },
   {
-    name: "laplacian_get_render_settings",
+    name: "laplaci_get_render_settings",
     readOnly: true,
     summary: "Read deg, scale, steps, boxSize, marchDownscale, preset key.",
   },
   {
-    name: "laplacian_set_expression",
+    name: "laplaci_set_expression",
     summary: "Patch a row by id (latex, enabled, color, color2). Refits on latex change.",
   },
   {
-    name: "laplacian_add_expression",
+    name: "laplaci_add_expression",
     summary: "Insert a row at index (default end). Refits when latex is non-empty.",
   },
   {
-    name: "laplacian_remove_expression",
+    name: "laplaci_remove_expression",
     summary: "Delete a row by id and refit.",
   },
   {
-    name: "laplacian_apply_preset",
+    name: "laplaci_apply_preset",
     summary: "Load a built-in preset by key; full refit.",
   },
   {
-    name: "laplacian_setup_lava_lamp",
+    name: "laplaci_setup_lava_lamp",
     summary: "Load animated 3-blob lava-lamp preset and start all param animations.",
   },
   {
-    name: "laplacian_set_param",
+    name: "laplaci_set_param",
     summary: "Set param value; stops animation unless keepAnimating=true.",
   },
   {
-    name: "laplacian_set_param_range",
+    name: "laplaci_set_param_range",
     summary: "Set param min/max slider range.",
   },
   {
-    name: "laplacian_set_param_animation",
+    name: "laplaci_set_param_animation",
     summary: "Start/stop/toggle one param; optional speed and animMode.",
   },
   {
-    name: "laplacian_set_all_param_animation",
+    name: "laplaci_set_all_param_animation",
     summary: "Start or stop animation on every parameter at once.",
   },
   {
-    name: "laplacian_set_render_settings",
+    name: "laplaci_set_render_settings",
     summary: "Patch deg/scale/steps/boxSize/marchDownscale; deg/box refit.",
   },
   {
-    name: "laplacian_reset_camera",
+    name: "laplaci_reset_camera",
     summary: "Reset orbit camera to default view.",
   },
 ] as const;
@@ -110,7 +110,7 @@ export function buildCapabilities() {
 
   return {
     app: {
-      name: "Laplacian",
+      name: "Laplaci",
       description:
         "Multi-expression 3D polynomial calculator. Scalar fields → density clouds or isosurfaces; vector fields → IBFV dye advection. Shared named parameters animate over time via slider keyframes.",
       pipeline:
@@ -194,7 +194,7 @@ export function buildCapabilities() {
     presetKeys: PRESET_KEYS,
     lavaLamp: {
       presetKey: "lavalamp",
-      tool: "laplacian_setup_lava_lamp",
+      tool: "laplaci_setup_lava_lamp",
       description:
         "Three Gaussian density blobs on separate layers; each blob's vertical position (params u, v, w) animates in loop mode for rising/falling lava-lamp motion. One animating param per layer enables GPU keyframe blending. Param names must be simple identifiers (a, u, v) — not y1-style subscripts.",
       suggestedRender: { deg: 20, scale: 2.8, steps: 20 },
@@ -202,7 +202,7 @@ export function buildCapabilities() {
     tools: TOOL_CATALOG,
     webmcp: {
       enable:
-        "Off by default. Opt in via Setup MCP, ?webmcp=1, or localStorage laplacian-webmcp=1. Opt out with ?webmcp=0.",
+        "Off by default. Opt in via Setup MCP, ?webmcp=1, or localStorage laplaci-webmcp=1. Opt out with ?webmcp=0.",
       relay:
         `@mcp-b/webmcp-local-relay with --widget-origin ${getWidgetOriginsForRelay()}. Local dev includes both 127.0.0.1 and localhost when applicable.`,
       setupDialog:
@@ -218,7 +218,7 @@ export function buildCapabilities() {
       browserNote:
         "Relay requires a system browser tab (Chrome/Firefox/Safari). IDE embedded browser panels may not connect.",
       refitTimeout: "Large deg refits may take 10–120s; relay request timeout is 120s.",
-      firstStep: "Call laplacian_get_capabilities, then verify webmcp_list_sources count >= 1 before mutating.",
+      firstStep: "Call laplaci_get_capabilities, then verify webmcp_list_sources count >= 1 before mutating.",
     },
   };
 }

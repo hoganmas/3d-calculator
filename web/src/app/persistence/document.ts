@@ -1,5 +1,5 @@
 /**
- * Laplacian scene document — serialize, validate re-exports, apply.
+ * Laplaci scene document — serialize, validate re-exports, apply.
  */
 import { PRESETS } from "../../math/fit.js";
 import { listExpressions, setExpressions, getExprWarning } from "../../model/expressions.js";
@@ -16,10 +16,10 @@ import {
   getDocumentRevision,
   setDocumentRevision,
   validateDocument,
-  type LaplacianDocument,
-  type LaplacianCameraSnapshot,
-  type LaplacianFlowSnapshot,
-  type LaplacianRenderSnapshot,
+  type LaplaciDocument,
+  type LaplaciCameraSnapshot,
+  type LaplaciFlowSnapshot,
+  type LaplaciRenderSnapshot,
 } from "./documentSchema.js";
 
 export {
@@ -28,11 +28,11 @@ export {
   getDocumentRevision,
   setDocumentRevision,
   validateDocument,
-  type LaplacianDocument,
-  type LaplacianCameraSnapshot,
-  type LaplacianDocumentMeta,
-  type LaplacianFlowSnapshot,
-  type LaplacianRenderSnapshot,
+  type LaplaciDocument,
+  type LaplaciCameraSnapshot,
+  type LaplaciDocumentMeta,
+  type LaplaciFlowSnapshot,
+  type LaplaciRenderSnapshot,
 } from "./documentSchema.js";
 
 let persistSuspended = false;
@@ -96,7 +96,7 @@ export function serializeParam(name: string) {
   };
 }
 
-export function getRenderSettingsSnapshot(): LaplacianRenderSnapshot {
+export function getRenderSettingsSnapshot(): LaplaciRenderSnapshot {
   return {
     deg: Number(els.deg.value),
     scale: Number(els.scale.value),
@@ -108,7 +108,7 @@ export function getRenderSettingsSnapshot(): LaplacianRenderSnapshot {
   };
 }
 
-function getFlowSnapshot(): LaplacianFlowSnapshot {
+function getFlowSnapshot(): LaplaciFlowSnapshot {
   return {
     flowAlpha: state.flowAlpha,
     flowNoiseScale: state.flowNoiseScale,
@@ -125,7 +125,7 @@ function getFlowSnapshot(): LaplacianFlowSnapshot {
   };
 }
 
-function getCameraSnapshot(): LaplacianCameraSnapshot {
+function getCameraSnapshot(): LaplaciCameraSnapshot {
   return {
     position: [camera.position.x, camera.position.y, camera.position.z],
     target: [controls.target.x, controls.target.y, controls.target.z],
@@ -150,10 +150,10 @@ function serializeParams(): Record<string, Partial<ParamState>> {
   return out;
 }
 
-export function serializeDocument(): LaplacianDocument {
+export function serializeDocument(): LaplaciDocument {
   const rev = bumpDocumentRevision();
   return {
-    format: "laplacian",
+    format: "laplaci",
     version: 1,
     revision: rev,
     savedAt: new Date().toISOString(),
@@ -183,7 +183,7 @@ function paramSeedFromDoc(params: Record<string, Partial<ParamState>>): Record<s
   return seed;
 }
 
-function syncRenderDom(render: LaplacianRenderSnapshot) {
+function syncRenderDom(render: LaplaciRenderSnapshot) {
   els.deg.value = String(Math.round(render.deg));
   els.scale.value = String(render.scale);
   els.steps.value = String(Math.round(render.steps));
@@ -197,7 +197,7 @@ function syncRenderDom(render: LaplacianRenderSnapshot) {
   syncClipPresentation();
 }
 
-function syncFlowDom(flow: LaplacianFlowSnapshot) {
+function syncFlowDom(flow: LaplaciFlowSnapshot) {
   state.flowAlpha = flow.flowAlpha;
   state.flowNoiseScale = flow.flowNoiseScale;
   state.flowGridPoints = flow.flowGridPoints;
@@ -225,7 +225,7 @@ function syncFlowDom(flow: LaplacianFlowSnapshot) {
 }
 
 /** Apply a validated document (DOM/state only; uploadFit performs refit). */
-export async function applyDocument(doc: LaplacianDocument) {
+export async function applyDocument(doc: LaplaciDocument) {
   persistSuspended = true;
   try {
     setDocumentRevision(doc.revision);

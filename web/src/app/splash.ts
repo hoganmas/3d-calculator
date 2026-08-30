@@ -114,7 +114,7 @@ export function isSplashContentReady() {
   return contentReady;
 }
 
-/** Snapshot for console debugging: copy(JSON.stringify(window.__laplacianSplash())) */
+/** Snapshot for console debugging: copy(JSON.stringify(window.__laplaciSplash())) */
 export function getSplashDebugSnapshot() {
   return splashDebugState();
 }
@@ -133,7 +133,7 @@ export function tryMarkSplashBakeReady(_hasSceneLayers: boolean) {
 export function initSplash() {
   splashEl = document.getElementById("splash");
   if (typeof window !== "undefined") {
-    (window as Window & { __laplacianSplash?: () => ReturnType<typeof getSplashDebugSnapshot> }).__laplacianSplash =
+    (window as Window & { __laplaciSplash?: () => ReturnType<typeof getSplashDebugSnapshot> }).__laplaciSplash =
       getSplashDebugSnapshot;
   }
   timeoutId = window.setTimeout(() => {

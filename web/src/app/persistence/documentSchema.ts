@@ -1,16 +1,16 @@
 /**
- * Laplacian document v1 types and strict validation (no app/DOM deps).
+ * Laplaci document v1 types and strict validation (no app/DOM deps).
  */
 import type { ExprItem, ParamState } from "../../types/models.js";
 
 export const DOCUMENT_VERSION = 1 as const;
 
-export interface LaplacianDocumentMeta {
+export interface LaplaciDocumentMeta {
   title?: string;
   preset?: string;
 }
 
-export interface LaplacianRenderSnapshot {
+export interface LaplaciRenderSnapshot {
   deg: number;
   scale: number;
   steps: number;
@@ -20,7 +20,7 @@ export interface LaplacianRenderSnapshot {
   preset: string;
 }
 
-export interface LaplacianFlowSnapshot {
+export interface LaplaciFlowSnapshot {
   flowAlpha: number;
   flowNoiseScale: number;
   flowGridPoints: boolean;
@@ -35,22 +35,22 @@ export interface LaplacianFlowSnapshot {
   flowTrailWidth: number;
 }
 
-export interface LaplacianCameraSnapshot {
+export interface LaplaciCameraSnapshot {
   position: [number, number, number];
   target: [number, number, number];
 }
 
-export interface LaplacianDocument {
-  format: "laplacian";
+export interface LaplaciDocument {
+  format: "laplaci";
   version: typeof DOCUMENT_VERSION;
   revision: number;
   savedAt: string;
-  meta?: LaplacianDocumentMeta;
+  meta?: LaplaciDocumentMeta;
   expressions: Partial<ExprItem>[];
   params: Record<string, Partial<ParamState>>;
-  render: LaplacianRenderSnapshot;
-  flow: LaplacianFlowSnapshot;
-  camera?: LaplacianCameraSnapshot;
+  render: LaplaciRenderSnapshot;
+  flow: LaplaciFlowSnapshot;
+  camera?: LaplaciCameraSnapshot;
 }
 
 let revision = 0;
@@ -104,7 +104,7 @@ function validateParams(v: unknown) {
   }
 }
 
-function validateRender(v: unknown): LaplacianRenderSnapshot {
+function validateRender(v: unknown): LaplaciRenderSnapshot {
   if (!isRecord(v)) throw new Error("render: expected object");
   const deg = v.deg;
   const scale = v.scale;
@@ -140,7 +140,7 @@ function validateRender(v: unknown): LaplacianRenderSnapshot {
   };
 }
 
-function validateFlow(v: unknown): LaplacianFlowSnapshot {
+function validateFlow(v: unknown): LaplaciFlowSnapshot {
   if (!isRecord(v)) throw new Error("flow: expected object");
   const flowVizMode = v.flowVizMode;
   if (flowVizMode !== "particles" && flowVizMode !== "ibfv") {
@@ -178,7 +178,7 @@ function validateFlow(v: unknown): LaplacianFlowSnapshot {
   };
 }
 
-function validateCamera(v: unknown): LaplacianCameraSnapshot | undefined {
+function validateCamera(v: unknown): LaplaciCameraSnapshot | undefined {
   if (v == null) return undefined;
   if (!isRecord(v)) throw new Error("camera: expected object");
   const pos = v.position;
@@ -195,9 +195,11 @@ function validateCamera(v: unknown): LaplacianCameraSnapshot | undefined {
   };
 }
 
-export function validateDocument(raw: unknown): LaplacianDocument {
+export function validateDocument(raw: unknown): LaplaciDocument {
   if (!isRecord(raw)) throw new Error("Document must be a JSON object");
-  if (raw.format !== "laplacian") throw new Error('format must be "laplacian"');
+  if (raw.format !== "laplaci" && raw.format !== "laplacian") {
+    throw new Error('format must be "laplaci"');
+  }
   if (raw.version !== DOCUMENT_VERSION) throw new Error(`unsupported version: ${raw.version}`);
   if (!isFiniteNum(raw.revision)) throw new Error("revision: invalid");
   if (raw.revision < 0) throw new Error("revision: invalid");
@@ -208,7 +210,7 @@ export function validateDocument(raw: unknown): LaplacianDocument {
   const render = validateRender(raw.render);
   const flow = validateFlow(raw.flow);
   const cameraSnap = validateCamera(raw.camera);
-  let meta: LaplacianDocumentMeta | undefined;
+  let meta: LaplaciDocumentMeta | undefined;
   if (raw.meta != null) {
     if (!isRecord(raw.meta)) throw new Error("meta: expected object");
     meta = {};
@@ -222,7 +224,7 @@ export function validateDocument(raw: unknown): LaplacianDocument {
     }
   }
   return {
-    format: "laplacian",
+    format: "laplaci",
     version: DOCUMENT_VERSION,
     revision: raw.revision as number,
     savedAt: raw.savedAt,

@@ -33,20 +33,20 @@ const result = await page.evaluate(async () => {
   if (!ctx) return { error: "no modelContext" };
   const tools = await ctx.getTools();
   const names = tools.map((t) => t.name).sort();
-  const getState = tools.find((t) => t.name === "laplacian_get_state");
+  const getState = tools.find((t) => t.name === "laplaci_get_state");
   let stateResult = null;
   if (getState && ctx.executeTool) {
     stateResult = unwrap(await ctx.executeTool(getState, "{}"));
   }
-  const reset = tools.find((t) => t.name === "laplacian_reset_camera");
+  const reset = tools.find((t) => t.name === "laplaci_reset_camera");
   let resetResult = null;
   if (reset && ctx.executeTool) {
     resetResult = unwrap(await ctx.executeTool(reset, "{}"));
   }
   return {
     toolCount: names.length,
-    laplacianTools: names.filter((n) => n.startsWith("laplacian_")),
-    hasRelayScript: !!document.getElementById("laplacian-webmcp-relay"),
+    laplacianTools: names.filter((n) => n.startsWith("laplaci_")),
+    hasRelayScript: !!document.getElementById("laplaci-webmcp-relay"),
     stateResult,
     resetResult,
   };

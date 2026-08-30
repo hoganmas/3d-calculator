@@ -76,7 +76,7 @@ try {
     const ctx = document.modelContext;
     if (!ctx?.executeTool) return { error: "no modelContext.executeTool" };
     const tools = await ctx.getTools();
-    const listTool = tools.find((t) => t.name === "laplacian_list_expressions");
+    const listTool = tools.find((t) => t.name === "laplaci_list_expressions");
     if (!listTool) return { error: "missing list tool" };
     const listed = unwrap(await ctx.executeTool(listTool, "{}"));
     const rows = listed?.expressions ?? [];
@@ -116,8 +116,8 @@ try {
     };
     const ctx = document.modelContext;
     const tools = await ctx.getTools();
-    const setTool = tools.find((t) => t.name === "laplacian_set_expression");
-    const listTool = tools.find((t) => t.name === "laplacian_list_expressions");
+    const setTool = tools.find((t) => t.name === "laplaci_set_expression");
+    const listTool = tools.find((t) => t.name === "laplaci_list_expressions");
     if (!setTool || !listTool) return { error: "missing tools" };
 
     let targetId = rowId;

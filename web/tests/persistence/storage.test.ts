@@ -12,7 +12,7 @@ import { runSuite } from "../helpers/runner.ts";
 
 function sampleJson(revision: number, latex = "\\sin(x)") {
   const doc = {
-    format: "laplacian",
+    format: "laplaci",
     version: DOCUMENT_VERSION,
     revision,
     savedAt: "2026-01-01T00:00:00.000Z",

@@ -1,14 +1,14 @@
 import {
   DOCUMENT_VERSION,
   validateDocument,
-  type LaplacianDocument,
+  type LaplaciDocument,
 } from "../../src/app/persistence/documentSchema.js";
 import { assert } from "../helpers/assert.ts";
 import { runSuite } from "../helpers/runner.ts";
 
-function sampleDoc(revision = 1): LaplacianDocument {
+function sampleDoc(revision = 1): LaplaciDocument {
   return {
-    format: "laplacian",
+    format: "laplaci",
     version: DOCUMENT_VERSION,
     revision,
     savedAt: "2026-01-01T00:00:00.000Z",
@@ -79,7 +79,7 @@ export async function run() {
       fn: () => {
         let threw = false;
         try {
-          validateDocument({ format: "laplacian", version: 1 });
+          validateDocument({ format: "laplaci", version: 1 });
         } catch {
           threw = true;
         }
@@ -90,7 +90,7 @@ export async function run() {
       name: "rejects torn / invalid expression rows",
       fn: () => {
         const raw = sampleDoc();
-        raw.expressions = [{ latex: 42 } as unknown as LaplacianDocument["expressions"][0]];
+        raw.expressions = [{ latex: 42 } as unknown as LaplaciDocument["expressions"][0]];
         let threw = false;
         try {
           validateDocument(raw);

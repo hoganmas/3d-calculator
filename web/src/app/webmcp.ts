@@ -1,10 +1,10 @@
 /**
- * WebMCP bootstrap: polyfill, local-relay embed, Laplacian tool registration.
+ * WebMCP bootstrap: polyfill, local-relay embed, Laplaci tool registration.
  */
 import { initializeWebMCPPolyfill } from "@mcp-b/webmcp-polyfill";
-import { registerLaplacianTools } from "./webmcpTools.js";
-const STORAGE_KEY = "laplacian-webmcp";
-const RELAY_SCRIPT_ID = "laplacian-webmcp-relay";
+import { registerLaplaciTools } from "./webmcpTools.js";
+const STORAGE_KEY = "laplaci-webmcp";
+const RELAY_SCRIPT_ID = "laplaci-webmcp-relay";
 const RELAY_CDN =
   "https://cdn.jsdelivr.net/npm/@mcp-b/webmcp-local-relay@latest/dist/browser/embed.js";
 
@@ -24,7 +24,7 @@ export function isWebMCPEnabled(): boolean {
     /* ignore */
   }
   // Off by default — avoids Chrome's WebMCP permission prompt on casual visits.
-  // Opt in via ?webmcp=1, Setup MCP, or localStorage laplacian-webmcp=1.
+  // Opt in via ?webmcp=1, Setup MCP, or localStorage laplaci-webmcp=1.
   return false;
 }
 
@@ -70,6 +70,6 @@ export async function initWebMCP() {
 
   registration?.abort();
   registration = new AbortController();
-  await registerLaplacianTools(registration.signal);
+  await registerLaplaciTools(registration.signal);
   initDone = true;
 }

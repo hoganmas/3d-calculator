@@ -8,13 +8,13 @@ import {
   getDocumentRevision,
   isPersistSuspended,
   serializeDocument,
-  type LaplacianDocument,
+  type LaplaciDocument,
 } from "./document.js";
 import { readDocument, writeDocument } from "./storage.js";
 
 const DEBOUNCE_MS = 1500;
-const LAST_SAVE_KEY = "laplacian-last-save-at";
-const LAST_REV_KEY = "laplacian-last-revision";
+const LAST_SAVE_KEY = "laplaci-last-save-at";
+const LAST_REV_KEY = "laplaci-last-revision";
 
 export type AutosaveStatus = "saved" | "saving" | "dirty" | "error";
 
@@ -158,7 +158,7 @@ export async function restoreAutosave(): Promise<boolean> {
   return true;
 }
 
-export async function applyImportedDocument(doc: LaplacianDocument) {
+export async function applyImportedDocument(doc: LaplaciDocument) {
   await applyDocument(doc);
   await persistNow();
 }
