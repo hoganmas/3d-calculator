@@ -31,7 +31,7 @@ export async function run() {
     {
       name: "seedFlowParticles allocates per flow layer",
       fn: () => {
-        const { posAge, layerIds } = seedFlowParticles(10, 2, 1, 0.4, false);
+        const { posAge, layerIds } = seedFlowParticles(10, 2, 1, 0.4);
         assert(posAge.length === 10 * 2 * FLOW_PARTICLE_STRIDE, "total buffer size");
         assert(layerIds.length === 20, "20 particles for 2 layers");
         let n0 = 0;
@@ -47,7 +47,7 @@ export async function run() {
     {
       name: "seedFlowParticles places particles on grid mask",
       fn: () => {
-        const { posAge, layerIds } = seedFlowParticles(64, 1, 1, 0.4, false);
+        const { posAge, layerIds } = seedFlowParticles(64, 1, 1, 0.4);
         let onGrid = 0;
         for (let i = 0; i < 64; i++) {
           const o = i * FLOW_PARTICLE_STRIDE;
@@ -83,7 +83,7 @@ export async function run() {
         const fy = new Float32Array(n).fill(0);
         const fz = new Float32Array(n).fill(0);
         const layers = [{ fx, fy, fz }];
-        const { posAge, layerIds } = seedFlowParticles(8, 1, 1, 0.5, false);
+        const { posAge, layerIds } = seedFlowParticles(8, 1, 1, 0.5);
         posAge[0] = 0;
         posAge[1] = 0;
         posAge[2] = 0;
@@ -93,9 +93,6 @@ export async function run() {
           dt: 0.1,
           vMax: 10,
           half: 1,
-          alpha: 0,
-          gridSpacing: 0.5,
-          gridPoints: false,
           ageMax: 2,
           frameIdx: 0,
         });
@@ -143,9 +140,6 @@ export async function run() {
           dt: 0.1,
           vMax: 10,
           half: 1,
-          alpha: 0,
-          gridSpacing: 0.5,
-          gridPoints: false,
           ageMax: 1,
           frameIdx: 0,
         }, trailHist, trailSteps);
@@ -174,8 +168,6 @@ export async function run() {
           layers,
           M,
           half: 1,
-          gridSpacing: 0.5,
-          gridPoints: false,
           frameIdx: 0,
         };
         pushFlowTrailHist(posAge, trailHist, trailSteps, 1, pushCtx);
@@ -326,7 +318,7 @@ export async function run() {
         const density = new Uint16Array(res * res * res);
         const crowded = res * res + 1;
         density[crowded] = 50;
-        const pt = pickLowDensitySpawn(density, res, 1, 3, 0, 0, 0.5, false);
+        const pt = pickLowDensitySpawn(density, res, 1, 3, 0, 0);
         assert(pt !== null, "spawn found");
       },
     },
@@ -343,7 +335,7 @@ export async function run() {
         const before = buildFlowParticleDensityGrid(posAge, count, 1);
         const peakBefore = Math.max(...before);
         redistributeOvercrowdedFlowParticles(
-          posAge, layerIds, count, 1, 0.5, false, 0, null, 0,
+          posAge, layerIds, count, 1, 0, null, 0,
         );
         const after = buildFlowParticleDensityGrid(posAge, count, 1);
         const peakAfter = Math.max(...after);
@@ -382,42 +374,10 @@ export async function run() {
           dt: 0.1,
           vMax: 10,
           half: 1,
-          alpha: 0,
-          gridSpacing: 0.5,
-          gridPoints: false,
           ageMax: 1,
           frameIdx: 0,
         });
         assert(posAge[3]! < 0.5, "stuck particle respawned with fresh age");
-      },
-    },
-    {
-      name: "advectFlowParticles alpha injection can respawn",
-      fn: () => {
-        const M = 4;
-        const n = M * M * M;
-        const fx = new Float32Array(n).fill(1);
-        const fy = new Float32Array(n).fill(0);
-        const fz = new Float32Array(n).fill(0);
-        const layers = [{ fx, fy, fz }];
-        const posAge = new Float32Array(5);
-        posAge[0] = 0;
-        posAge[1] = 0;
-        posAge[2] = 0;
-        posAge[3] = 0.1;
-        posAge[4] = 1;
-        const layerIds = new Uint32Array([0]);
-        advectFlowParticles(posAge, layerIds, layers, M, {
-          dt: 0.05,
-          vMax: 10,
-          half: 1,
-          alpha: 1,
-          gridSpacing: 0.5,
-          gridPoints: false,
-          ageMax: 10,
-          frameIdx: 0,
-        });
-        assert(posAge[3]! < 0.2, "alpha respawn resets age");
       },
     },
     {
@@ -475,9 +435,6 @@ export async function run() {
           dt: 0.1,
           vMax: 10,
           half: 1,
-          alpha: 0,
-          gridSpacing: 0.5,
-          gridPoints: false,
           ageMax: 1,
           frameIdx: 2,
         }, null, 0, density, FLOW_PARTICLE_DENSITY_GRID);

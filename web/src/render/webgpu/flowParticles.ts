@@ -22,7 +22,7 @@ import {
   updateFlowTrailHead,
   type FlowParticleLayerVel,
 } from "../../math/fitVector.js";
-import { effectiveFlowDt } from "./flowIbfv.js";
+import { effectiveFlowDt, effectiveFlowVMax, FLOW_PARTICLE_SPAWN_GRID_SPACING } from "./flowCommon.js";
 import { getFlowParticlesShader } from "./shaders/compose.js";
 
 export const DEFAULT_FLOW_PARTICLE_COUNT = 1000;
@@ -35,7 +35,6 @@ const PROFILE_SMOOTH = 0.12;
 
 export type FlowParticleMetrics = {
   active: boolean;
-  vizMode: string;
   layerCount: number;
   perLayer: number;
   total: number;
@@ -61,7 +60,6 @@ export type FlowParticleMetrics = {
 
 const profile: FlowParticleMetrics = {
   active: false,
-  vizMode: "particles",
   layerCount: 0,
   perLayer: 0,
   total: 0,
@@ -131,11 +129,6 @@ export function getFlowParticleMetrics(): FlowParticleMetrics {
 
 function trailSteps(): number {
   return Math.max(2, Math.min(MAX_FLOW_TRAIL_STEPS, state.flowTrailSteps | 0 || DEFAULT_FLOW_TRAIL_STEPS));
-}
-
-function effectiveVMax(): number {
-  if (state.flowVMax > 1e-8) return state.flowVMax;
-  return state.flowNoiseScale / effectiveFlowDt();
 }
 
 function destroyBuffer(buf: GPUBuffer | null): void {
@@ -241,8 +234,7 @@ export function ensureFlowParticleBuffers(layerCount: number, half: number): voi
       perLayer,
       layerCount,
       half,
-      state.flowNoiseScale,
-      state.flowGridPoints,
+      FLOW_PARTICLE_SPAWN_GRID_SPACING,
     );
     posAge = seeded.posAge;
     layerIds = seeded.layerIds;
@@ -280,8 +272,7 @@ export function reseedFlowParticles(): void {
     perLayer,
     gpu.flowLayerCount,
     gpu.flowHalf,
-    state.flowNoiseScale,
-    state.flowGridPoints,
+    FLOW_PARTICLE_SPAWN_GRID_SPACING,
   );
   posAge = seeded.posAge;
   layerIds = seeded.layerIds;
@@ -319,8 +310,7 @@ function extractFlowLayers(): FlowParticleLayerVel[] {
 function syncProfileStatic(): void {
   const steps = trailSteps();
   const lod = drawTrailLod(Math.max(0, gpu.flowParticleCount), steps);
-  profile.active = hasFlowGpuLayers() && state.flowVizMode === "particles";
-  profile.vizMode = state.flowVizMode;
+  profile.active = hasFlowGpuLayers();
   profile.layerCount = gpu.flowLayerCount;
   profile.perLayer = gpu.flowParticlesPerLayer;
   profile.total = gpu.flowParticleCount;
@@ -337,7 +327,7 @@ export function tickFlowParticles(
   ro: [number, number, number],
   viewDir: [number, number, number],
 ): void {
-  if (!hasFlowGpuLayers() || state.flowVizMode !== "particles") {
+  if (!hasFlowGpuLayers()) {
     profile.active = false;
     return;
   }
@@ -372,11 +362,8 @@ export function tickFlowParticles(
     gpu.sceneM,
     {
       dt: effectiveFlowDt(),
-      vMax: effectiveVMax(),
+      vMax: effectiveFlowVMax(),
       half: gpu.flowHalf,
-      alpha: 0,
-      gridSpacing: state.flowNoiseScale,
-      gridPoints: state.flowGridPoints,
       ageMax: state.flowAgeMax,
       frameIdx: flowParticleFrameIdx,
     },
@@ -393,8 +380,6 @@ export function tickFlowParticles(
     layerIds,
     gpu.flowParticleCount,
     gpu.flowHalf,
-    state.flowNoiseScale,
-    state.flowGridPoints,
     flowParticleFrameIdx,
     trailHist,
     steps,
@@ -415,8 +400,6 @@ export function tickFlowParticles(
         layers,
         M: gpu.sceneM,
         half: gpu.flowHalf,
-        gridSpacing: state.flowNoiseScale,
-        gridPoints: state.flowGridPoints,
         frameIdx: flowParticleFrameIdx,
         density: densityGrids,
         densityRes: FLOW_PARTICLE_DENSITY_GRID,
@@ -528,7 +511,7 @@ function resolveFlowSpeedRange(): [number, number] {
     trailHist,
     gpu.flowParticleCount,
     trailSteps(),
-    effectiveVMax(),
+    effectiveFlowVMax(),
     flowFieldSpeedRange(),
   );
   profile.speedRangeMs = smoothMs(profile.speedRangeMs, performance.now() - t0);
@@ -602,7 +585,7 @@ function packFlowParticleParams(
   f[43] = speedRange[0];
   f[44] = speedRange[1];
   const dt = effectiveFlowDt();
-  const vMax = state.flowVMax > 1e-8 ? state.flowVMax : state.flowNoiseScale / dt;
+  const vMax = effectiveFlowVMax();
   f[45] = Math.max(half * 0.2, dt * vMax * 2.5 * TRAIL_PUSH_INTERVAL);
   const fovRad = (cameraFovDeg * Math.PI) / 180;
   f[46] = (2 * Math.tan(fovRad / 2)) / Math.max(fbH, 1);
@@ -668,7 +651,6 @@ export function drawFlowParticlesPass(
   fbW: number,
   fbH: number,
 ): void {
-  if (state.flowVizMode !== "particles") return;
   if (!gpu.flowParticlesPipeline || !gpu.flowParticlesParamBuf) return;
   if (!gpu.flowParticleLayerBuf || !gpu.flowParticleSortBuf || !gpu.flowTrailBuf || !gpu.colorBuf) return;
   if (gpu.flowParticleCount <= 0) return;

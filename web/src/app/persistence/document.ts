@@ -8,7 +8,8 @@ import type { AnimMode, ExprItem, ParamState, PresetParamSeed } from "../../type
 import { els } from "../dom.js";
 import { syncExprCompileState } from "../hud.js";
 import { applyRenderHyperparams } from "../pipeline.js";
-import { syncMarchSlider, syncClipPresentation, syncShowGridAxesUi } from "../presentation.js";
+import { syncMarchSlider, syncClipPresentation, syncShowGridAxesUi, syncBoundsSlider } from "../presentation.js";
+import { syncQualitySlidersFromSettings } from "../quality.js";
 import { camera, controls } from "../scene.js";
 import { state } from "../state.js";
 import {
@@ -110,15 +111,11 @@ export function getRenderSettingsSnapshot(): LaplacianRenderSnapshot {
 
 function getFlowSnapshot(): LaplacianFlowSnapshot {
   return {
-    flowAlpha: state.flowAlpha,
-    flowNoiseScale: state.flowNoiseScale,
-    flowGridPoints: state.flowGridPoints,
     flowDt: state.flowDt,
     flowSpeed: state.flowSpeed,
     flowVMax: state.flowVMax,
     flowOpacity: state.flowOpacity,
     flowAgeMax: state.flowAgeMax,
-    flowVizMode: state.flowVizMode,
     flowParticleCount: state.flowParticleCount,
     flowTrailSteps: state.flowTrailSteps,
     flowTrailWidth: state.flowTrailWidth,
@@ -188,6 +185,7 @@ function syncRenderDom(render: LaplacianRenderSnapshot) {
   els.scale.value = String(render.scale);
   els.steps.value = String(Math.round(render.steps));
   els.boxSize.value = String(render.boxSize);
+  syncBoundsSlider();
   els.marchDownscale.value = String(Math.round(render.marchDownscale));
   state.showGridAxes = render.showGridAxes;
   syncShowGridAxesUi();
@@ -195,30 +193,23 @@ function syncRenderDom(render: LaplacianRenderSnapshot) {
   syncMarchSlider();
   applyRenderHyperparams();
   syncClipPresentation();
+  syncQualitySlidersFromSettings();
 }
 
 function syncFlowDom(flow: LaplacianFlowSnapshot) {
-  state.flowAlpha = flow.flowAlpha;
-  state.flowNoiseScale = flow.flowNoiseScale;
-  state.flowGridPoints = flow.flowGridPoints;
   state.flowDt = flow.flowDt;
   state.flowSpeed = flow.flowSpeed;
   state.flowVMax = flow.flowVMax;
   state.flowOpacity = flow.flowOpacity;
   state.flowAgeMax = flow.flowAgeMax;
-  state.flowVizMode = flow.flowVizMode;
   state.flowParticleCount = flow.flowParticleCount;
   state.flowTrailSteps = flow.flowTrailSteps;
   state.flowTrailWidth = flow.flowTrailWidth;
-  if (els.flowAlpha) els.flowAlpha.value = String(flow.flowAlpha);
-  if (els.flowNoiseScale) els.flowNoiseScale.value = String(flow.flowNoiseScale);
-  if (els.flowGridMode) els.flowGridMode.value = flow.flowGridPoints ? "points" : "lines";
   if (els.flowDt) els.flowDt.value = String(flow.flowDt);
   if (els.flowSpeed) els.flowSpeed.value = String(flow.flowSpeed);
   if (els.flowVMax) els.flowVMax.value = String(flow.flowVMax);
   if (els.flowOpacity) els.flowOpacity.value = String(flow.flowOpacity);
   if (els.flowAgeMax) els.flowAgeMax.value = String(flow.flowAgeMax);
-  if (els.flowVizMode) els.flowVizMode.value = flow.flowVizMode;
   if (els.flowParticleCount) els.flowParticleCount.value = String(flow.flowParticleCount);
   if (els.flowTrailSteps) els.flowTrailSteps.value = String(flow.flowTrailSteps);
   if (els.flowTrailWidth) els.flowTrailWidth.value = String(flow.flowTrailWidth);

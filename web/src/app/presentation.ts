@@ -7,7 +7,7 @@ import {
   isClipBakeGpuReady,
 } from "../render/webgpu/march.js";
 import { els, viewportSize } from "./dom.js";
-import { state, MARCH_DOWNSCALE_MIN, MARCH_DOWNSCALE_MAX, MARCH_DOWNSCALE_LABELS } from "./state.js";
+import { state, MARCH_DOWNSCALE_MIN, MARCH_DOWNSCALE_MAX, MARCH_DOWNSCALE_LABELS, BOUNDS_SIZE_MIN, BOUNDS_SIZE_MAX } from "./state.js";
 import {
   isHorizontalPanelLayout,
   readPanelCoverHeight,
@@ -23,6 +23,50 @@ import {
   boxHelper,
 } from "./scene.js";
 import { clipQuad, useGpuClipPath } from "./webglFallback.js";
+
+function formatBoundsSize(n: number) {
+  const rounded = Math.round(n * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+export function readBoundsSize() {
+  const n = Number(els.boxSize.value) || 5;
+  return Math.min(BOUNDS_SIZE_MAX, Math.max(BOUNDS_SIZE_MIN, Math.round(n * 10) / 10));
+}
+
+export function syncBoundsSlider() {
+  const n = readBoundsSize();
+  els.boxSize.value = String(n);
+  if (els.boundsSizeLabel) els.boundsSizeLabel.textContent = formatBoundsSize(n);
+  syncLiquidThumb(els.boxSize);
+  return n;
+}
+
+function mountSettingsLiquidSlider(input: HTMLInputElement | null | undefined) {
+  if (!input) return;
+  const wrap =
+    input.closest(".settings-liquid-track") ||
+    input.closest(".march-liquid-track") ||
+    input.closest(".march-slider-wrap");
+  if (wrap instanceof HTMLElement) mountLiquidThumb(wrap, input);
+}
+
+function initSettingsLiquidSliders() {
+  mountSettingsLiquidSlider(els.precisionQuality);
+  mountSettingsLiquidSlider(els.boxSize);
+  mountSettingsLiquidSlider(els.scalarQuality);
+  mountSettingsLiquidSlider(els.surfaceQuality);
+  mountSettingsLiquidSlider(els.vectorQuality);
+  syncBoundsSlider();
+}
+
+export function syncSettingsLiquidThumbs() {
+  syncLiquidThumb(els.precisionQuality);
+  syncLiquidThumb(els.boxSize);
+  syncLiquidThumb(els.scalarQuality);
+  syncLiquidThumb(els.surfaceQuality);
+  syncLiquidThumb(els.vectorQuality);
+}
 
 function marchDownscaleTickPct(n: number) {
   return ((n - MARCH_DOWNSCALE_MIN) / (MARCH_DOWNSCALE_MAX - MARCH_DOWNSCALE_MIN)) * 100;
@@ -201,6 +245,7 @@ export function markMarchDirty() {
 
 export function initPresentation() {
   initMarchSliderUi();
+  initSettingsLiquidSliders();
   if (els.marchDownscale) {
     const wrap = els.marchDownscale.closest(".march-liquid-track") || els.marchDownscale.closest(".march-slider-wrap");
     if (wrap instanceof HTMLElement) mountLiquidThumb(wrap, els.marchDownscale);
@@ -209,6 +254,8 @@ export function initPresentation() {
 
   els.marchDownscale?.addEventListener("input", markMarchDirty);
   els.marchDownscale?.addEventListener("change", markMarchDirty);
+  els.boxSize.addEventListener("input", syncBoundsSlider);
+  els.boxSize.addEventListener("change", syncBoundsSlider);
 
   window.addEventListener("resize", resize);
   resize();

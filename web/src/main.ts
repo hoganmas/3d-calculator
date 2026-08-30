@@ -19,6 +19,7 @@ import {
 import { clipUniforms, initWebglFallback, ensureSceneGpuUpload, warmClipGpuInit } from "./app/webglFallback.js";
 import { initPresentation, resize, bindHudText } from "./app/presentation.js";
 import { hudText, copyMetricsToClipboard } from "./app/hud.js";
+import { initProdSettingsUi } from "./app/quality.js";
 import { startRenderLoop } from "./app/loop.js";
 import { state } from "./app/state.js";
 import { initWebMCP } from "./app/webmcp.js";
@@ -53,6 +54,7 @@ initTearDebug();
 initStartupProfile();
 initTheme();
 initDom();
+initProdSettingsUi();
 initWebglFallback();
 bindClipUniforms(clipUniforms);
 initScene();

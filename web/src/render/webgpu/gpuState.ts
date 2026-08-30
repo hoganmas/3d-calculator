@@ -98,19 +98,12 @@ export interface GpuState {
   profileMethod: string;
   profileGridM: number;
   builtEpoch: number;
-  flowGridM: number;
   flowHalf: number;
   /** First Beer layer index that is a flow layer. */
   flowLayerStart: number;
   /** Float offset in volume for first flow layer fx slice. */
   flowVelBase: number;
   flowLayerCount: number;
-  flowEpoch: number;
-  flowDyeBufA: GPUBuffer | null;
-  flowDyeBufB: GPUBuffer | null;
-  flowDyeReadIsA: boolean;
-  flowIbfvPipeline: GPUComputePipeline | null;
-  flowIbfvParamBuf: GPUBuffer | null;
   flowParticlesPipeline: GPURenderPipeline | null;
   flowParticlesParamBuf: GPUBuffer | null;
   flowParticleBuf: GPUBuffer | null;
@@ -121,8 +114,6 @@ export interface GpuState {
   flowParticleCount: number;
   /** Particles allocated per flow expression (count ≈ perLayer × flowLayerCount). */
   flowParticlesPerLayer: number;
-  /** Minimal storage buffer so Beer binding 4 is always valid. */
-  flowDyeDummy: GPUBuffer | null;
 }
 
 export const gpu: GpuState = {
@@ -196,17 +187,10 @@ export const gpu: GpuState = {
   profileMethod: "",
   profileGridM: 0,
   builtEpoch: -1,
-  flowGridM: 0,
   flowHalf: 2.5,
   flowLayerStart: -1,
   flowVelBase: 0,
   flowLayerCount: 0,
-  flowEpoch: 0,
-  flowDyeBufA: null,
-  flowDyeBufB: null,
-  flowDyeReadIsA: true,
-  flowIbfvPipeline: null,
-  flowIbfvParamBuf: null,
   flowParticlesPipeline: null,
   flowParticlesParamBuf: null,
   flowParticleBuf: null,
@@ -215,7 +199,6 @@ export const gpu: GpuState = {
   flowTrailBuf: null,
   flowParticleCount: 0,
   flowParticlesPerLayer: 0,
-  flowDyeDummy: null,
 };
 
 export const PIPELINE_EPOCH = 76;
@@ -224,14 +207,11 @@ export const labelVertScratch = new Float32Array(18 * 6);
 export function resetPipelinesOnDeviceLost(): void {
   gpu.isoPipeline = gpu.beerPipeline = gpu.fxaaPipeline = gpu.ssaoPipeline = null;
   gpu.gridPipeline = gpu.labelPipeline = null;
-  gpu.flowIbfvPipeline = null;
-  gpu.flowIbfvParamBuf = null;
   gpu.flowParticlesPipeline = null;
   gpu.flowParticlesParamBuf = null;
   gpu.flowParticleBuf = gpu.flowParticleLayerBuf = gpu.flowParticleSortBuf = gpu.flowTrailBuf = null;
   gpu.flowParticleCount = 0;
   gpu.flowParticlesPerLayer = 0;
-  gpu.flowDyeBufA = gpu.flowDyeBufB = null;
   gpu.labelAtlasTex = gpu.labelAtlasSamp = null;
   gpu.labelVertexBuf = null;
   gpu.labelAtlasDirty = true;

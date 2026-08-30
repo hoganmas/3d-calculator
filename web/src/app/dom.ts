@@ -21,6 +21,7 @@ export interface DomElements {
   scale: HTMLInputElement;
   steps: HTMLInputElement;
   boxSize: HTMLInputElement;
+  boundsSizeLabel: HTMLElement | null;
   marchDownscale: HTMLInputElement;
   toggleGridAxes: HTMLButtonElement | null;
   marchScaleLabel: HTMLElement | null;
@@ -35,15 +36,11 @@ export interface DomElements {
   closeSettings: HTMLButtonElement | null;
   settingsDialog: HTMLDialogElement | null;
   themePref: HTMLSelectElement | null;
-  flowAlpha: HTMLInputElement | null;
-  flowGridMode: HTMLSelectElement | null;
-  flowNoiseScale: HTMLInputElement | null;
   flowDt: HTMLInputElement | null;
   flowSpeed: HTMLInputElement | null;
   flowVMax: HTMLInputElement | null;
   flowOpacity: HTMLInputElement | null;
   flowAgeMax: HTMLInputElement | null;
-  flowVizMode: HTMLSelectElement | null;
   flowParticleCount: HTMLInputElement | null;
   flowTrailSteps: HTMLInputElement | null;
   flowTrailWidth: HTMLInputElement | null;
@@ -54,6 +51,10 @@ export interface DomElements {
   sceneFileInput: HTMLInputElement | null;
   autosaveStatus: HTMLElement | null;
   autosaveStatusBar: HTMLElement | null;
+  scalarQuality: HTMLInputElement | null;
+  surfaceQuality: HTMLInputElement | null;
+  vectorQuality: HTMLInputElement | null;
+  precisionQuality: HTMLInputElement | null;
 }
 
 export const els: DomElements = {
@@ -63,6 +64,7 @@ export const els: DomElements = {
   scale: el("scale"),
   steps: el("steps"),
   boxSize: el("boxSize"),
+  boundsSizeLabel: document.getElementById("boundsSizeLabel"),
   marchDownscale: el("marchDownscale"),
   toggleGridAxes: document.getElementById("toggleGridAxes") as HTMLButtonElement | null,
   marchScaleLabel: document.getElementById("marchScaleLabel"),
@@ -77,15 +79,11 @@ export const els: DomElements = {
   closeSettings: document.getElementById("closeSettings") as HTMLButtonElement | null,
   settingsDialog: document.getElementById("settingsDialog") as HTMLDialogElement | null,
   themePref: document.getElementById("themePref") as HTMLSelectElement | null,
-  flowAlpha: document.getElementById("flowAlpha") as HTMLInputElement | null,
-  flowGridMode: document.getElementById("flowGridMode") as HTMLSelectElement | null,
-  flowNoiseScale: document.getElementById("flowNoiseScale") as HTMLInputElement | null,
   flowDt: document.getElementById("flowDt") as HTMLInputElement | null,
   flowSpeed: document.getElementById("flowSpeed") as HTMLInputElement | null,
   flowVMax: document.getElementById("flowVMax") as HTMLInputElement | null,
   flowOpacity: document.getElementById("flowOpacity") as HTMLInputElement | null,
   flowAgeMax: document.getElementById("flowAgeMax") as HTMLInputElement | null,
-  flowVizMode: document.getElementById("flowVizMode") as HTMLSelectElement | null,
   flowParticleCount: document.getElementById("flowParticleCount") as HTMLInputElement | null,
   flowTrailSteps: document.getElementById("flowTrailSteps") as HTMLInputElement | null,
   flowTrailWidth: document.getElementById("flowTrailWidth") as HTMLInputElement | null,
@@ -96,6 +94,10 @@ export const els: DomElements = {
   sceneFileInput: document.getElementById("sceneFileInput") as HTMLInputElement | null,
   autosaveStatus: document.getElementById("autosaveStatus"),
   autosaveStatusBar: document.getElementById("autosaveStatusBar"),
+  scalarQuality: document.getElementById("scalarQuality") as HTMLInputElement | null,
+  surfaceQuality: document.getElementById("surfaceQuality") as HTMLInputElement | null,
+  vectorQuality: document.getElementById("vectorQuality") as HTMLInputElement | null,
+  precisionQuality: document.getElementById("precisionQuality") as HTMLInputElement | null,
 };
 
 export function viewportSize() {

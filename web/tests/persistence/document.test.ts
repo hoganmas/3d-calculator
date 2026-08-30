@@ -25,15 +25,11 @@ function sampleDoc(revision = 1): LaplacianDocument {
       preset: "sincos",
     },
     flow: {
-      flowAlpha: 0.1,
-      flowNoiseScale: 0.3,
-      flowGridPoints: false,
       flowDt: 0.05,
       flowSpeed: 0.1,
       flowVMax: 0,
       flowOpacity: 0.5,
       flowAgeMax: 30,
-      flowVizMode: "particles",
       flowParticleCount: 1000,
       flowTrailSteps: 32,
       flowTrailWidth: 10,
@@ -56,7 +52,7 @@ export async function run() {
         assert(parsed.expressions[0]?.latex === doc.expressions[0]?.latex, "latex");
         assert(parsed.params.a?.value === 1, "param value");
         assert(parsed.render.deg === 20, "render.deg");
-        assert(parsed.flow.flowVizMode === "particles", "flow mode");
+        assert(parsed.flow.flowTrailWidth === 10, "flow trail width");
         assert(parsed.camera?.position[0] === 5.2, "camera x");
       },
     },

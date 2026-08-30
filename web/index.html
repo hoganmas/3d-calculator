@@ -240,14 +240,59 @@
 
           <section class="settings-section">
             <p class="settings-section-title">Scene</p>
-            <label>
+            <label class="settings-dev-only">
               Load preset
               <select id="preset"></select>
             </label>
-            <label>box size<input id="boxSize" type="number" min="1" max="10" step="0.1" value="5" title="Full edge length of the axis-aligned cube [-S/2,S/2]³" /></label>
+            <label class="settings-slider-label">
+              <span class="settings-slider-head">
+                <span>Bounds size</span>
+                <span id="boundsSizeLabel" class="settings-value-badge">5</span>
+              </span>
+              <div class="settings-liquid-track">
+                <input
+                  id="boxSize"
+                  class="ui-slider"
+                  type="range"
+                  min="1"
+                  max="10"
+                  step="0.1"
+                  value="5"
+                  title="Full edge length of the axis-aligned cube [-S/2,S/2]³"
+                />
+              </div>
+            </label>
           </section>
 
-          <section class="settings-section">
+          <section class="settings-section settings-prod-only">
+            <p class="settings-section-title">Quality</p>
+            <label class="settings-slider-label">
+              Precision
+              <div class="settings-liquid-track">
+                <input id="precisionQuality" class="ui-slider" type="range" min="0" max="100" step="1" value="50" />
+              </div>
+            </label>
+            <label class="settings-slider-label">
+              Scalar fields
+              <div class="settings-liquid-track">
+                <input id="scalarQuality" class="ui-slider" type="range" min="0" max="100" step="1" value="50" />
+              </div>
+            </label>
+            <label class="settings-slider-label">
+              Surfaces
+              <div class="settings-liquid-track">
+                <input id="surfaceQuality" class="ui-slider" type="range" min="0" max="100" step="1" value="50" />
+              </div>
+            </label>
+            <label class="settings-slider-label">
+              Vector fields
+              <div class="settings-liquid-track">
+                <input id="vectorQuality" class="ui-slider" type="range" min="0" max="100" step="1" value="50" />
+              </div>
+            </label>
+          </section>
+
+          <section class="settings-section settings-dev-only">
             <p class="settings-section-title">Approximation</p>
             <div class="row3">
               <label>poly deg<input id="deg" type="number" min="2" max="128" step="1" value="32" /></label>
@@ -256,7 +301,7 @@
             </div>
           </section>
 
-          <section class="settings-section">
+          <section class="settings-section settings-dev-only">
             <p class="settings-section-title">Rendering</p>
             <label class="march-slider-label">
               <span class="march-slider-head">
@@ -273,15 +318,12 @@
             </label>
           </section>
 
-          <section class="settings-section">
-            <p class="settings-section-title">Flow</p>
+          <section class="settings-section settings-dev-only">
+            <p class="settings-section-title">Flow (particles)</p>
             <div class="row3">
-              <label>viz<select id="flowVizMode" title="Particle advection or IBFV dye grid">
-                <option value="particles" selected>particles</option>
-                <option value="ibfv">ibfv</option>
-              </select></label>
               <label>count / layer<input id="flowParticleCount" type="number" min="100" max="32000" step="100" value="1000" title="Particles per flow expression (total = count × number of flow layers)" /></label>
               <label>width<input id="flowTrailWidth" type="number" min="1" max="32" step="1" value="10" title="Trail stroke width in pixels" /></label>
+              <label>life<input id="flowAgeMax" type="number" min="1" max="120" step="1" value="30" title="Particle lifetime (seconds)" /></label>
             </div>
             <div class="row3">
               <label>speed<input id="flowSpeed" type="number" min="0.05" max="10" step="0.05" value="0.1" title="Animation speed multiplier" /></label>
@@ -289,19 +331,8 @@
               <label>trail<input id="flowTrailSteps" type="number" min="2" max="32" step="1" value="32" title="Trail history length (segments = steps − 1)" /></label>
             </div>
             <div class="row3">
-              <label>alpha<input id="flowAlpha" type="number" min="0" max="1" step="0.01" value="0.1" title="Grid injection rate at upstream footpoint (0 = advection only)" /></label>
-            </div>
-            <div class="row3">
-              <label>inject<select id="flowGridMode" title="Grid lines vs lattice points">
-                <option value="lines" selected>lines</option>
-                <option value="points">points</option>
-              </select></label>
-              <label>grid<input id="flowNoiseScale" type="number" min="0.05" max="2" step="0.05" value="0.3" title="Grid spacing (world units)" /></label>
               <label>vMax<input id="flowVMax" type="number" min="0" max="20" step="0.1" value="0" title="Velocity clamp (0 = auto)" /></label>
-            </div>
-            <div class="row3">
               <label>opacity<input id="flowOpacity" type="number" min="0.01" max="2" step="0.01" value="0.5" /></label>
-              <label>life<input id="flowAgeMax" type="number" min="1" max="120" step="1" value="30" title="Particle lifetime / IBFV dye age (seconds)" /></label>
             </div>
           </section>
 
@@ -317,7 +348,7 @@
             <p id="autosaveStatus" class="autosave-status" data-state="saved" aria-live="polite">Saved</p>
           </section>
 
-          <section class="settings-section">
+          <section class="settings-section settings-dev-only">
             <details class="metrics-block" open>
               <summary class="metrics-head">
                 <span>Diagnostics</span>
