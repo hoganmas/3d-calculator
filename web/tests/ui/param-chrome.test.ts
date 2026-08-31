@@ -42,7 +42,7 @@ export async function run() {
         ]);
         const c0 = chrome("a", 0);
         assert(c0.visible, "visible");
-        assert(c0.icon === "▶", "play icon");
+        assert(c0.icon === "play", "play icon");
         assert(!c0.animating, "not animating");
         assert(!c0.disabled, "enabled");
       },
@@ -56,13 +56,13 @@ export async function run() {
         ]);
         toggleParamAnimate("a", 0);
         const c1 = chrome("a", 1);
-        assert(c1.icon === "⏸", "pause icon after start");
+        assert(c1.icon === "pause", "pause icon after start");
         assert(c1.animating, "animating");
         assert(c1.title.includes("Pause"), "pause title");
 
         stopParamAnimation("a");
         const c2 = chrome("a", 2);
-        assert(c2.icon === "▶", "play icon after stop");
+        assert(c2.icon === "play", "play icon after stop");
         assert(!c2.animating, "stopped");
       },
     },
@@ -79,7 +79,7 @@ export async function run() {
         const c = chrome("a", 0);
         assert(c.driven, "driven");
         assert(c.disabled, "disabled");
-        assert(c.icon === "▶", "no pause for driven");
+        assert(c.icon === "play", "no pause for driven");
         assert(!c.animating, "not animating");
         assert(c.title.includes("Driven"), "driven title");
         assert(getParam("a")?.animating !== true, "model stays off");
@@ -100,10 +100,10 @@ export async function run() {
             animating: true,
           },
         ]);
-        assert(chrome("a", 0).icon === "⏸", "starts paused icon");
+        assert(chrome("a", 0).icon === "pause", "starts paused icon");
         setParamValue("a", 3, { stopAnim: true, rewriteLatex: true });
         const c = chrome("a", 1);
-        assert(c.icon === "▶", "play after drag");
+        assert(c.icon === "play", "play after drag");
         assert(!c.animating, "not animating");
       },
     },
@@ -119,7 +119,7 @@ export async function run() {
         updateParam("a", { animating: true });
         const c = chrome("a", 0);
         assert(c.driven, "driven");
-        assert(c.icon === "▶", "play despite stale animating flag");
+        assert(c.icon === "play", "play despite stale animating flag");
         assert(!c.animating, "chrome not animating");
       },
     },
@@ -129,7 +129,7 @@ export async function run() {
         resetParams();
         const c = chrome("missing", 0);
         assert(!c.visible, "hidden");
-        assert(c.icon === "▶", "default icon");
+        assert(c.icon === "play", "default icon");
       },
     },
     {
@@ -140,10 +140,10 @@ export async function run() {
           { name: "a", latex: "a=0.5", exprId: "e1", min: 0, max: 1, animating: false },
         ]);
         toggleParamAnimate("a", 0);
-        assert(chrome("a", 1).icon === "⏸", "pause after first toggle");
+        assert(chrome("a", 1).icon === "pause", "pause after first toggle");
         toggleParamAnimate("a", 0);
         const c = chrome("a", 2);
-        assert(c.icon === "▶", "play after second toggle");
+        assert(c.icon === "play", "play after second toggle");
         assert(!c.animating, "not animating");
       },
     },

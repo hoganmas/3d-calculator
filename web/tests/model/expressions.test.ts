@@ -166,6 +166,30 @@ export async function run() {
       },
     },
     {
+      name: "updateExpr colors persist when re-resolved from the live row",
+      fn: () => {
+        clearExpressions();
+        setExpressions([
+          {
+            id: "e1",
+            latex: "x",
+            colors: ["#ff4500", "#ffec00"],
+            color: "#ff4500",
+            color2: "#ffec00",
+          },
+        ]);
+        const row = listExpressions().find((e) => e.id === "e1")!;
+        const stale = { ...row, colors: row.colors.slice() };
+        updateExpr("e1", { colors: ["#010203", "#040506"] });
+        const fromStale = resolveExprGradient(stale);
+        assert(fromStale.color === "#ff4500", "stale snapshot still original");
+        const reopen = resolveExprGradient(listExpressions().find((e) => e.id === "e1")!);
+        assert(reopen.color === "#010203", "reopen uses live primary");
+        assert(reopen.color2 === "#040506", "reopen uses live secondary");
+        assert(reopen.colors[0] === "#010203", "reopen uses live stops");
+      },
+    },
+    {
       name: "updateExpr colors array still works for gradient editor",
       fn: () => {
         clearExpressions();

@@ -1,11 +1,13 @@
 import { getParam } from "../../model/params.js";
 
+export type ParamPlayIcon = "play" | "pause";
+
 export type ParamPlayChrome = {
   visible: boolean;
   animating: boolean;
   driven: boolean;
   disabled: boolean;
-  icon: "▶" | "⏸";
+  icon: ParamPlayIcon;
   title: string;
 };
 
@@ -14,7 +16,7 @@ const HIDDEN: ParamPlayChrome = {
   animating: false,
   driven: false,
   disabled: true,
-  icon: "▶",
+  icon: "play",
   title: "",
 };
 
@@ -35,7 +37,7 @@ export function readParamPlayChrome(paramName: string, tick = 0): ParamPlayChrom
     animating,
     driven,
     disabled: driven,
-    icon: animating ? "⏸" : "▶",
+    icon: animating ? "pause" : "play",
     title: driven
       ? "Driven by equation"
       : animating

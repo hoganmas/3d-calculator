@@ -5,6 +5,7 @@ import {
   cssGradientFromColors,
   MAX_GRAD_STOPS,
   MIN_GRAD_STOPS,
+  listExpressions,
   updateExpr,
   updateExprSilent,
 } from "../../model/expressions.js";
@@ -40,7 +41,9 @@ export function openGradientEditor(
   onColorChange: () => void,
 ) {
   closeAllPopovers();
-  const grad = resolveExprGradient(item);
+  const live = listExpressions().find((e) => e.id === item.id) ?? item;
+  const grad = resolveExprGradient(live);
+  const exprId = live.id;
   let draft = grad.colors.slice();
 
   const pop = document.createElement("div");
@@ -83,7 +86,7 @@ export function openGradientEditor(
 
   function commit(next: string[], rebuildStops = true) {
     draft = normalizeGradColors(next);
-    updateExpr(item.id, { colors: draft });
+    updateExpr(exprId, { colors: draft });
     onColorChange();
     if (rebuildStops) renderStops();
     else syncGradientVisuals();
