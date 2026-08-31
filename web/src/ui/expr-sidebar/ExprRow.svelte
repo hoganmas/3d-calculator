@@ -110,7 +110,13 @@ import {
   const pendingErr = $derived(pendingParamErrorMessage(pendingParams));
   const rowError = $derived(warn ?? paramErr ?? pendingErr);
   const isParamDef = $derived(isParameterRow(item.latex || ""));
-  const grad = $derived(resolveExprGradient(item));
+  /** Bumped when the gradient editor commits; model mutates in place so `item` identity is stale. */
+  let gradEpoch = $state(0);
+  const grad = $derived.by(() => {
+    void gradEpoch;
+    const latest = listExpressions().find((e) => e.id === item.id) ?? item;
+    return resolveExprGradient(latest);
+  });
   const gradCss = $derived(cssGradientFromColors(grad.colors));
   const swatchDisabled = $derived(isParamDef);
 
@@ -135,6 +141,7 @@ import {
     if (swatchDisabled || !rowEl) return;
     const btn = ev.currentTarget as HTMLButtonElement;
     openGradientEditor(btn, item, () => {
+      gradEpoch += 1;
       if (onColorChange) onColorChange();
       else onExprChange();
     });

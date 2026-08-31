@@ -5,6 +5,8 @@
       body {
         margin: 0;
         height: 100%;
+        overflow: hidden;
+        overscroll-behavior: none;
         font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
         background: var(--bg);
         color: var(--text);
@@ -13,6 +15,7 @@
         position: relative;
         height: 100%;
         overflow: hidden;
+        overscroll-behavior: none;
       }
       #viewport {
         position: absolute;
@@ -20,6 +23,8 @@
         min-width: 0;
         min-height: 0;
         overflow: hidden;
+        overscroll-behavior: none;
+        touch-action: none;
         background: transparent;
       }
       #panel {
@@ -1272,6 +1277,7 @@
         gap: 12px;
         padding: 14px 16px 18px;
         overflow: auto;
+        overscroll-behavior: contain;
       }
       .settings-section {
         display: flex;
@@ -1504,11 +1510,33 @@
         display: flex;
         flex-direction: column;
       }
+      html[data-panel-layout="horizontal"],
+      html[data-panel-layout="horizontal"] body {
+        /* 100% is the large viewport on iOS, so the page is slightly taller than
+           the visible area while Safari chrome is showing. */
+        height: 100dvh;
+        max-height: 100dvh;
+        overflow: hidden;
+        overscroll-behavior: none;
+      }
+      html[data-panel-layout="horizontal"] body {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+      }
+      html[data-panel-layout="horizontal"] #app {
+        height: 100%;
+        max-height: 100%;
+        overflow: hidden;
+        overscroll-behavior: none;
+      }
       html[data-panel-layout="horizontal"] #exprList {
         flex: 1 1 auto;
         min-height: 0;
         overflow-y: auto;
+        overscroll-behavior: contain;
         -webkit-overflow-scrolling: touch;
+        touch-action: pan-y;
         padding-bottom: 8px;
       }
       html[data-panel-layout="horizontal"] #viewport {
@@ -1926,7 +1954,8 @@
       .mobile-expr-viewport {
         overflow: hidden;
         width: 100%;
-        touch-action: pan-y;
+        overscroll-behavior: none;
+        touch-action: none;
         transition: height 0.2s cubic-bezier(0.32, 0.72, 0, 1);
       }
       .mobile-expr-viewport.is-dragging {
