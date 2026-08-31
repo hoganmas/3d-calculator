@@ -167,6 +167,33 @@ export async function run() {
       },
     },
     {
+      name: "syncParamsFromDefinitions preserves in-flight animation",
+      fn: () => {
+        resetParams();
+        syncParamsFromDefinitions([
+          {
+            name: "a",
+            latex: "a=0.5",
+            exprId: "e1",
+            min: 0,
+            max: 1,
+            animating: true,
+          },
+        ]);
+        syncParamsFromDefinitions([
+          {
+            name: "a",
+            latex: "a=0.5",
+            exprId: "e1",
+            min: 0,
+            max: 1,
+            animating: false,
+          },
+        ]);
+        assert(getParam("a")?.animating === true, "live animating survives stale defs");
+      },
+    },
+    {
       name: "recompileParam records invalid latex error",
       fn: () => {
         resetParams();

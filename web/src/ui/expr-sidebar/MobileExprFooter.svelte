@@ -9,7 +9,8 @@
     commitAutoParams,
   } from "../../model/expressions.js";
   import ExprRow from "./ExprRow.svelte";
-  import { readFieldLatex } from "./helpers.ts";
+  import { readFieldLatex, neededParamForItem } from "./helpers.ts";
+  import { getParam } from "../../model/params.js";
   import {
     createSuppressAutoCommitCounter,
     scheduleCommitIfLeftExpr as scheduleAutoCommitIfLeftExpr,
@@ -119,7 +120,11 @@
   }
 
   function slideMounted(i: number) {
-    return Math.abs(i - index) <= 1;
+    if (Math.abs(i - index) <= 1) return true;
+    const item = items[i];
+    if (!item) return false;
+    const name = neededParamForItem(item, paramTick);
+    return !!(name && getParam(name)?.animating);
   }
 
   function currentRow() {

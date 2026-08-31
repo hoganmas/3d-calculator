@@ -140,16 +140,22 @@ import {
     });
   }
 
+  function stopParamAnimForRowEdit() {
+    if (!mfEl) return;
+    const classified = classifyKind(readFieldLatex(mfEl));
+    if (classified?.kind !== "parameter" || !classified.paramName) return;
+    if (!suppressAutoCommit()) commitAutoParams();
+    const next = stopParamAnimation(classified.paramName);
+    if (next) {
+      updateExprSilent(item.id, { sliderAnimating: false });
+    }
+  }
+
   function onMfFocus() {
     onSelect(item.id);
-    const classified = classifyKind(readFieldLatex(mfEl!));
-    if (classified?.kind === "parameter" && classified.paramName) {
-      if (!suppressAutoCommit()) commitAutoParams();
-      const next = stopParamAnimation(classified.paramName);
-      if (next) {
-        updateExprSilent(item.id, { sliderAnimating: false });
-      }
-    }
+    // Carousel navigation focuses fields without editing; keep animation running until input.
+    if (disableSplitMerge) return;
+    stopParamAnimForRowEdit();
   }
 
   function onMfBlur() {
@@ -160,6 +166,7 @@ import {
 
   function onMfInput() {
     if (!mfEl || ignoreFieldInput) return;
+    if (disableSplitMerge) stopParamAnimForRowEdit();
     updateExpr(item.id, { latex: readFieldLatex(mfEl) });
     onExprChange();
   }
