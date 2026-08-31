@@ -88,8 +88,8 @@ function frame(rafNow: number) {
         state.lastAnimFitAt = t0;
         // Don't cancel a pending structural (latex) refit — anim would starve it.
         const pendingStructural =
-          !!state.fitTimer && !state.pendingFitOpts?.fromAnim;
-        if (pendingStructural) {
+          !!state.fitTimer && state.pendingFitOpts?.fromAnim !== true;
+        if (state.uploadFitBusy || pendingStructural) {
           // Keep the timer; GPU keyframe blends above still run this frame.
         } else {
           if (state.fitTimer) {

@@ -64,6 +64,13 @@ export function scheduleProgressiveUploadFit(
   delay = FIT_DEBOUNCE_MS,
   opts: { fromAnim?: boolean } = {},
 ): void {
+  if (
+    state.fitTimer &&
+    state.pendingFitOpts.fromAnim !== true &&
+    opts.fromAnim
+  ) {
+    return;
+  }
   state.pendingFitOpts = opts;
   if (state.fitTimer) clearTimeout(state.fitTimer);
   state.fitTimer = window.setTimeout(() => {

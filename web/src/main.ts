@@ -15,6 +15,7 @@ import {
   initKeyframeHandler,
   wirePipelineDom,
   handleColorChange,
+  invalidateLayerBakeFingerprint,
 } from "./app/pipeline.js";
 import { clipUniforms, initWebglFallback, ensureSceneGpuUpload, warmClipGpuInit } from "./app/webglFallback.js";
 import { initPresentation, resize, bindHudText } from "./app/presentation.js";
@@ -22,6 +23,7 @@ import { hudText, copyMetricsToClipboard } from "./app/hud.js";
 import { initProdSettingsUi } from "./app/quality.js";
 import { applyBootPerfTier } from "./app/perfAdapt.js";
 import { detectDeviceTier } from "./app/deviceTier.js";
+import { cancelProgressiveFit } from "./app/progressiveFit.js";
 import { startRenderLoop } from "./app/loop.js";
 import { setPanelCollapsed } from "./app/panelLayout.js";
 import { state } from "./app/state.js";
@@ -59,6 +61,8 @@ initPresentation();
 bindHudText(hudText);
 initKeyframeHandler();
 
+state.latexChangeInvalidators.push(invalidateLayerBakeFingerprint);
+
 function collapseToViewport() {
   setPanelCollapsed(true);
   refreshPanelToggleChrome();
@@ -79,7 +83,12 @@ state.exprListApi = mountExprList({
   onCollapsePanel: collapseToViewport,
   onExprChange: () => {
     syncExprCompileState();
-    scheduleUploadFit();
+    if (anyParamAnimating()) {
+      cancelProgressiveFit();
+      scheduleUploadFit(0, { fromAnim: false });
+    } else {
+      scheduleUploadFit();
+    }
     scheduleAutosave();
   },
   onParamChange: () => {
@@ -93,7 +102,8 @@ state.exprListApi = mountExprList({
     scheduleAutosave();
   },
   onStructuralChange: () => {
-    scheduleUploadFit(0);
+    cancelProgressiveFit();
+    scheduleUploadFit(0, { fromAnim: false });
     scheduleAutosave();
   },
 });

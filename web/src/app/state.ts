@@ -38,6 +38,12 @@ export const state = {
 
   pendingFitOpts: {} as { fromAnim?: boolean },
 
+  /** Guards against anim vs structural uploadFit re-entry races. */
+  uploadFitBusy: false,
+
+  /** Latex/content invalidation hooks (pipeline registers bake fingerprint clears). */
+  latexChangeInvalidators: [] as ((id: string) => void)[],
+
   loopFps: 0,
   loopFpsFrames: 0,
   loopFpsLast: performance.now(),
