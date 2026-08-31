@@ -56,27 +56,21 @@ export function getLastOffset(mf: MathfieldElement): number {
 }
 
 export function isCursorAtStart(mf: MathfieldElement): boolean {
-  const sel = mf.selection;
-  if (sel?.ranges?.length) {
-    const [a, b] = sel.ranges[0];
-    return a === 0 && b === 0;
-  }
   return getCaretPos(mf) === 0;
 }
 
 export function setCaretPos(mf: MathfieldElement, pos: number) {
   const end = getLastOffset(mf);
   const p = Math.max(0, Math.min(pos | 0, end));
-  if (typeof mf.position === "number") {
-    mf.position = p;
-    return;
-  }
   if (mf.selection) {
     try {
       mf.selection = { ranges: [[p, p]] };
     } catch {
       /* ignore */
     }
+  }
+  if (typeof mf.position === "number") {
+    mf.position = p;
   }
 }
 

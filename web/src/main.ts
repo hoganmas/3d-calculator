@@ -70,7 +70,6 @@ state.exprListApi = mountExprList({
   root: els.exprList,
   footerRoot: els.exprFooter,
   onCollapsePanel: collapseToViewport,
-  onReturnToViewport: collapseToViewport,
   onExprChange: () => {
     syncExprCompileState();
     scheduleUploadFit();

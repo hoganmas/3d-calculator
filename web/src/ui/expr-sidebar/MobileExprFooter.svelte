@@ -1,38 +1,20 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { convertLatexToMarkup } from "mathlive";
   import type { ExprItem } from "../../types/models.js";
   import {
     listExpressions,
     getSelectedId,
     selectExpr,
     updateExpr,
-    removeExpr,
-    splitExprAt,
     commitAutoParams,
-    resolveExprGradient,
-    cssGradientFromColors,
-    getExprWarning,
   } from "../../model/expressions.js";
-  import { getParam } from "../../model/params.js";
-  import ParamRail from "./ParamRail.svelte";
-  import { openGradientEditor } from "./popovers.ts";
+  import ExprRow from "./ExprRow.svelte";
+  import { readFieldLatex } from "./helpers.ts";
   import {
-    neededParamForItem,
-    isParameterRow,
-    ICON_EYE,
-    ICON_EYE_OFF,
-  } from "./helpers.ts";
-  import {
-    collectPendingParamsForExpr,
-    createParamRows,
-    formatPendingParamNamesLatex,
-    formatPendingParamOverflow,
-    formatPendingParamLabelPlain,
-    pendingParamErrorMessage,
-  } from "../../app/pendingParams.js";
+    createSuppressAutoCommitCounter,
+    scheduleCommitIfLeftExpr as scheduleAutoCommitIfLeftExpr,
+  } from "./autoCommit.ts";
   import { isMobileExprUi } from "./mobileExprUi.ts";
-  import { isPanelCollapsed } from "../../app/panelLayout.js";
 
   interface Props {
     paramTick?: number;
@@ -41,69 +23,45 @@
     onColorChange?: () => void;
     onParamChange: () => void;
     onSelectionSync?: () => void;
-    onReturnToViewport?: () => void;
   }
 
   let {
-    paramTick = 0,
+    paramTick: externalParamTick = 0,
     onExprChange,
     onStructuralChange,
     onColorChange,
     onParamChange,
     onSelectionSync,
-    onReturnToViewport,
   }: Props = $props();
 
   let items: ExprItem[] = $state([]);
   let index = $state(0);
-  let expanded = $state(false);
-  let draftLatex = $state("");
-  let sourceEl: HTMLTextAreaElement | undefined = $state();
-  let swipeStartX = 0;
-  let swipeActive = false;
+  let localParamTick = $state(0);
   let mobileUi = $state(isMobileExprUi());
+  let footerEl: HTMLElement | undefined = $state();
+  let viewportEl: HTMLElement | undefined = $state();
+  let viewportWidth = $state(0);
 
-  const currentItem = $derived(items[index] ?? null);
+  let rowRefs = $state<Record<string, ExprRow | undefined>>({});
 
-  const previewMarkup = $derived.by(() => {
-    const latex = draftLatex.trim() || "\\text{\\;}\\text{empty expression}";
-    try {
-      return convertLatexToMarkup(latex, { defaultMode: "math" });
-    } catch {
-      return latex.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    }
-  });
+  const suppressCtrl = createSuppressAutoCommitCounter();
+  let dragX = $state(0);
+  let dragging = $state(false);
+  let swipeStartX = 0;
+  let swipeStartY = 0;
+  let swipePointerId: number | null = null;
+  let swipeLocked: "none" | "pending" | "horizontal" | "vertical" = "none";
 
-  const paramName = $derived.by(() => {
-    void paramTick;
-    return currentItem ? neededParamForItem(currentItem, paramTick) : null;
-  });
-
-  const pendingParams = $derived.by(() => {
-    void paramTick;
-    return currentItem ? collectPendingParamsForExpr(currentItem) : [];
-  });
-
-  const pendingParamLabelPlain = $derived(formatPendingParamLabelPlain(pendingParams));
-  const pendingParamNamesLatex = $derived(formatPendingParamNamesLatex(pendingParams));
-  const pendingParamOverflow = $derived(formatPendingParamOverflow(pendingParams));
-  const pendingParamNamesMarkup = $derived(
-    pendingParamNamesLatex
-      ? convertLatexToMarkup(pendingParamNamesLatex, { defaultMode: "textstyle" })
-      : "",
+  const paramTick = $derived(externalParamTick + localParamTick);
+  const trackTransform = $derived(
+    viewportWidth > 0
+      ? `translateX(${-index * viewportWidth + dragX}px)`
+      : `translateX(${dragX}px)`,
   );
-  const pendingErr = $derived(pendingParamErrorMessage(pendingParams));
-  const paramErr = $derived.by(() => {
-    void paramTick;
-    return paramName ? getParam(paramName)?.error ?? null : null;
-  });
-  const rowError = $derived(
-    (currentItem ? getExprWarning(currentItem.id) : null) ?? paramErr ?? pendingErr,
-  );
-  const isParamDef = $derived(isParameterRow(draftLatex));
-  const grad = $derived(currentItem ? resolveExprGradient(currentItem) : null);
-  const gradCss = $derived(grad ? cssGradientFromColors(grad.colors) : "transparent");
-  const swatchDisabled = $derived(isParamDef);
+
+  function isSuppressingAutoCommit() {
+    return suppressCtrl.isActive();
+  }
 
   function syncIndexFromSelection() {
     const sid = getSelectedId();
@@ -112,332 +70,312 @@
     if (i >= 0) index = i;
   }
 
-  function syncDraftFromItem(force = false) {
-    if (!currentItem) return;
-    if (!force && expanded && sourceEl && document.activeElement === sourceEl) return;
-    draftLatex = currentItem.latex ?? "";
+  function syncViewportWidth() {
+    if (!viewportEl) return;
+    const w = Math.round(viewportEl.clientWidth);
+    viewportWidth = w;
+    viewportEl.style.setProperty("--mobile-expr-slide-w", `${w}px`);
+  }
+
+  function syncFooterHeight() {
+    if (!footerEl) return;
+    const h = Math.ceil(footerEl.getBoundingClientRect().height);
+    document.documentElement.style.setProperty("--mobile-expr-footer-h", `${h}px`);
   }
 
   export function syncFromList() {
     items = listExpressions();
     if (index >= items.length) index = Math.max(0, items.length - 1);
     syncIndexFromSelection();
-    syncDraftFromItem();
+    queueMicrotask(() => {
+      syncViewportWidth();
+      syncFooterHeight();
+    });
   }
 
-  function commitDraft() {
-    if (!currentItem) return;
-    const trimmed = draftLatex;
-    if (trimmed !== currentItem.latex) {
-      updateExpr(currentItem.id, { latex: trimmed });
-      onExprChange();
+  function currentRow() {
+    const id = items[index]?.id;
+    return id ? rowRefs[id] : undefined;
+  }
+
+  function commitCurrentField() {
+    const row = currentRow();
+    const item = items[index];
+    const mf = row?.getMathField();
+    if (!mf || !item) return;
+    updateExpr(item.id, { latex: readFieldLatex(mf) });
+  }
+
+  function scheduleCommitIfLeftExpr(fromExprId: string) {
+    scheduleAutoCommitIfLeftExpr(fromExprId, {
+      isSuppressingAutoCommit: () => suppressCtrl.isActive(),
+      getFocusedExprId: () => {
+        for (const item of items) {
+          const mf = rowRefs[item.id]?.getMathField();
+          if (mf && document.activeElement === mf) return item.id;
+        }
+        return null;
+      },
+      commitAutoParams,
+      onExprChange,
+    });
+  }
+
+  function refreshAfterStructural(focus?: { id: string; pos: number } | null) {
+    onStructuralChange();
+    items = listExpressions();
+    if (focus?.id) {
+      const i = items.findIndex((e) => e.id === focus.id);
+      if (i >= 0) index = i;
+      selectExpr(focus.id);
+      queueMicrotask(() => rowRefs[focus.id]?.focusAt(focus.pos));
+    } else {
+      index = Math.min(index, Math.max(0, items.length - 1));
+      syncIndexFromSelection();
     }
+    onSelectionSync?.();
+    localParamTick++;
+    queueMicrotask(syncFooterHeight);
   }
 
-  function go(delta: number) {
-    if (!items.length) return;
-    commitDraft();
-    const next = Math.max(0, Math.min(items.length - 1, index + delta));
-    if (next === index) return;
+  function goTo(next: number) {
+    if (next === index || next < 0 || next >= items.length || dragging) return;
+    commitCurrentField();
+    commitAutoParams();
+    dragX = 0;
     index = next;
-    selectExpr(items[index]!.id);
+    selectExpr(items[next]!.id);
     onSelectionSync?.();
-    syncDraftFromItem(true);
+    localParamTick++;
+  }
+
+  /** Block swipe only on explicit controls — not the math field (gesture lock handles that). */
+  function swipeTargetBlocked(target: EventTarget | null) {
+    if (!(target instanceof Element)) return false;
+    return !!target.closest(
+      "button, input, textarea, select, .expr-param-block, .expr-pending-params, .mobile-expr-dot, .liquid-range, .liquid-thumb",
+    );
+  }
+
+  function rubberBand(dx: number) {
+    if (items.length <= 1) return dx * 0.25;
+    if (index === 0 && dx > 0) return dx * 0.25;
+    if (index >= items.length - 1 && dx < 0) return dx * 0.25;
+    return dx;
+  }
+
+  function resetSwipe() {
+    if (viewportEl && swipePointerId != null) {
+      try {
+        viewportEl.releasePointerCapture(swipePointerId);
+      } catch {
+        /* ignore */
+      }
+    }
+    dragging = false;
+    dragX = 0;
+    swipeLocked = "none";
+    swipePointerId = null;
   }
 
   function onSwipePointerDown(ev: PointerEvent) {
-    if (expanded) return;
+    if (ev.button !== 0 || swipeTargetBlocked(ev.target)) return;
     swipeStartX = ev.clientX;
-    swipeActive = true;
+    swipeStartY = ev.clientY;
+    swipePointerId = ev.pointerId;
+    swipeLocked = "pending";
+    dragX = 0;
     (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
   }
 
-  function onSwipePointerUp(ev: PointerEvent) {
-    if (!swipeActive || expanded) return;
-    swipeActive = false;
+  function onSwipePointerMove(ev: PointerEvent) {
+    if (swipePointerId !== ev.pointerId || swipeLocked === "none") return;
+
     const dx = ev.clientX - swipeStartX;
-    if (Math.abs(dx) >= 48) go(dx < 0 ? 1 : -1);
-  }
+    const dy = ev.clientY - swipeStartY;
 
-  function openExpanded() {
-    if (!currentItem) return;
-    onReturnToViewport?.();
-    syncDraftFromItem(true);
-    expanded = true;
-    document.documentElement.classList.add("mobile-expr-expanded");
-    queueMicrotask(() => sourceEl?.focus({ preventScroll: true }));
-  }
-
-  function closeExpanded() {
-    commitDraft();
-    expanded = false;
-    document.documentElement.classList.remove("mobile-expr-expanded");
-    sourceEl?.blur();
-    onReturnToViewport?.();
-  }
-
-  function onSourceInput() {
-    if (!currentItem) return;
-    updateExpr(currentItem.id, { latex: draftLatex });
-    onExprChange();
-  }
-
-  function onCreatePendingParams() {
-    if (!pendingParams.length) return;
-    commitDraft();
-    if (!createParamRows(pendingParams)) return;
-    onStructuralChange();
-    onExprChange();
-  }
-
-  function toggleVisibility(ev?: MouseEvent) {
-    ev?.stopPropagation();
-    if (!currentItem) return;
-    updateExpr(currentItem.id, { enabled: !currentItem.enabled });
-    items = listExpressions();
-    onStructuralChange();
-  }
-
-  function deleteCurrent() {
-    if (!currentItem) return;
-    commitAutoParams();
-    const id = currentItem.id;
-    removeExpr(id);
-    onStructuralChange();
-    items = listExpressions();
-    index = Math.min(index, Math.max(0, items.length - 1));
-    syncDraftFromItem(true);
-    if (!items.length) closeExpanded();
-  }
-
-  function addExpression() {
-    commitDraft();
-    const list = listExpressions();
-    items = list;
-    const last = list[list.length - 1];
-    if (last && !String(last.latex || "").trim()) {
-      index = list.length - 1;
-      selectExpr(last.id);
-      syncDraftFromItem(true);
-      openExpanded();
-      return;
+    if (swipeLocked === "pending") {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      if (Math.abs(dx) > Math.abs(dy) * 1.15) {
+        swipeLocked = "horizontal";
+        dragging = true;
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && active.closest(".mobile-expr-footer")) {
+          active.blur();
+        }
+        ev.preventDefault();
+      } else {
+        swipeLocked = "vertical";
+        resetSwipe();
+        return;
+      }
     }
-    if (!currentItem) return;
-    const split = splitExprAt(currentItem.id, currentItem.latex, "");
-    if (!split) return;
-    onStructuralChange();
-    items = listExpressions();
-    const i = items.findIndex((e) => e.id === split.id);
-    index = i >= 0 ? i : items.length - 1;
-    syncDraftFromItem(true);
-    openExpanded();
+
+    if (!dragging) return;
+    ev.preventDefault();
+    dragX = rubberBand(dx);
   }
 
-  function onSwatchClick(ev: MouseEvent) {
-    ev.stopPropagation();
-    if (!currentItem || swatchDisabled) return;
-    openGradientEditor(ev.currentTarget as HTMLElement, currentItem, () => {
-      if (onColorChange) onColorChange();
-      else onExprChange();
-    });
+  function onSwipePointerUp(ev: PointerEvent) {
+    if (swipePointerId !== ev.pointerId) return;
+
+    const wasDragging = dragging;
+    const dx = dragX;
+    resetSwipe();
+
+    if (!wasDragging) return;
+
+    const threshold = Math.min(52, viewportWidth * 0.16);
+    let next = index;
+    if (dx < -threshold && index < items.length - 1) next = index + 1;
+    else if (dx > threshold && index > 0) next = index - 1;
+
+    if (next !== index) {
+      commitCurrentField();
+      commitAutoParams();
+      index = next;
+      selectExpr(items[next]!.id);
+      onSelectionSync?.();
+      localParamTick++;
+    }
   }
 
   function onLayoutChange() {
     mobileUi = isMobileExprUi();
-    if (!mobileUi && expanded) closeExpanded();
-  }
-
-  function onPanelCollapsed() {
-    if (!isPanelCollapsed() && expanded) closeExpanded();
+    queueMicrotask(() => {
+      syncViewportWidth();
+      syncFooterHeight();
+    });
   }
 
   onMount(() => {
     items = listExpressions();
     syncIndexFromSelection();
-    syncDraftFromItem(true);
+
     const mq = window.matchMedia("(max-width: 800px)");
     mq.addEventListener("change", onLayoutChange);
-    window.addEventListener("laplaci:panel-collapsed", onPanelCollapsed);
+
     return () => {
       mq.removeEventListener("change", onLayoutChange);
-      window.removeEventListener("laplaci:panel-collapsed", onPanelCollapsed);
     };
+  });
+
+  $effect(() => {
+    if (!footerEl || typeof ResizeObserver === "undefined") return;
+    syncFooterHeight();
+    const ro = new ResizeObserver(() => syncFooterHeight());
+    ro.observe(footerEl);
+    return () => ro.disconnect();
+  });
+
+  $effect(() => {
+    if (!viewportEl || typeof ResizeObserver === "undefined") return;
+    syncViewportWidth();
+    const ro = new ResizeObserver(() => syncViewportWidth());
+    ro.observe(viewportEl);
+    return () => ro.disconnect();
   });
 </script>
 
 {#if mobileUi}
-  {#if expanded && currentItem}
-    <div class="mobile-expr-sheet" role="dialog" aria-modal="true" aria-label="Edit expression">
-      <header class="mobile-expr-sheet-head">
-        <button type="button" class="icon-btn mobile-expr-done" aria-label="Done" onclick={closeExpanded}>
-          <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75">
-            <path stroke-linecap="round" d="M4 7h16M4 12h16M4 17h16" />
-          </svg>
-        </button>
-        <span class="mobile-expr-sheet-index">{index + 1} / {items.length}</span>
-        <span class="mobile-expr-head-spacer" aria-hidden="true"></span>
-      </header>
+  <footer bind:this={footerEl} class="mobile-expr-footer" aria-label="Expression carousel">
+    {#if items.length > 0}
+      <div class="mobile-expr-dots" role="tablist" aria-label="Expression index">
+        {#each items as item, i (item.id)}
+          <button
+            type="button"
+            class="mobile-expr-dot"
+            class:active={i === index}
+            role="tab"
+            aria-selected={i === index}
+            aria-label={`Expression ${i + 1} of ${items.length}`}
+            disabled={dragging}
+            onclick={() => goTo(i)}
+          ></button>
+        {/each}
+      </div>
+    {/if}
 
+    <div
+      bind:this={viewportEl}
+      class="mobile-expr-viewport"
+      class:is-dragging={dragging}
+      role="region"
+      aria-label="Swipe between expressions"
+      aria-roledescription="carousel"
+      onpointerdown={onSwipePointerDown}
+      onpointermove={onSwipePointerMove}
+      onpointerup={onSwipePointerUp}
+      onpointercancel={resetSwipe}
+    >
       <div
-        class="expr-row mobile-expr-row selected"
-        class:is-hidden={!currentItem.enabled}
-        class:is-param-def={isParamDef}
-        class:has-error={!!rowError}
-        class:has-pending-params={pendingParams.length > 0}
-        style:--expr-grad={gradCss}
-        style:--expr-c0={grad?.color}
-        style:--expr-c1={grad?.color2}
+        class="mobile-expr-track"
+        class:no-transition={dragging}
+        style:transform={trackTransform}
       >
-        <button
-          type="button"
-          class="expr-color"
-          disabled={swatchDisabled}
-          title={swatchDisabled ? "Parameters are not drawn" : "Edit gradient"}
-          aria-label="Edit gradient"
-          onclick={onSwatchClick}
-        ></button>
+        {#each items as item, i (item.id)}
+          <div class="mobile-expr-slide" aria-hidden={i !== index}>
+            <div class="mobile-expr-panel-card">
+              <button
+                type="button"
+                class="mobile-expr-edge-nav secondary"
+                aria-label="Previous expression"
+                disabled={i <= 0 || dragging}
+                onclick={() => goTo(i - 1)}
+              >
+                ‹
+              </button>
 
-        <div class="expr-mid">
-          <div class="mobile-expr-preview" class:has-error={!!rowError} aria-live="polite">
-            <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-            {@html previewMarkup}
+              <div class="mobile-expr-row-wrap">
+                <ExprRow
+                  bind:this={rowRefs[item.id]}
+                  {item}
+                  selected={i === index}
+                  {paramTick}
+                  suppressAutoCommit={isSuppressingAutoCommit}
+                  onExprChange={() => {
+                    localParamTick++;
+                    onExprChange();
+                    queueMicrotask(syncFooterHeight);
+                  }}
+                  onStructuralChange={() => refreshAfterStructural()}
+                  {onColorChange}
+                  onParamChange={() => {
+                    localParamTick++;
+                    (onParamChange ?? onExprChange)();
+                    queueMicrotask(syncFooterHeight);
+                  }}
+                  onSelect={(id) => {
+                    selectExpr(id);
+                    const idx = items.findIndex((e) => e.id === id);
+                    if (idx >= 0) goTo(idx);
+                  }}
+                  onFocusNav={(targetId, caret) => {
+                    const idx = items.findIndex((e) => e.id === targetId);
+                    if (idx >= 0) goTo(idx);
+                    queueMicrotask(() => rowRefs[targetId]?.focusAt(caret));
+                    onSelectionSync?.();
+                  }}
+                  onSplit={(focus) => refreshAfterStructural(focus)}
+                  onMerge={(focus) => refreshAfterStructural(focus)}
+                  onDragStart={() => {}}
+                  onScheduleCommit={scheduleCommitIfLeftExpr}
+                />
+              </div>
+
+              <button
+                type="button"
+                class="mobile-expr-edge-nav secondary"
+                aria-label="Next expression"
+                disabled={i >= items.length - 1 || dragging}
+                onclick={() => goTo(i + 1)}
+              >
+                ›
+              </button>
+            </div>
           </div>
-          {#if rowError}
-            <p class="mobile-expr-error">{rowError}</p>
-          {/if}
-
-          <label class="mobile-expr-source-label">
-            <span>Source</span>
-            <textarea
-              bind:this={sourceEl}
-              class="mobile-expr-source expr-field"
-              class:invalid={!!rowError}
-              bind:value={draftLatex}
-              rows={4}
-              spellcheck="false"
-              autocapitalize="off"
-              autocomplete="off"
-              aria-label={isParamDef ? "Parameter definition" : "Expression source"}
-              oninput={onSourceInput}
-            ></textarea>
-          </label>
-
-          {#if pendingParams.length}
-            <button
-              type="button"
-              class="expr-pending-params"
-              title={pendingErr ?? undefined}
-              aria-label={`Create parameter rows for ${pendingParamLabelPlain}`}
-              onclick={onCreatePendingParams}
-            >
-              <span class="expr-pending-params-copy">
-                Create {pendingParams.length === 1 ? "parameter" : "parameters"}
-                <strong class="expr-pending-params-names">
-                  <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                  {@html pendingParamNamesMarkup}{#if pendingParamOverflow}<span class="expr-pending-params-overflow"> +{pendingParamOverflow}</span>{/if}
-                </strong>
-              </span>
-              <kbd class="expr-pending-params-tab">Tab</kbd>
-            </button>
-          {/if}
-
-          {#if paramName}
-            <ParamRail
-              item={currentItem}
-              {paramName}
-              {paramTick}
-              {onParamChange}
-              getMathField={() => null}
-            />
-          {/if}
-        </div>
-
-        <button
-          type="button"
-          class="expr-vis secondary"
-          class:is-off={!currentItem.enabled}
-          title={currentItem.enabled ? "Hide" : "Show"}
-          aria-label={currentItem.enabled ? "Hide expression" : "Show expression"}
-          aria-pressed={currentItem.enabled ? "true" : "false"}
-          onclick={toggleVisibility}
-        >
-          {@html currentItem.enabled ? ICON_EYE : ICON_EYE_OFF}
-        </button>
-
-        <button type="button" class="expr-del secondary" title="Delete" aria-label="Delete" onclick={deleteCurrent}>
-          ×
-        </button>
+        {/each}
       </div>
     </div>
-  {/if}
-
-  <footer
-    class="mobile-expr-footer"
-    aria-label="Expression carousel"
-    onpointerdown={onSwipePointerDown}
-    onpointerup={onSwipePointerUp}
-    onpointercancel={() => {
-      swipeActive = false;
-    }}
-  >
-    <button
-      type="button"
-      class="mobile-expr-nav"
-      aria-label="Previous expression"
-      disabled={index <= 0}
-      onclick={() => go(-1)}
-    >
-      ‹
-    </button>
-
-    {#if currentItem}
-      <button
-        type="button"
-        class="expr-color mobile-expr-footer-swatch"
-        disabled={swatchDisabled}
-        aria-label="Edit gradient"
-        style:--expr-grad={gradCss}
-        style:--expr-c0={grad?.color}
-        style:--expr-c1={grad?.color2}
-        onclick={onSwatchClick}
-      ></button>
-    {/if}
-
-    <button type="button" class="mobile-expr-chip" onclick={openExpanded} disabled={!currentItem}>
-      <span class="mobile-expr-chip-preview" aria-hidden="true">
-        <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-        {@html previewMarkup}
-      </span>
-      <span class="mobile-expr-chip-meta">
-        <span class="mobile-expr-chip-hint">Tap to edit</span>
-        <span class="mobile-expr-counter">{items.length ? index + 1 : 0} / {items.length}</span>
-      </span>
-    </button>
-
-    {#if currentItem}
-      <button
-        type="button"
-        class="expr-vis secondary mobile-expr-footer-vis"
-        class:is-off={!currentItem.enabled}
-        aria-label={currentItem.enabled ? "Hide expression" : "Show expression"}
-        onclick={toggleVisibility}
-      >
-        {@html currentItem.enabled ? ICON_EYE : ICON_EYE_OFF}
-      </button>
-    {/if}
-
-    <button
-      type="button"
-      class="mobile-expr-nav"
-      aria-label="Next expression"
-      disabled={index >= items.length - 1}
-      onclick={() => go(1)}
-    >
-      ›
-    </button>
-
-    <button type="button" class="mobile-expr-add secondary" aria-label="Add expression" onclick={addExpression}>
-      +
-    </button>
   </footer>
 {/if}

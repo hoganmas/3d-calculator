@@ -11,12 +11,11 @@ export interface MountExprListOpts {
   onColorChange?: () => void;
   onParamChange?: () => void;
   onCollapsePanel?: () => void;
-  onReturnToViewport?: () => void;
 }
 
 /** Mount the expression sidebar (Svelte) and optional mobile scene footer. */
 export function mountExprList(opts: MountExprListOpts): ExprListApi {
-  const { root, footerRoot, onCollapsePanel, onReturnToViewport, ...props } = opts;
+  const { root, footerRoot, ...props } = opts;
   root.replaceChildren();
 
   type SidebarInst = InstanceType<typeof ExprSidebar> & {
@@ -44,7 +43,6 @@ export function mountExprList(opts: MountExprListOpts): ExprListApi {
         onColorChange: props.onColorChange,
         onParamChange: props.onParamChange ?? props.onExprChange,
         onSelectionSync: () => inst.syncParamChrome(),
-        onReturnToViewport: onReturnToViewport ?? onCollapsePanel,
       },
     }) as FooterInst;
   }

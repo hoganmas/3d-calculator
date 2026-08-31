@@ -42,6 +42,7 @@ import {
   formatPendingParamOverflow,
   pendingParamErrorMessage,
 } from "../../app/pendingParams.js";
+  import { scheduleDoubleRaf } from "./autoCommit.ts";
 
   interface Props {
     item: ExprItem;
@@ -150,8 +151,10 @@ import {
     onScheduleCommit(item.id);
   }
 
+  let ignoreFieldInput = false;
+
   function onMfInput() {
-    if (!mfEl) return;
+    if (!mfEl || ignoreFieldInput) return;
     updateExpr(item.id, { latex: readFieldLatex(mfEl) });
     onExprChange();
   }
@@ -177,6 +180,31 @@ import {
 
   function onMfKeydownCapture(ev: KeyboardEvent) {
     if (!mfEl) return;
+    if (ev.key === "Enter" && !ev.shiftKey) {
+      if (isSuggestionUiActive(mfEl)) return;
+      if (ev.defaultPrevented) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const latex = readFieldLatex(mfEl);
+      if (isParameterRow(latex)) {
+        updateExpr(item.id, { latex });
+        onExprChange();
+        mfEl.blur?.();
+        return;
+      }
+      const { left, right } = latexAroundCaret(mfEl);
+      ignoreFieldInput = true;
+      try {
+        setFieldLatex(mfEl, left);
+        const split = splitExprAt(item.id, left, right);
+        onSplit(split ? { id: split.id, pos: 0 } : null);
+      } finally {
+        scheduleDoubleRaf(() => {
+          ignoreFieldInput = false;
+        });
+      }
+      return;
+    }
     if (ev.key === "Tab" && !ev.shiftKey) {
       if (isSuggestionUiActive(mfEl)) return;
       if (pendingParams.length > 0) {
@@ -204,33 +232,21 @@ import {
       if (idx > 0) {
         ev.preventDefault();
         ev.stopPropagation();
-        updateExpr(item.id, { latex: readFieldLatex(mfEl) });
-        const merged = mergeExprIntoPrevious(item.id);
-        if (merged) {
-          onMerge({ id: merged.id, pos: merged.caretOffset });
+        const curLatex = readFieldLatex(mfEl);
+        ignoreFieldInput = true;
+        try {
+          updateExprSilent(item.id, { latex: curLatex });
+          const merged = mergeExprIntoPrevious(item.id);
+          if (merged) {
+            onMerge({ id: merged.id, pos: merged.caretOffset });
+          }
+        } finally {
+          scheduleDoubleRaf(() => {
+            ignoreFieldInput = false;
+          });
         }
       }
     }
-  }
-
-  function onMfKeydownEnter(ev: KeyboardEvent) {
-    if (!mfEl) return;
-    if (ev.key !== "Enter" || ev.shiftKey) return;
-    if (ev.defaultPrevented) return;
-    ev.preventDefault();
-    ev.stopPropagation();
-    const latex = readFieldLatex(mfEl);
-    updateExpr(item.id, { latex });
-    // Parameter declarations: Enter confirms the value instead of splitting a new row.
-    if (isParameterRow(latex)) {
-      onExprChange();
-      mfEl.blur?.();
-      return;
-    }
-    const { left, right } = latexAroundCaret(mfEl);
-    updateExpr(item.id, { latex: left });
-    const split = splitExprAt(item.id, left, right);
-    onSplit(split ? { id: split.id, pos: 0 } : null);
   }
 
   function onVisClick(ev: MouseEvent) {
@@ -329,7 +345,6 @@ import {
         onfocus={onMfFocus}
         onblur={onMfBlur}
         oninput={onMfInput}
-        onkeydown={onMfKeydownEnter}
         onkeydowncapture={onMfKeydownCapture}
       ></math-field>
     </div>
