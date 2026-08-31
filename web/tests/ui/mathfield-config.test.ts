@@ -28,7 +28,10 @@ export async function run() {
           (merged.xx as { after?: string }).after?.includes("digit"),
           "xx requires non-letter context",
         );
-        assert(!(merged.xx as { after?: string }).after?.includes("letter"), "xx not after letter");
+        assert(
+          (merged.xx as { after?: string }).after?.includes("closefence"),
+          "xx allows tuple cross after )",
+        );
         assert(merged.pi === "\\pi", "pi preserved");
         assert(!("grad" in merged), "grad suppressed");
         assert(!("del" in merged), "del suppressed");

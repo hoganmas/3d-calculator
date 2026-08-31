@@ -29,7 +29,7 @@ export type InlineShortcutMap = Record<string, InlineShortcutDefinition>;
 /** Shortcuts removed or replaced when the curated whitelist is active. */
 export const CURATED_SHORTCUT_OVERRIDES: InlineShortcutMap = {
   xx: {
-    after: "digit+binop+relop+punct+openfence+nothing+space",
+    after: "digit+binop+relop+punct+openfence+closefence+nothing+space",
     value: "\\times",
   },
 };

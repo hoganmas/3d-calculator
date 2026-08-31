@@ -47,7 +47,8 @@ export async function focusEmptyExprField(page) {
 }
 
 export async function typeKeys(page, keys, delay = 30) {
-  await page.keyboard.type(keys, { delay });
+  const field = page.locator(".expr-row:not(.is-param-def) math-field").first();
+  await field.pressSequentially(keys, { delay });
 }
 
 export async function readFieldLatex(page) {
@@ -69,11 +70,16 @@ export async function runKeystrokeCase(page, testCase) {
   await typeKeys(page, testCase.keys, testCase.delay ?? 30);
   await page.waitForTimeout(80);
   const actual = await readFieldLatex(page);
-  const pass = latexMatches(actual, testCase.expectLatex);
+  let pass = latexMatches(actual, testCase.expectLatex);
+  if (pass && testCase.expectNotLatex) {
+    pass = !testCase.expectNotLatex.test(actual);
+  }
   return {
     pass,
     actual,
-    expected: String(testCase.expectLatex),
+    expected: testCase.expectNotLatex
+      ? `${String(testCase.expectLatex)} & not ${String(testCase.expectNotLatex)}`
+      : String(testCase.expectLatex),
     name: testCase.name,
   };
 }
