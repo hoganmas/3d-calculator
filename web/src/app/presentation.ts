@@ -299,9 +299,19 @@ export function initPresentation() {
   resize();
 }
 
+function pinDocumentScroll() {
+  if (window.scrollX !== 0 || window.scrollY !== 0) {
+    window.scrollTo(0, 0);
+  }
+}
+
 function initVisualViewportResize() {
+  window.addEventListener("scroll", pinDocumentScroll, { passive: true });
   const vv = window.visualViewport;
   if (!vv) return;
   vv.addEventListener("resize", resize);
-  vv.addEventListener("scroll", resize);
+  vv.addEventListener("scroll", () => {
+    pinDocumentScroll();
+    resize();
+  });
 }
