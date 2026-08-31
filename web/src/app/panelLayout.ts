@@ -26,7 +26,8 @@ export function readPanelCoverWidth() {
 
 export function readPanelCoverHeight() {
   if (!isHorizontalPanelLayout()) return 0;
-  return readPanelHeight() * (1 - readPanelProgress());
+  // Full-screen mobile overlay — scene keeps the full viewport.
+  return 0;
 }
 
 export function panelTransitionMs() {
@@ -46,6 +47,9 @@ export function setPanelCollapsed(collapsed: boolean) {
   } catch {
     /* ignore */
   }
+  window.dispatchEvent(
+    new CustomEvent("laplaci:panel-collapsed", { detail: { collapsed } }),
+  );
 }
 
 export function readPanelCollapsedPref(): boolean {

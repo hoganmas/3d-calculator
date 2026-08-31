@@ -17,6 +17,7 @@ function el<T extends HTMLElement>(id: string): T {
 export interface DomElements {
   preset: HTMLSelectElement;
   exprList: HTMLElement;
+  exprFooter: HTMLElement | null;
   deg: HTMLInputElement;
   scale: HTMLInputElement;
   steps: HTMLInputElement;
@@ -31,12 +32,16 @@ export interface DomElements {
   isoMarchScaleLabel: HTMLElement | null;
   reset: HTMLButtonElement;
   togglePanel: HTMLButtonElement | null;
+  collapsePanel: HTMLButtonElement | null;
+  clearExprs: HTMLButtonElement | null;
+  panelDismissHandle: HTMLElement | null;
   err: HTMLElement;
   viewport: HTMLElement;
   hud: HTMLElement;
   metricsDump: HTMLElement | null;
   copyMetrics: HTMLButtonElement | null;
   openSettings: HTMLButtonElement | null;
+  openSettingsViewport: HTMLButtonElement | null;
   closeSettings: HTMLButtonElement | null;
   settingsDialog: HTMLDialogElement | null;
   themePref: HTMLSelectElement | null;
@@ -59,6 +64,7 @@ export interface DomElements {
 export const els: DomElements = {
   preset: el("preset"),
   exprList: el("exprList"),
+  exprFooter: document.getElementById("exprFooter") as HTMLElement | null,
   deg: el("deg"),
   scale: el("scale"),
   steps: el("steps"),
@@ -73,12 +79,16 @@ export const els: DomElements = {
   isoMarchScaleLabel: document.getElementById("isoMarchScaleLabel"),
   reset: el("reset"),
   togglePanel: document.getElementById("togglePanel") as HTMLButtonElement | null,
+  collapsePanel: document.getElementById("collapsePanel") as HTMLButtonElement | null,
+  clearExprs: document.getElementById("clearExprs") as HTMLButtonElement | null,
+  panelDismissHandle: document.getElementById("panelDismissHandle") as HTMLElement | null,
   err: el("err"),
   viewport: el("viewport"),
   hud: el("hud"),
   metricsDump: document.getElementById("metricsDump"),
   copyMetrics: document.getElementById("copyMetrics") as HTMLButtonElement | null,
   openSettings: document.getElementById("openSettings") as HTMLButtonElement | null,
+  openSettingsViewport: document.getElementById("openSettingsViewport") as HTMLButtonElement | null,
   closeSettings: document.getElementById("closeSettings") as HTMLButtonElement | null,
   settingsDialog: document.getElementById("settingsDialog") as HTMLDialogElement | null,
   themePref: document.getElementById("themePref") as HTMLSelectElement | null,
@@ -120,10 +130,29 @@ export function initDom() {
   }
 
   els.openSettings?.addEventListener("click", () => openSettingsDialog());
+  els.openSettingsViewport?.addEventListener("click", () => openSettingsDialog());
   els.closeSettings?.addEventListener("click", () => closeSettingsDialog());
   els.settingsDialog?.addEventListener("click", (ev) => {
     if (ev.target === els.settingsDialog) closeSettingsDialog();
   });
+
+  initViewportToolbarTouch();
+}
+
+/** On touch, release focus after toolbar taps so tooltips / focus rings do not stick. */
+function initViewportToolbarTouch() {
+  const toolbar = document.querySelector(".viewport-toolbar");
+  if (!toolbar) return;
+  const mq = window.matchMedia("(pointer: coarse)");
+
+  const releaseFocus = (ev: Event) => {
+    if (!mq.matches) return;
+    const btn = (ev.target as Element | null)?.closest("button");
+    if (!(btn instanceof HTMLButtonElement) || !toolbar.contains(btn)) return;
+    queueMicrotask(() => btn.blur());
+  };
+
+  toolbar.addEventListener("click", releaseFocus);
 }
 
 export function openSettingsDialog() {
@@ -303,7 +332,14 @@ export function initPanelResize(onResize: () => void) {
 
 function syncPanelToggleChrome(btn: HTMLButtonElement) {
   const collapsed = isPanelCollapsed();
-  const label = collapsed ? "Show sidebar" : "Hide sidebar";
+  const horizontal = isHorizontalPanelLayout();
+  const label = collapsed
+    ? horizontal
+      ? "Show expressions"
+      : "Show sidebar"
+    : horizontal
+      ? "Hide expressions"
+      : "Hide sidebar";
   btn.setAttribute("aria-label", label);
   btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
   btn.dataset.tooltip = label;
@@ -322,6 +358,50 @@ function runPanelTransition(onResize: () => void) {
     else onResize();
   };
   requestAnimationFrame(tick);
+}
+
+/** Toggle sidebar visibility (wide left dock or narrow top strip). */
+export function initPanelCollapse(onCollapse: () => void) {
+  els.collapsePanel?.addEventListener("click", onCollapse);
+}
+
+/** Swipe up on the mobile expression-list footer to collapse back to the scene. */
+export function initPanelDismiss(onCollapse: () => void) {
+  const status = document.getElementById("panelStatus");
+  if (!status) return;
+
+  let startY = 0;
+  let tracking = false;
+
+  function onPointerDown(ev: PointerEvent) {
+    if (!isHorizontalPanelLayout()) return;
+    if (ev.button !== 0) return;
+    tracking = true;
+    startY = ev.clientY;
+    status.setPointerCapture(ev.pointerId);
+  }
+
+  function onPointerUp(ev: PointerEvent) {
+    if (!tracking) return;
+    tracking = false;
+    const dy = ev.clientY - startY;
+    if (dy < -44) onCollapse();
+  }
+
+  function onPointerCancel() {
+    tracking = false;
+  }
+
+  status.addEventListener("pointerdown", onPointerDown);
+  status.addEventListener("pointerup", onPointerUp);
+  status.addEventListener("pointercancel", onPointerCancel);
+
+  els.panelDismissHandle?.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" || ev.key === " ") {
+      ev.preventDefault();
+      onCollapse();
+    }
+  });
 }
 
 /** Toggle sidebar visibility (wide left dock or narrow top strip). */

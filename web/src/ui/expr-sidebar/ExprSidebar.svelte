@@ -16,6 +16,8 @@
     createSuppressAutoCommitCounter,
     scheduleCommitIfLeftExpr as scheduleAutoCommitIfLeftExpr,
   } from "./autoCommit.ts";
+  import { isMobileExprUi } from "./mobileExprUi.ts";
+  import { isPanelCollapsed } from "../../app/panelLayout.js";
 
   interface Props {
     onExprChange: () => void;
@@ -109,7 +111,9 @@
     items = listExpressions();
     selectedId = getSelectedId();
     paramTick++;
-    restoreFocus(focusSnap, epoch);
+    if (!(isMobileExprUi() && isPanelCollapsed())) {
+      restoreFocus(focusSnap, epoch);
+    }
     endSuppressAutoCommit();
   }
 
@@ -151,6 +155,10 @@
     selectedId = getSelectedId();
     onExprChange();
     onStructuralChange();
+  }
+
+  export function clearAll() {
+    handleClear();
   }
 
   onMount(() => {

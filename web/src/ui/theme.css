@@ -20,6 +20,8 @@
   --safe-right: env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
+  --mobile-expr-footer-h: 68px;
+  --mobile-chrome-pad: 12px;
 }
 
 html {
@@ -28,7 +30,7 @@ html {
 
 html[data-panel-layout="horizontal"] {
   --panel-cover-w: 0px;
-  --panel-cover-h: calc(var(--panel-h) * (1 - var(--panel-progress)));
+  --panel-cover-h: 0px;
 }
 
 html:not([data-panel-layout="horizontal"]) {

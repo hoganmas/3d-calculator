@@ -6,7 +6,7 @@ import { mountExprList } from "./ui/expr-sidebar/mount.js";
 import { setExpressionsOnChange } from "./model/expressions.js";
 import { anyParamAnimating, ensureParamAnimationFromExprs } from "./model/params.js";
 import { syncExprCompileState, getExpressionErrorReport } from "./app/hud.js";
-import { initDom, els, initPanelResize, initPanelToggle, refreshPanelToggleChrome } from "./app/dom.js";
+import { initDom, els, initPanelResize, initPanelToggle, initPanelCollapse, initPanelDismiss, refreshPanelToggleChrome } from "./app/dom.js";
 import { initScene, bindClipUniforms, resetCameraView } from "./app/scene.js";
 import { initCompile, applyPreset } from "./app/compile.js";
 import {
@@ -23,6 +23,7 @@ import { initProdSettingsUi } from "./app/quality.js";
 import { applyBootPerfTier } from "./app/perfAdapt.js";
 import { detectDeviceTier } from "./app/deviceTier.js";
 import { startRenderLoop } from "./app/loop.js";
+import { setPanelCollapsed } from "./app/panelLayout.js";
 import { state } from "./app/state.js";
 import { initWebMCP } from "./app/webmcp.js";
 import { initWebmcpSetupDialog } from "./app/webmcpSetupDialog.js";
@@ -58,8 +59,18 @@ initPresentation();
 bindHudText(hudText);
 initKeyframeHandler();
 
+function collapseToViewport() {
+  setPanelCollapsed(true);
+  refreshPanelToggleChrome();
+  resize();
+  state.exprListApi?.render();
+}
+
 state.exprListApi = mountExprList({
   root: els.exprList,
+  footerRoot: els.exprFooter,
+  onCollapsePanel: collapseToViewport,
+  onReturnToViewport: collapseToViewport,
   onExprChange: () => {
     syncExprCompileState();
     scheduleUploadFit();
@@ -86,6 +97,11 @@ async function bootstrap() {
   wirePipelineDom();
   initPanelResize(resize);
   initPanelToggle(resize);
+  initPanelCollapse(collapseToViewport);
+  initPanelDismiss(collapseToViewport);
+  els.clearExprs?.addEventListener("click", () => {
+    state.exprListApi?.clearAll?.();
+  });
   initAutosave();
   initProjectActions();
 
