@@ -25,7 +25,10 @@ npm run test:coverage  # c8 line coverage (HTML → coverage/index.html)
 | `expr/` | — | Expression error reporting |
 | `persistence/` | — | Document schema, IndexedDB storage, expr URL benchmarks |
 | `integration/` | — | Browser smoke tests (Playwright; needs `npm run dev`) |
-| `helpers/` | — | Shared assert, grid sampling, DOM stub, suite runner |
+| `ui/` | — | MathLive input policy, param chrome, auto-commit |
+| `helpers/` | — | Shared assert, grid sampling, DOM stub, suite runner, MathLive keystroke helpers |
+
+Keystroke integration tests (`integration/keystroke-input.test.mjs`) assert keyboard input → LaTeX under curated and raw shortcut policies. Case table: `ui/keystroke-cases.mjs`. With dev server: `npm run test:integration:keystroke`.
 
 Each `*.test.ts` exports `run(): Promise<number>` (failure count). `run.mjs` discovers and runs them via `tsx`.
 

@@ -15,6 +15,7 @@
     "test:cloud": "tsx tests/run.mjs cloud",
     "test:isosurface": "tsx tests/run.mjs isosurface",
     "test:integration": "tsx tests/integration/run.mjs",
+    "test:integration:keystroke": "tsx tests/integration/keystroke-input.test.mjs",
     "test:coverage": "c8 tsx tests/run.mjs",
     "test:coverage:flow": "c8 tsx tests/run.mjs flow",
     "bench:lobatto": "tsx scripts/bench-lobatto-accuracy.mjs",

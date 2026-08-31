@@ -27,6 +27,7 @@ import { initWebmcpSetupDialog } from "./app/webmcpSetupDialog.js";
 import { initSplash, markSplashSidebarReady, forceSplashDismiss } from "./app/splash.js";
 import { initKeyframeLoadBar } from "./app/keyframeLoadBar.js";
 import { initTearDebug } from "./app/tearDebug.js";
+import { initMathInputConfig, wireMathInputConfigDom } from "./app/mathInputConfig.js";
 import { initStartupProfile, startupBegin, startupEnd, startupMark } from "./app/startupProfile.js";
 import {
   initAutosave,
@@ -44,6 +45,7 @@ import { installOgCapture } from "./app/ogCapture.js";
 initSplash();
 initKeyframeLoadBar();
 initTearDebug();
+initMathInputConfig();
 initStartupProfile();
 initTheme();
 initDom();
@@ -81,6 +83,7 @@ state.exprListApi = mountExprList({
 async function bootstrap() {
   startupBegin("boot.bootstrap");
   wirePipelineDom();
+  wireMathInputConfigDom(els.curatedShortcuts);
   initPanelResize(resize);
   initPanelToggle(resize);
   initAutosave();

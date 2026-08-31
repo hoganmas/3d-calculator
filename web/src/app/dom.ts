@@ -54,6 +54,7 @@ export interface DomElements {
   surfaceQuality: HTMLInputElement | null;
   vectorQuality: HTMLInputElement | null;
   precisionQuality: HTMLInputElement | null;
+  curatedShortcuts: HTMLInputElement | null;
 }
 
 export const els: DomElements = {
@@ -96,6 +97,7 @@ export const els: DomElements = {
   surfaceQuality: document.getElementById("surfaceQuality") as HTMLInputElement | null,
   vectorQuality: document.getElementById("vectorQuality") as HTMLInputElement | null,
   precisionQuality: document.getElementById("precisionQuality") as HTMLInputElement | null,
+  curatedShortcuts: document.getElementById("curatedShortcuts") as HTMLInputElement | null,
 };
 
 export function viewportSize() {

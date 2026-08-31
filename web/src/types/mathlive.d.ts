@@ -18,6 +18,10 @@ declare global {
     mathVirtualKeyboardPolicy?: string;
     menuItems?: unknown[];
     inlineShortcutTimeout?: number;
+    inlineShortcuts?: Record<string, string | { value: string; after?: string }>;
+    overrideDefaultInlineShortcuts?: boolean;
+    mathModeSpace?: string;
+    smartMode?: boolean;
     macros?: Record<string, string | object>;
     contains(node: Node | null): boolean;
     getValue(
