@@ -140,7 +140,8 @@ import {
     ev.stopPropagation();
     if (swatchDisabled || !rowEl) return;
     const btn = ev.currentTarget as HTMLButtonElement;
-    openGradientEditor(btn, item, () => {
+    const live = listExpressions().find((e) => e.id === item.id) ?? item;
+    openGradientEditor(btn, live, () => {
       gradEpoch += 1;
       if (onColorChange) onColorChange();
       else onExprChange();

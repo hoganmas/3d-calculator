@@ -23,6 +23,7 @@ import {
   boxHelper,
 } from "./scene.js";
 import { clipQuad, useGpuClipPath } from "./webglFallback.js";
+import { initKeyboardInsets } from "./keyboardInsets.js";
 
 function formatBoundsSize(n: number) {
   const rounded = Math.round(n * 10) / 10;
@@ -296,6 +297,7 @@ export function initPresentation() {
 
   window.addEventListener("resize", resize);
   initVisualViewportResize();
+  initKeyboardInsets();
   resize();
 }
 

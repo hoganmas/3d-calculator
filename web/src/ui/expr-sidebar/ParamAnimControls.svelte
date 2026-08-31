@@ -2,7 +2,7 @@
   import type { ExprItem } from "../../types/models.js";
   import { getParam, toggleParamAnimate } from "../../model/params.js";
   import { updateExprSilent } from "../../model/expressions.js";
-  import { ANIM_OPTS_ICON } from "./helpers.ts";
+  import { ANIM_OPTS_ICON, PAUSE_ICON, PLAY_ICON } from "./helpers.ts";
   import {
     openAnimOptions,
     isAnimPopoverOpen,
@@ -84,9 +84,10 @@
       class:on={playChrome.animating}
       disabled={playChrome.disabled}
       title={playChrome.title}
+      aria-label={playChrome.title}
       onclick={onPlayClick}
     >
-      {playChrome.icon}
+      {@html playChrome.icon === "pause" ? PAUSE_ICON : PLAY_ICON}
     </button>
     <button
       bind:this={optsBtn}

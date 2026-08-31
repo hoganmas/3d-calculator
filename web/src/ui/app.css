@@ -781,6 +781,7 @@
         background: var(--accent-soft-strong);
         color: var(--accent);
       }
+      .expr-param-play svg,
       .expr-param-anim-opts svg {
         width: 14px;
         height: 14px;
@@ -1413,10 +1414,10 @@
           calc(var(--mobile-chrome-pad) + var(--safe-left));
       }
       html[data-panel-layout="horizontal"]:not([data-panel-collapsed="true"]) #panel {
-        top: calc(var(--safe-top) + 6px);
+        top: calc(var(--safe-top) + 6px + var(--vv-top, 0px));
         left: calc(var(--safe-left) + var(--mobile-chrome-pad));
         right: calc(var(--safe-right) + var(--mobile-chrome-pad));
-        bottom: calc(var(--safe-bottom) + 6px);
+        bottom: calc(var(--safe-bottom) + 6px + var(--vv-bottom, 0px));
         border-radius: var(--panel-radius);
         background: var(--glass-bg-strong);
         backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
