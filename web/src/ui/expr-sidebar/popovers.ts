@@ -66,15 +66,31 @@ export function openGradientEditor(
   addBtn.className = "secondary";
   addBtn.textContent = "Add color";
 
-  function commit(next: string[]) {
+  function syncGradientVisuals() {
+    const css = cssGradientFromColors(draft);
+    preview.style.background = css;
+    const c0 = draft[0];
+    const c1 = draft[draft.length - 1];
+    const targets: HTMLElement[] = [anchor];
+    const row = anchor.closest(".expr-row");
+    if (row instanceof HTMLElement && row !== anchor) targets.push(row);
+    for (const el of targets) {
+      el.style.setProperty("--expr-grad", css);
+      if (c0) el.style.setProperty("--expr-c0", c0);
+      if (c1) el.style.setProperty("--expr-c1", c1);
+    }
+  }
+
+  function commit(next: string[], rebuildStops = true) {
     draft = normalizeGradColors(next);
     updateExpr(item.id, { colors: draft });
     onColorChange();
-    renderStops();
+    if (rebuildStops) renderStops();
+    else syncGradientVisuals();
   }
 
   function renderStops() {
-    preview.style.background = cssGradientFromColors(draft);
+    syncGradientVisuals();
     list.replaceChildren();
     draft.forEach((hex, i) => {
       const stop = document.createElement("div");
@@ -88,7 +104,8 @@ export function openGradientEditor(
       pick.addEventListener("input", () => {
         const next = draft.slice();
         next[i] = pick.value;
-        commit(next);
+        // Keep the native picker mounted so its swatch and the row icon update live.
+        commit(next, false);
       });
       pick.addEventListener("click", (ev) => ev.stopPropagation());
 

@@ -120,38 +120,47 @@ export function latexAroundCaret(mf: MathfieldElement) {
   return { left: full.slice(0, pos), right: full.slice(pos), pos };
 }
 
+function patchKeyboardSink(mf: MathfieldElement, label: string) {
+  const sink = mf.shadowRoot?.querySelector<HTMLElement>(".ML__keyboard-sink");
+  if (!sink) return null;
+  if (sink.getAttribute("aria-label") !== label) {
+    sink.setAttribute("aria-label", label);
+  }
+  if (isCoarsePointer()) {
+    sink.setAttribute("inputmode", "text");
+  }
+  return sink;
+}
+
 export function configureMathField(mf: MathfieldElement, label = "Math expression") {
   mf.setAttribute("aria-label", label);
-  const syncKeyboardSinkLabel = () => {
-    const sink = mf.shadowRoot?.querySelector<HTMLElement>(".ML__keyboard-sink");
-    if (sink && sink.getAttribute("aria-label") !== label) {
-      sink.setAttribute("aria-label", label);
-    }
+  const syncKeyboardSink = () => {
+    patchKeyboardSink(mf, label);
   };
-  syncKeyboardSinkLabel();
-  queueMicrotask(syncKeyboardSinkLabel);
-  requestAnimationFrame(syncKeyboardSinkLabel);
-  mf.addEventListener("focusin", syncKeyboardSinkLabel);
+  syncKeyboardSink();
+  queueMicrotask(syncKeyboardSink);
+  requestAnimationFrame(syncKeyboardSink);
+  mf.addEventListener("focusin", () => {
+    syncKeyboardSink();
+    if (isCoarsePointer()) {
+      queueMicrotask(() => {
+        patchKeyboardSink(mf, label)?.focus({ preventScroll: true });
+      });
+    }
+  });
+
   mf.setAttribute("math-virtual-keyboard-policy", "manual");
   mf.setAttribute("virtual-keyboard-mode", "off");
   if (isCoarsePointer()) {
-    // Rely on the OS keyboard — MathLive virtual keyboard stays off.
     mf.removeAttribute("readonly");
-    mf.addEventListener("focusin", () => {
-      try {
-        mf.focus();
-      } catch {
-        /* ignore */
-      }
-    });
   }
-  mf.setAttribute("smart-fence", "");
-  mf.setAttribute("smart-superscript", "");
   try {
     mf.mathVirtualKeyboardPolicy = "manual";
   } catch {
     /* ignore */
   }
+  mf.setAttribute("smart-fence", "");
+  mf.setAttribute("smart-superscript", "");
   try {
     mf.macros = {
       ...mf.macros,
