@@ -5,17 +5,10 @@
     getParam,
     setParamValue,
     updateParam,
-    toggleParamAnimate,
   } from "../../model/params.js";
   import { updateExprSilent } from "../../model/expressions.js";
   import { mountLiquidThumb, syncLiquidThumb } from "../liquidSlider.js";
-  import { fmtNum, ANIM_OPTS_ICON, isMathFieldFocused } from "./helpers.ts";
-  import {
-    openAnimOptions,
-    isAnimPopoverOpen,
-    closeAnimPopover,
-  } from "./popovers.ts";
-  import { readParamPlayChrome } from "./paramChrome.ts";
+  import { fmtNum, isMathFieldFocused } from "./helpers.ts";
 
   interface Props {
     item: ExprItem;
@@ -32,9 +25,8 @@
   let sliderEl: HTMLInputElement | undefined = $state();
   let trackEl: HTMLDivElement | undefined = $state();
   let zeroEl: HTMLSpanElement | undefined = $state();
-  let optsBtn: HTMLButtonElement | undefined = $state();
 
-  function syncFromParam() {
+  export function syncFromParam() {
     const p = getParam(paramName);
     if (!p) return;
     const min = p.min;
@@ -58,13 +50,6 @@
       const show = min < 0 && max > 0;
       zeroEl.hidden = !show;
       if (show) zeroEl.style.left = `${Math.min(100, Math.max(0, zeroPct))}%`;
-    }
-    if (optsBtn) {
-      optsBtn.disabled = !!p.driven;
-      const mode = p.animMode === "loop" ? "loop" : "back & forth";
-      optsBtn.title = p.driven
-        ? "Driven by equation"
-        : `Animation options (${mode}, ${p.speed}×)`;
     }
   }
 
@@ -122,32 +107,10 @@
     onParamChange();
   }
 
-  function onPlayClick(ev: MouseEvent) {
-    ev.stopPropagation();
-    const next = toggleParamAnimate(paramName);
-    if (!next) return;
-    updateExprSilent(item.id, { sliderAnimating: next.animating, sliderPhase: next.phase });
-    syncFromParam();
-    onParamChange();
-  }
-
-  function onOptsClick(ev: MouseEvent) {
-    ev.stopPropagation();
-    if (isAnimPopoverOpen(paramName)) {
-      closeAnimPopover();
-      return;
-    }
-    if (optsBtn) {
-      openAnimOptions(optsBtn, item, paramName, onParamChange, syncFromParam);
-    }
-  }
-
   const p = $derived.by(() => {
     void paramTick;
     return getParam(paramName);
   });
-
-  const playChrome = $derived.by(() => readParamPlayChrome(paramName, paramTick));
 </script>
 
 {#if p}
@@ -179,27 +142,6 @@
         title="Maximum"
         onchange={onMaxChange}
       />
-      <button
-        type="button"
-        class="expr-param-play"
-        class:on={playChrome.animating}
-        disabled={playChrome.disabled}
-        title={playChrome.title}
-        onclick={onPlayClick}
-      >
-        {playChrome.icon}
-      </button>
-      <button
-        bind:this={optsBtn}
-        type="button"
-        class="expr-param-anim-opts"
-        disabled={p.driven}
-        aria-label="Animation options"
-        title="Animation options"
-        onclick={onOptsClick}
-      >
-        {@html ANIM_OPTS_ICON}
-      </button>
     </div>
   </div>
 {/if}

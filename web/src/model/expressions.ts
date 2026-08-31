@@ -6,6 +6,7 @@
 import type { ExprItem, LayerRole, ExprKind } from "../types/models.js";
 import { isVectorFieldLatex } from "../math/fitVector.js";
 import type { SymbolRegistry } from "./symbols.js";
+import { state } from "../app/state.js";
 
 export type { ExprItem, AnimMode } from "../types/models.js";
 
@@ -445,6 +446,9 @@ export function updateExpr(id: string, patch: Partial<ExprItem>) {
   const row = items.find((e) => e.id === id);
   if (!row) return null;
   Object.assign(row, patch);
+  if (Object.prototype.hasOwnProperty.call(patch, "latex")) {
+    for (const fn of state.latexChangeInvalidators) fn(id);
+  }
   if (patch.colors != null || patch.color != null || patch.color2 != null) {
     const g = gradientFromPatch(row, patch);
     row.colors = g.colors;

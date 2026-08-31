@@ -33,6 +33,7 @@ import {
   } from "./helpers.ts";
   import { openGradientEditor } from "./popovers.ts";
   import ParamRail from "./ParamRail.svelte";
+  import ParamAnimControls from "./ParamAnimControls.svelte";
   import { convertLatexToMarkup } from "mathlive";
   import {
   collectPendingParamsForExpr,
@@ -42,6 +43,7 @@ import {
   formatPendingParamOverflow,
   pendingParamErrorMessage,
 } from "../../app/pendingParams.js";
+  import { scheduleDoubleRaf } from "./autoCommit.ts";
 
   interface Props {
     item: ExprItem;
@@ -58,6 +60,8 @@ import {
     onMerge: (focus: { id: string; pos: number }) => void;
     onDragStart: (row: HTMLElement, ev: PointerEvent) => void;
     onScheduleCommit: (fromId: string) => void;
+    /** Mobile carousel: no Enter-to-split or Backspace-to-merge. */
+    disableSplitMerge?: boolean;
   }
 
   let {
@@ -75,10 +79,12 @@ import {
     onMerge,
     onDragStart,
     onScheduleCommit,
+    disableSplitMerge = false,
   }: Props = $props();
 
   let rowEl: HTMLDivElement | undefined = $state();
   let mfEl: MathfieldElement | undefined = $state();
+  let paramRail: ParamRail | undefined = $state();
 
   const warn = $derived(getExprWarning(item.id));
   const paramName = $derived.by(() => {
@@ -134,24 +140,33 @@ import {
     });
   }
 
+  function stopParamAnimForRowEdit() {
+    if (!mfEl) return;
+    const classified = classifyKind(readFieldLatex(mfEl));
+    if (classified?.kind !== "parameter" || !classified.paramName) return;
+    if (!suppressAutoCommit()) commitAutoParams();
+    const next = stopParamAnimation(classified.paramName);
+    if (next) {
+      updateExprSilent(item.id, { sliderAnimating: false });
+    }
+  }
+
   function onMfFocus() {
     onSelect(item.id);
-    const classified = classifyKind(readFieldLatex(mfEl!));
-    if (classified?.kind === "parameter" && classified.paramName) {
-      if (!suppressAutoCommit()) commitAutoParams();
-      const next = stopParamAnimation(classified.paramName);
-      if (next) {
-        updateExprSilent(item.id, { sliderAnimating: false });
-      }
-    }
+    // Carousel navigation focuses fields without editing; keep animation running until input.
+    if (disableSplitMerge) return;
+    stopParamAnimForRowEdit();
   }
 
   function onMfBlur() {
     onScheduleCommit(item.id);
   }
 
+  let ignoreFieldInput = false;
+
   function onMfInput() {
-    if (!mfEl) return;
+    if (!mfEl || ignoreFieldInput) return;
+    if (disableSplitMerge) stopParamAnimForRowEdit();
     updateExpr(item.id, { latex: readFieldLatex(mfEl) });
     onExprChange();
   }
@@ -177,6 +192,37 @@ import {
 
   function onMfKeydownCapture(ev: KeyboardEvent) {
     if (!mfEl) return;
+    if (ev.key === "Enter" && !ev.shiftKey) {
+      if (isSuggestionUiActive(mfEl)) return;
+      if (ev.defaultPrevented) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const latex = readFieldLatex(mfEl);
+      if (isParameterRow(latex)) {
+        updateExpr(item.id, { latex });
+        onExprChange();
+        mfEl.blur?.();
+        return;
+      }
+      if (disableSplitMerge) {
+        updateExpr(item.id, { latex });
+        onExprChange();
+        mfEl.blur?.();
+        return;
+      }
+      const { left, right } = latexAroundCaret(mfEl);
+      ignoreFieldInput = true;
+      try {
+        setFieldLatex(mfEl, left);
+        const split = splitExprAt(item.id, left, right);
+        onSplit(split ? { id: split.id, pos: 0 } : null);
+      } finally {
+        scheduleDoubleRaf(() => {
+          ignoreFieldInput = false;
+        });
+      }
+      return;
+    }
     if (ev.key === "Tab" && !ev.shiftKey) {
       if (isSuggestionUiActive(mfEl)) return;
       if (pendingParams.length > 0) {
@@ -200,37 +246,26 @@ import {
       return;
     }
     if (ev.key === "Backspace" && isCursorAtStart(mfEl)) {
+      if (disableSplitMerge) return;
       const idx = listExpressions().findIndex((e) => e.id === item.id);
       if (idx > 0) {
         ev.preventDefault();
         ev.stopPropagation();
-        updateExpr(item.id, { latex: readFieldLatex(mfEl) });
-        const merged = mergeExprIntoPrevious(item.id);
-        if (merged) {
-          onMerge({ id: merged.id, pos: merged.caretOffset });
+        const curLatex = readFieldLatex(mfEl);
+        ignoreFieldInput = true;
+        try {
+          updateExprSilent(item.id, { latex: curLatex });
+          const merged = mergeExprIntoPrevious(item.id);
+          if (merged) {
+            onMerge({ id: merged.id, pos: merged.caretOffset });
+          }
+        } finally {
+          scheduleDoubleRaf(() => {
+            ignoreFieldInput = false;
+          });
         }
       }
     }
-  }
-
-  function onMfKeydownEnter(ev: KeyboardEvent) {
-    if (!mfEl) return;
-    if (ev.key !== "Enter" || ev.shiftKey) return;
-    if (ev.defaultPrevented) return;
-    ev.preventDefault();
-    ev.stopPropagation();
-    const latex = readFieldLatex(mfEl);
-    updateExpr(item.id, { latex });
-    // Parameter declarations: Enter confirms the value instead of splitting a new row.
-    if (isParameterRow(latex)) {
-      onExprChange();
-      mfEl.blur?.();
-      return;
-    }
-    const { left, right } = latexAroundCaret(mfEl);
-    updateExpr(item.id, { latex: left });
-    const split = splitExprAt(item.id, left, right);
-    onSplit(split ? { id: split.id, pos: 0 } : null);
   }
 
   function onVisClick(ev: MouseEvent) {
@@ -247,7 +282,7 @@ import {
 
   function onRowClick(ev: MouseEvent) {
     const t = ev.target;
-    if (t instanceof Element && t.closest(".expr-drag, .expr-color, .expr-vis, .expr-del, .expr-param-block, .expr-pending-params")) {
+    if (t instanceof Element && t.closest(".expr-drag, .expr-color, .expr-vis, .expr-del, .expr-param-block, .expr-param-side, .expr-pending-params")) {
       return;
     }
     if (t === mfEl || (mfEl && mfEl.contains(t as Node))) return;
@@ -329,7 +364,6 @@ import {
         onfocus={onMfFocus}
         onblur={onMfBlur}
         oninput={onMfInput}
-        onkeydown={onMfKeydownEnter}
         onkeydowncapture={onMfKeydownCapture}
       ></math-field>
     </div>
@@ -353,6 +387,7 @@ import {
     {/if}
     {#if paramName}
       <ParamRail
+        bind:this={paramRail}
         {item}
         {paramName}
         {paramTick}
@@ -362,17 +397,27 @@ import {
     {/if}
   </div>
 
-  <button
-    type="button"
-    class="expr-vis secondary"
-    class:is-off={!item.enabled}
-    title={item.enabled ? "Hide" : "Show"}
-    aria-label={item.enabled ? "Hide expression" : "Show expression"}
-    aria-pressed={item.enabled ? "true" : "false"}
-    onclick={onVisClick}
-  >
-    {@html item.enabled ? ICON_EYE : ICON_EYE_OFF}
-  </button>
+  {#if paramName}
+    <ParamAnimControls
+      {item}
+      {paramName}
+      {paramTick}
+      {onParamChange}
+      onAnimSync={() => paramRail?.syncFromParam()}
+    />
+  {:else}
+    <button
+      type="button"
+      class="expr-vis secondary"
+      class:is-off={!item.enabled}
+      title={item.enabled ? "Hide" : "Show"}
+      aria-label={item.enabled ? "Hide expression" : "Show expression"}
+      aria-pressed={item.enabled ? "true" : "false"}
+      onclick={onVisClick}
+    >
+      {@html item.enabled ? ICON_EYE : ICON_EYE_OFF}
+    </button>
+  {/if}
 
   <button type="button" class="expr-del secondary" title="Delete" onclick={onDelClick}>×</button>
 </div>

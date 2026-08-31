@@ -6,7 +6,7 @@ import { mountExprList } from "./ui/expr-sidebar/mount.js";
 import { setExpressionsOnChange } from "./model/expressions.js";
 import { anyParamAnimating, ensureParamAnimationFromExprs } from "./model/params.js";
 import { syncExprCompileState, getExpressionErrorReport } from "./app/hud.js";
-import { initDom, els, initPanelResize, initPanelToggle } from "./app/dom.js";
+import { initDom, els, initPanelResize, initPanelToggle, initPanelCollapse, initPanelDismiss, refreshPanelToggleChrome, runPanelTransition } from "./app/dom.js";
 import { initScene, bindClipUniforms, resetCameraView } from "./app/scene.js";
 import { initCompile, applyPreset } from "./app/compile.js";
 import {
@@ -15,12 +15,17 @@ import {
   initKeyframeHandler,
   wirePipelineDom,
   handleColorChange,
+  invalidateLayerBakeFingerprint,
 } from "./app/pipeline.js";
 import { clipUniforms, initWebglFallback, ensureSceneGpuUpload, warmClipGpuInit } from "./app/webglFallback.js";
 import { initPresentation, resize, bindHudText } from "./app/presentation.js";
 import { hudText, copyMetricsToClipboard } from "./app/hud.js";
 import { initProdSettingsUi } from "./app/quality.js";
+import { applyBootPerfTier } from "./app/perfAdapt.js";
+import { detectDeviceTier } from "./app/deviceTier.js";
+import { cancelProgressiveFit } from "./app/progressiveFit.js";
 import { startRenderLoop } from "./app/loop.js";
+import { setPanelCollapsed } from "./app/panelLayout.js";
 import { state } from "./app/state.js";
 import { initWebMCP } from "./app/webmcp.js";
 import { initWebmcpSetupDialog } from "./app/webmcpSetupDialog.js";
@@ -47,6 +52,7 @@ initTearDebug();
 initStartupProfile();
 initTheme();
 initDom();
+state.deviceTier = detectDeviceTier();
 initProdSettingsUi();
 initWebglFallback();
 bindClipUniforms(clipUniforms);
@@ -55,11 +61,34 @@ initPresentation();
 bindHudText(hudText);
 initKeyframeHandler();
 
+state.latexChangeInvalidators.push(invalidateLayerBakeFingerprint);
+
+function collapseToViewport() {
+  setPanelCollapsed(true);
+  refreshPanelToggleChrome();
+  runPanelTransition(resize);
+  resize();
+  state.exprListApi?.render();
+}
+
+function onPanelDismissSettled(collapsed: boolean) {
+  refreshPanelToggleChrome();
+  resize();
+  if (collapsed) state.exprListApi?.render();
+}
+
 state.exprListApi = mountExprList({
   root: els.exprList,
+  footerRoot: els.exprFooter,
+  onCollapsePanel: collapseToViewport,
   onExprChange: () => {
     syncExprCompileState();
-    scheduleUploadFit();
+    if (anyParamAnimating()) {
+      cancelProgressiveFit();
+      scheduleUploadFit(0, { fromAnim: false });
+    } else {
+      scheduleUploadFit();
+    }
     scheduleAutosave();
   },
   onParamChange: () => {
@@ -73,7 +102,8 @@ state.exprListApi = mountExprList({
     scheduleAutosave();
   },
   onStructuralChange: () => {
-    scheduleUploadFit(0);
+    cancelProgressiveFit();
+    scheduleUploadFit(0, { fromAnim: false });
     scheduleAutosave();
   },
 });
@@ -83,6 +113,11 @@ async function bootstrap() {
   wirePipelineDom();
   initPanelResize(resize);
   initPanelToggle(resize);
+  initPanelCollapse(collapseToViewport);
+  initPanelDismiss(onPanelDismissSettled, resize);
+  els.clearExprs?.addEventListener("click", () => {
+    state.exprListApi?.clearAll?.();
+  });
   initAutosave();
   initProjectActions();
 
@@ -139,6 +174,8 @@ async function bootstrap() {
     initCompile();
     startupEnd("boot.init-compile");
   }
+  applyBootPerfTier(restored);
+  refreshPanelToggleChrome();
   ensureParamAnimationFromExprs();
   state.exprListApi?.render();
   markSplashSidebarReady();

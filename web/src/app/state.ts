@@ -38,6 +38,12 @@ export const state = {
 
   pendingFitOpts: {} as { fromAnim?: boolean },
 
+  /** Guards against anim vs structural uploadFit re-entry races. */
+  uploadFitBusy: false,
+
+  /** Latex/content invalidation hooks (pipeline registers bake fingerprint clears). */
+  latexChangeInvalidators: [] as ((id: string) => void)[],
+
   loopFps: 0,
   loopFpsFrames: 0,
   loopFpsLast: performance.now(),
@@ -67,6 +73,13 @@ export const state = {
   surfaceQuality: 50,
   vectorQuality: 50,
   precisionQuality: 50,
+
+  /** Boot-detected device tier for perf defaults. */
+  deviceTier: "desktop" as "mobile" | "tablet" | "desktop",
+  webGpuFailed: false,
+  /** Timestamp of last manual quality slider move (blocks auto step-down). */
+  qualityUserOverrideAt: 0,
+  perfAdaptStepDownCount: 0,
 };
 
 export const FIT_DEBOUNCE_MS = 320;

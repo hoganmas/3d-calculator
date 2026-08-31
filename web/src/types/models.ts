@@ -200,6 +200,7 @@ export interface ExprListApi {
   render: (focus?: { id: string; pos?: number } | null) => void;
   syncAllParamSliders?: () => void;
   syncParamChrome?: () => boolean;
+  clearAll?: () => void;
 }
 
 export type ClassifiedShade = "iso" | "volume" | "none";

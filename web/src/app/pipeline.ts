@@ -53,6 +53,7 @@ import { fitVectorField } from "../math/fitVector.js";
 import { listExpressions, inferLayerRole } from "../model/expressions.js";
 import { els, viewportSize } from "./dom.js";
 import { state, FIT_DEBOUNCE_MS } from "./state.js";
+import { layerNeedsRefit } from "./layerFitPolicy.js";
 import type {
   ChebFitTiming,
   CloudLayer,
@@ -106,6 +107,11 @@ interface CachedLayer {
 
 /** Last successful dens/keyframe fingerprint per layer id (decoupled invalidation). */
 const layerBakeFingerprints = new Map<string, string>();
+
+/** Drop bake fingerprint so the next fit sees content dirtiness (latex/role edits). */
+export function invalidateLayerBakeFingerprint(layerId: string) {
+  layerBakeFingerprints.delete(layerId);
+}
 
 function layerBakeFingerprint(
   layer: {
@@ -182,6 +188,8 @@ export function uploadFit(
     progressiveFinal?: boolean;
   } = {},
 ) {
+  if (state.uploadFitBusy) return;
+  state.uploadFitBusy = true;
   const fromAnim = !!opts.fromAnim;
   const progressive = !!opts.progressive;
   startupBegin("uploadFit");
@@ -315,9 +323,7 @@ export function uploadFit(
       // on layers unrelated to the animating param(s) reuse stale dens forever
       // (anim ticks also cancel the scheduled structural uploadFit).
       const contentDirty = layerBakeFingerprints.get(L.item.id) !== fp;
-      const depends = fromAnim
-        ? contentDirty || !dirty || paramDepends
-        : contentDirty;
+      const depends = layerNeedsRefit(fromAnim, contentDirty, paramDepends);
       const prev = sceneMetaOk && !depends ? prevById.get(L.item.id) : null;
       const prevHasKf =
         prev && Array.isArray(prev.keyframes) && prev.keyframes.length > 0;
@@ -394,6 +400,7 @@ export function uploadFit(
         isClipBakeGpuReady() &&
         fromAnim &&
         depends &&
+        !contentDirty &&
         dirty &&
         L.compiled
           ? keyframeAnimParams(L.compiled.freeParams, dirty)
@@ -510,6 +517,7 @@ export function uploadFit(
           isClipBakeGpuReady() &&
           fromAnim &&
           depends &&
+          !contentDirty &&
           dirty &&
           L.vectorCompiled
             ? keyframeAnimParams(L.vectorCompiled.freeParams, dirty)
@@ -820,6 +828,8 @@ export function uploadFit(
     }
     tryMarkSplashBakeReady(false);
     startupEnd("uploadFit", { error: message });
+  } finally {
+    state.uploadFitBusy = false;
   }
 }
 

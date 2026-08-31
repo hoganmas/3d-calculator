@@ -198,7 +198,10 @@ export function syncParamsFromDefinitions(
       max: Number.isFinite(d.max) ? (d.max as number) : cur.max,
       speed:
         Number.isFinite(d.speed) && (d.speed as number) > 0 ? (d.speed as number) : cur.speed,
-      animating: typeof d.animating === "boolean" ? d.animating : cur.animating,
+      // Prefer live animation state so compile cannot clobber an in-flight slider.
+      animating:
+        cur.animating ||
+        (typeof d.animating === "boolean" ? d.animating : false),
       phase: Number.isFinite(d.phase) ? (d.phase as number) : cur.phase,
       animMode: d.animMode != null ? normalizeAnimMode(d.animMode) : cur.animMode,
     });

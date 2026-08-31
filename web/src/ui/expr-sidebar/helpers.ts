@@ -1,6 +1,7 @@
 import { classifyExpr } from "../../math/fit.js";
 import { getParam } from "../../model/params.js";
 import type { ExprItem } from "../../types/models.js";
+import { isCoarsePointer } from "../../app/deviceTier.js";
 
 export const ANIM_OPTS_ICON = `<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 3.2a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Zm0 3.7a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Zm0 3.7a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Z"/></svg>`;
 
@@ -55,27 +56,21 @@ export function getLastOffset(mf: MathfieldElement): number {
 }
 
 export function isCursorAtStart(mf: MathfieldElement): boolean {
-  const sel = mf.selection;
-  if (sel?.ranges?.length) {
-    const [a, b] = sel.ranges[0];
-    return a === 0 && b === 0;
-  }
   return getCaretPos(mf) === 0;
 }
 
 export function setCaretPos(mf: MathfieldElement, pos: number) {
   const end = getLastOffset(mf);
   const p = Math.max(0, Math.min(pos | 0, end));
-  if (typeof mf.position === "number") {
-    mf.position = p;
-    return;
-  }
   if (mf.selection) {
     try {
       mf.selection = { ranges: [[p, p]] };
     } catch {
       /* ignore */
     }
+  }
+  if (typeof mf.position === "number") {
+    mf.position = p;
   }
 }
 
@@ -139,6 +134,17 @@ export function configureMathField(mf: MathfieldElement, label = "Math expressio
   mf.addEventListener("focusin", syncKeyboardSinkLabel);
   mf.setAttribute("math-virtual-keyboard-policy", "manual");
   mf.setAttribute("virtual-keyboard-mode", "off");
+  if (isCoarsePointer()) {
+    // Rely on the OS keyboard — MathLive virtual keyboard stays off.
+    mf.removeAttribute("readonly");
+    mf.addEventListener("focusin", () => {
+      try {
+        mf.focus();
+      } catch {
+        /* ignore */
+      }
+    });
+  }
   mf.setAttribute("smart-fence", "");
   mf.setAttribute("smart-superscript", "");
   try {

@@ -7,7 +7,10 @@ import {
   PANEL_LAYOUT_MQ,
   readPanelCollapsedPref,
   readPanelInset,
+  readPanelProgress,
   setPanelCollapsed,
+  setPanelDragging,
+  setPanelProgress,
 } from "./panelLayout.js";
 
 function el<T extends HTMLElement>(id: string): T {
@@ -17,6 +20,7 @@ function el<T extends HTMLElement>(id: string): T {
 export interface DomElements {
   preset: HTMLSelectElement;
   exprList: HTMLElement;
+  exprFooter: HTMLElement | null;
   deg: HTMLInputElement;
   scale: HTMLInputElement;
   steps: HTMLInputElement;
@@ -31,12 +35,16 @@ export interface DomElements {
   isoMarchScaleLabel: HTMLElement | null;
   reset: HTMLButtonElement;
   togglePanel: HTMLButtonElement | null;
+  collapsePanel: HTMLButtonElement | null;
+  clearExprs: HTMLButtonElement | null;
+  panelDismissHandle: HTMLElement | null;
   err: HTMLElement;
   viewport: HTMLElement;
   hud: HTMLElement;
   metricsDump: HTMLElement | null;
   copyMetrics: HTMLButtonElement | null;
   openSettings: HTMLButtonElement | null;
+  openSettingsViewport: HTMLButtonElement | null;
   closeSettings: HTMLButtonElement | null;
   settingsDialog: HTMLDialogElement | null;
   themePref: HTMLSelectElement | null;
@@ -59,6 +67,7 @@ export interface DomElements {
 export const els: DomElements = {
   preset: el("preset"),
   exprList: el("exprList"),
+  exprFooter: document.getElementById("exprFooter") as HTMLElement | null,
   deg: el("deg"),
   scale: el("scale"),
   steps: el("steps"),
@@ -73,12 +82,16 @@ export const els: DomElements = {
   isoMarchScaleLabel: document.getElementById("isoMarchScaleLabel"),
   reset: el("reset"),
   togglePanel: document.getElementById("togglePanel") as HTMLButtonElement | null,
+  collapsePanel: document.getElementById("collapsePanel") as HTMLButtonElement | null,
+  clearExprs: document.getElementById("clearExprs") as HTMLButtonElement | null,
+  panelDismissHandle: document.getElementById("panelDismissHandle") as HTMLElement | null,
   err: el("err"),
   viewport: el("viewport"),
   hud: el("hud"),
   metricsDump: document.getElementById("metricsDump"),
   copyMetrics: document.getElementById("copyMetrics") as HTMLButtonElement | null,
   openSettings: document.getElementById("openSettings") as HTMLButtonElement | null,
+  openSettingsViewport: document.getElementById("openSettingsViewport") as HTMLButtonElement | null,
   closeSettings: document.getElementById("closeSettings") as HTMLButtonElement | null,
   settingsDialog: document.getElementById("settingsDialog") as HTMLDialogElement | null,
   themePref: document.getElementById("themePref") as HTMLSelectElement | null,
@@ -120,10 +133,29 @@ export function initDom() {
   }
 
   els.openSettings?.addEventListener("click", () => openSettingsDialog());
+  els.openSettingsViewport?.addEventListener("click", () => openSettingsDialog());
   els.closeSettings?.addEventListener("click", () => closeSettingsDialog());
   els.settingsDialog?.addEventListener("click", (ev) => {
     if (ev.target === els.settingsDialog) closeSettingsDialog();
   });
+
+  initViewportToolbarTouch();
+}
+
+/** On touch, release focus after toolbar taps so tooltips / focus rings do not stick. */
+function initViewportToolbarTouch() {
+  const toolbar = document.querySelector(".viewport-toolbar");
+  if (!toolbar) return;
+  const mq = window.matchMedia("(pointer: coarse)");
+
+  const releaseFocus = (ev: Event) => {
+    if (!mq.matches) return;
+    const btn = (ev.target as Element | null)?.closest("button");
+    if (!(btn instanceof HTMLButtonElement) || !toolbar.contains(btn)) return;
+    queueMicrotask(() => btn.blur());
+  };
+
+  toolbar.addEventListener("click", releaseFocus);
 }
 
 export function openSettingsDialog() {
@@ -303,13 +335,20 @@ export function initPanelResize(onResize: () => void) {
 
 function syncPanelToggleChrome(btn: HTMLButtonElement) {
   const collapsed = isPanelCollapsed();
-  const label = collapsed ? "Show sidebar" : "Hide sidebar";
+  const horizontal = isHorizontalPanelLayout();
+  const label = collapsed
+    ? horizontal
+      ? "Show expressions"
+      : "Show sidebar"
+    : horizontal
+      ? "Hide expressions"
+      : "Hide sidebar";
   btn.setAttribute("aria-label", label);
   btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
   btn.dataset.tooltip = label;
 }
 
-function runPanelTransition(onResize: () => void) {
+export function runPanelTransition(onResize: () => void) {
   const duration = panelTransitionMs();
   if (duration <= 0) {
     onResize();
@@ -322,6 +361,120 @@ function runPanelTransition(onResize: () => void) {
     else onResize();
   };
   requestAnimationFrame(tick);
+}
+
+/** Toggle sidebar visibility (wide left dock or narrow top strip). */
+export function initPanelCollapse(onCollapse: () => void) {
+  els.collapsePanel?.addEventListener("click", onCollapse);
+}
+
+/** Drag the mobile expression-list footer handle to dismiss or restore. */
+export function initPanelDismiss(onSettled: (collapsed: boolean) => void, onResize: () => void) {
+  const status = document.getElementById("panelStatus");
+  const panel = document.getElementById("panel");
+  if (!status || !panel) return;
+
+  const DISMISS_THRESHOLD = 0.28;
+  const VELOCITY_DISMISS = -0.55;
+  const VELOCITY_OPEN = 0.55;
+
+  let dragging = false;
+  let startY = 0;
+  let startProgress = 0;
+  let lastY = 0;
+  let lastT = 0;
+  let velocityY = 0;
+  let pointerId: number | null = null;
+
+  function panelTravelPx() {
+    return Math.max(panel!.getBoundingClientRect().height, 1);
+  }
+
+  function snapTo(collapsed: boolean) {
+    setPanelDragging(false);
+    status!.classList.remove("is-dragging");
+    dragging = false;
+    pointerId = null;
+    setPanelCollapsed(collapsed);
+    refreshPanelToggleChrome();
+    runPanelTransition(onResize);
+    onSettled(collapsed);
+  }
+
+  function onPointerDown(ev: PointerEvent) {
+    if (!isHorizontalPanelLayout() || isPanelCollapsed()) return;
+    if (ev.button !== 0) return;
+    dragging = true;
+    pointerId = ev.pointerId;
+    startY = ev.clientY;
+    lastY = startY;
+    lastT = ev.timeStamp;
+    velocityY = 0;
+    startProgress = readPanelProgress();
+    setPanelDragging(true);
+    status!.classList.add("is-dragging");
+    status!.setPointerCapture(ev.pointerId);
+    ev.preventDefault();
+  }
+
+  function onPointerMove(ev: PointerEvent) {
+    if (!dragging || ev.pointerId !== pointerId) return;
+    const dt = ev.timeStamp - lastT;
+    if (dt > 0) velocityY = (ev.clientY - lastY) / dt;
+    lastY = ev.clientY;
+    lastT = ev.timeStamp;
+    const dy = ev.clientY - startY;
+    const next = Math.min(1, Math.max(0, startProgress + -dy / panelTravelPx()));
+    setPanelProgress(next);
+    onResize();
+    ev.preventDefault();
+  }
+
+  function onPointerUp(ev: PointerEvent) {
+    if (!dragging || ev.pointerId !== pointerId) return;
+    try {
+      status!.releasePointerCapture(ev.pointerId);
+    } catch {
+      /* ignore */
+    }
+
+    const progress = readPanelProgress();
+    let collapse = progress > DISMISS_THRESHOLD;
+    if (velocityY < VELOCITY_DISMISS) collapse = true;
+    else if (velocityY > VELOCITY_OPEN && progress < 0.85) collapse = false;
+    snapTo(collapse);
+  }
+
+  function onPointerCancel(ev: PointerEvent) {
+    if (!dragging || (pointerId != null && ev.pointerId !== pointerId)) return;
+    try {
+      status!.releasePointerCapture(ev.pointerId);
+    } catch {
+      /* ignore */
+    }
+    snapTo(false);
+  }
+
+  status.addEventListener("pointerdown", onPointerDown);
+  status.addEventListener("pointermove", onPointerMove);
+  status.addEventListener("pointerup", onPointerUp);
+  status.addEventListener("pointercancel", onPointerCancel);
+
+  els.panelDismissHandle?.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" || ev.key === " ") {
+      ev.preventDefault();
+      setPanelCollapsed(true);
+      refreshPanelToggleChrome();
+      runPanelTransition(onResize);
+      onSettled(true);
+    }
+  });
+}
+
+/** Toggle sidebar visibility (wide left dock or narrow top strip). */
+export function refreshPanelToggleChrome() {
+  const btn = els.togglePanel;
+  if (btn) syncPanelToggleChrome(btn);
 }
 
 /** Toggle sidebar visibility (wide left dock or narrow top strip). */

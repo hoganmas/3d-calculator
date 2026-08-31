@@ -19,6 +19,17 @@ export function readPanelProgress() {
   return isPanelCollapsed() ? 1 : 0;
 }
 
+export function setPanelDragging(dragging: boolean) {
+  const root = document.documentElement;
+  if (dragging) root.dataset.panelDragging = "true";
+  else delete root.dataset.panelDragging;
+}
+
+export function setPanelProgress(progress: number) {
+  const p = Math.min(1, Math.max(0, progress));
+  document.documentElement.style.setProperty("--panel-progress", String(p));
+}
+
 export function readPanelCoverWidth() {
   if (isHorizontalPanelLayout()) return 0;
   return readPanelWidth() * (1 - readPanelProgress());
@@ -26,7 +37,8 @@ export function readPanelCoverWidth() {
 
 export function readPanelCoverHeight() {
   if (!isHorizontalPanelLayout()) return 0;
-  return readPanelHeight() * (1 - readPanelProgress());
+  // Full-screen mobile overlay — scene keeps the full viewport.
+  return 0;
 }
 
 export function panelTransitionMs() {
@@ -40,11 +52,19 @@ export function panelTransitionMs() {
 }
 
 export function setPanelCollapsed(collapsed: boolean) {
-  document.documentElement.dataset.panelCollapsed = collapsed ? "true" : "false";
+  const root = document.documentElement;
+  const wasCollapsed = isPanelCollapsed();
+  root.dataset.panelCollapsed = collapsed ? "true" : "false";
+  setPanelProgress(collapsed ? 1 : 0);
   try {
     localStorage.setItem(PANEL_COLLAPSED_KEY, collapsed ? "1" : "0");
   } catch {
     /* ignore */
+  }
+  if (wasCollapsed !== collapsed) {
+    window.dispatchEvent(
+      new CustomEvent("laplaci:panel-collapsed", { detail: { collapsed } }),
+    );
   }
 }
 

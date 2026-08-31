@@ -38,6 +38,7 @@ import { hudText, refreshMetricsDump } from "./hud.js";
 import { isSplashContentReady, markSplashFrameReady } from "./splash.js";
 import { startupMark } from "./startupProfile.js";
 import { syncKeyframeLoadBar } from "./keyframeLoadBar.js";
+import { tickPerfAdapt } from "./perfAdapt.js";
 
 let splashFrameReported = false;
 
@@ -87,8 +88,8 @@ function frame(rafNow: number) {
         state.lastAnimFitAt = t0;
         // Don't cancel a pending structural (latex) refit — anim would starve it.
         const pendingStructural =
-          !!state.fitTimer && !state.pendingFitOpts?.fromAnim;
-        if (pendingStructural) {
+          !!state.fitTimer && state.pendingFitOpts?.fromAnim !== true;
+        if (state.uploadFitBusy || pendingStructural) {
           // Keep the timer; GPU keyframe blends above still run this frame.
         } else {
           if (state.fitTimer) {
@@ -106,6 +107,7 @@ function frame(rafNow: number) {
     state.loopFps = (state.loopFpsFrames * 1000) / winMs;
     state.loopFpsFrames = 0;
     state.loopFpsLast = t0;
+    tickPerfAdapt(t0);
     if (els.hud) els.hud.textContent = hudText();
     refreshMetricsDump();
   }
