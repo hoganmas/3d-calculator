@@ -7,7 +7,10 @@ import {
   PANEL_LAYOUT_MQ,
   readPanelCollapsedPref,
   readPanelInset,
+  readPanelProgress,
   setPanelCollapsed,
+  setPanelDragging,
+  setPanelProgress,
 } from "./panelLayout.js";
 
 function el<T extends HTMLElement>(id: string): T {
@@ -345,7 +348,7 @@ function syncPanelToggleChrome(btn: HTMLButtonElement) {
   btn.dataset.tooltip = label;
 }
 
-function runPanelTransition(onResize: () => void) {
+export function runPanelTransition(onResize: () => void) {
   const duration = panelTransitionMs();
   if (duration <= 0) {
     onResize();
@@ -365,41 +368,105 @@ export function initPanelCollapse(onCollapse: () => void) {
   els.collapsePanel?.addEventListener("click", onCollapse);
 }
 
-/** Swipe up on the mobile expression-list footer to collapse back to the scene. */
-export function initPanelDismiss(onCollapse: () => void) {
+/** Drag the mobile expression-list footer handle to dismiss or restore. */
+export function initPanelDismiss(onSettled: (collapsed: boolean) => void, onResize: () => void) {
   const status = document.getElementById("panelStatus");
-  if (!status) return;
+  const panel = document.getElementById("panel");
+  if (!status || !panel) return;
 
+  const DISMISS_THRESHOLD = 0.28;
+  const VELOCITY_DISMISS = -0.55;
+  const VELOCITY_OPEN = 0.55;
+
+  let dragging = false;
   let startY = 0;
-  let tracking = false;
+  let startProgress = 0;
+  let lastY = 0;
+  let lastT = 0;
+  let velocityY = 0;
+  let pointerId: number | null = null;
+
+  function panelTravelPx() {
+    return Math.max(panel!.getBoundingClientRect().height, 1);
+  }
+
+  function snapTo(collapsed: boolean) {
+    setPanelDragging(false);
+    status!.classList.remove("is-dragging");
+    dragging = false;
+    pointerId = null;
+    setPanelCollapsed(collapsed);
+    refreshPanelToggleChrome();
+    runPanelTransition(onResize);
+    onSettled(collapsed);
+  }
 
   function onPointerDown(ev: PointerEvent) {
-    if (!isHorizontalPanelLayout()) return;
+    if (!isHorizontalPanelLayout() || isPanelCollapsed()) return;
     if (ev.button !== 0) return;
-    tracking = true;
+    dragging = true;
+    pointerId = ev.pointerId;
     startY = ev.clientY;
-    status.setPointerCapture(ev.pointerId);
+    lastY = startY;
+    lastT = ev.timeStamp;
+    velocityY = 0;
+    startProgress = readPanelProgress();
+    setPanelDragging(true);
+    status!.classList.add("is-dragging");
+    status!.setPointerCapture(ev.pointerId);
+    ev.preventDefault();
+  }
+
+  function onPointerMove(ev: PointerEvent) {
+    if (!dragging || ev.pointerId !== pointerId) return;
+    const dt = ev.timeStamp - lastT;
+    if (dt > 0) velocityY = (ev.clientY - lastY) / dt;
+    lastY = ev.clientY;
+    lastT = ev.timeStamp;
+    const dy = ev.clientY - startY;
+    const next = Math.min(1, Math.max(0, startProgress + -dy / panelTravelPx()));
+    setPanelProgress(next);
+    onResize();
+    ev.preventDefault();
   }
 
   function onPointerUp(ev: PointerEvent) {
-    if (!tracking) return;
-    tracking = false;
-    const dy = ev.clientY - startY;
-    if (dy < -44) onCollapse();
+    if (!dragging || ev.pointerId !== pointerId) return;
+    try {
+      status!.releasePointerCapture(ev.pointerId);
+    } catch {
+      /* ignore */
+    }
+
+    const progress = readPanelProgress();
+    let collapse = progress > DISMISS_THRESHOLD;
+    if (velocityY < VELOCITY_DISMISS) collapse = true;
+    else if (velocityY > VELOCITY_OPEN && progress < 0.85) collapse = false;
+    snapTo(collapse);
   }
 
-  function onPointerCancel() {
-    tracking = false;
+  function onPointerCancel(ev: PointerEvent) {
+    if (!dragging || (pointerId != null && ev.pointerId !== pointerId)) return;
+    try {
+      status!.releasePointerCapture(ev.pointerId);
+    } catch {
+      /* ignore */
+    }
+    snapTo(false);
   }
 
   status.addEventListener("pointerdown", onPointerDown);
+  status.addEventListener("pointermove", onPointerMove);
   status.addEventListener("pointerup", onPointerUp);
   status.addEventListener("pointercancel", onPointerCancel);
 
   els.panelDismissHandle?.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter" || ev.key === " ") {
       ev.preventDefault();
-      onCollapse();
+      setPanelCollapsed(true);
+      refreshPanelToggleChrome();
+      runPanelTransition(onResize);
+      onSettled(true);
     }
   });
 }

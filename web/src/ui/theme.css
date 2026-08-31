@@ -46,6 +46,10 @@ html[data-panel-init] {
   transition: none;
 }
 
+html[data-panel-dragging] {
+  transition: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     transition: none;

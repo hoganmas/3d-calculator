@@ -33,6 +33,7 @@ import {
   } from "./helpers.ts";
   import { openGradientEditor } from "./popovers.ts";
   import ParamRail from "./ParamRail.svelte";
+  import ParamAnimControls from "./ParamAnimControls.svelte";
   import { convertLatexToMarkup } from "mathlive";
   import {
   collectPendingParamsForExpr,
@@ -59,6 +60,8 @@ import {
     onMerge: (focus: { id: string; pos: number }) => void;
     onDragStart: (row: HTMLElement, ev: PointerEvent) => void;
     onScheduleCommit: (fromId: string) => void;
+    /** Mobile carousel: no Enter-to-split or Backspace-to-merge. */
+    disableSplitMerge?: boolean;
   }
 
   let {
@@ -76,10 +79,12 @@ import {
     onMerge,
     onDragStart,
     onScheduleCommit,
+    disableSplitMerge = false,
   }: Props = $props();
 
   let rowEl: HTMLDivElement | undefined = $state();
   let mfEl: MathfieldElement | undefined = $state();
+  let paramRail: ParamRail | undefined = $state();
 
   const warn = $derived(getExprWarning(item.id));
   const paramName = $derived.by(() => {
@@ -192,6 +197,12 @@ import {
         mfEl.blur?.();
         return;
       }
+      if (disableSplitMerge) {
+        updateExpr(item.id, { latex });
+        onExprChange();
+        mfEl.blur?.();
+        return;
+      }
       const { left, right } = latexAroundCaret(mfEl);
       ignoreFieldInput = true;
       try {
@@ -228,6 +239,7 @@ import {
       return;
     }
     if (ev.key === "Backspace" && isCursorAtStart(mfEl)) {
+      if (disableSplitMerge) return;
       const idx = listExpressions().findIndex((e) => e.id === item.id);
       if (idx > 0) {
         ev.preventDefault();
@@ -263,7 +275,7 @@ import {
 
   function onRowClick(ev: MouseEvent) {
     const t = ev.target;
-    if (t instanceof Element && t.closest(".expr-drag, .expr-color, .expr-vis, .expr-del, .expr-param-block, .expr-pending-params")) {
+    if (t instanceof Element && t.closest(".expr-drag, .expr-color, .expr-vis, .expr-del, .expr-param-block, .expr-param-side, .expr-pending-params")) {
       return;
     }
     if (t === mfEl || (mfEl && mfEl.contains(t as Node))) return;
@@ -368,6 +380,7 @@ import {
     {/if}
     {#if paramName}
       <ParamRail
+        bind:this={paramRail}
         {item}
         {paramName}
         {paramTick}
@@ -377,17 +390,27 @@ import {
     {/if}
   </div>
 
-  <button
-    type="button"
-    class="expr-vis secondary"
-    class:is-off={!item.enabled}
-    title={item.enabled ? "Hide" : "Show"}
-    aria-label={item.enabled ? "Hide expression" : "Show expression"}
-    aria-pressed={item.enabled ? "true" : "false"}
-    onclick={onVisClick}
-  >
-    {@html item.enabled ? ICON_EYE : ICON_EYE_OFF}
-  </button>
+  {#if paramName}
+    <ParamAnimControls
+      {item}
+      {paramName}
+      {paramTick}
+      {onParamChange}
+      onAnimSync={() => paramRail?.syncFromParam()}
+    />
+  {:else}
+    <button
+      type="button"
+      class="expr-vis secondary"
+      class:is-off={!item.enabled}
+      title={item.enabled ? "Hide" : "Show"}
+      aria-label={item.enabled ? "Hide expression" : "Show expression"}
+      aria-pressed={item.enabled ? "true" : "false"}
+      onclick={onVisClick}
+    >
+      {@html item.enabled ? ICON_EYE : ICON_EYE_OFF}
+    </button>
+  {/if}
 
   <button type="button" class="expr-del secondary" title="Delete" onclick={onDelClick}>×</button>
 </div>

@@ -77,6 +77,14 @@
     viewportEl.style.setProperty("--mobile-expr-slide-w", `${w}px`);
   }
 
+  function syncViewportHeight() {
+    if (!viewportEl) return;
+    const slide = viewportEl.querySelector('.mobile-expr-slide:not([aria-hidden="true"])');
+    if (!(slide instanceof HTMLElement)) return;
+    viewportEl.style.height = `${Math.ceil(slide.getBoundingClientRect().height)}px`;
+    syncFooterHeight();
+  }
+
   function syncFooterHeight() {
     if (!footerEl) return;
     const h = Math.ceil(footerEl.getBoundingClientRect().height);
@@ -89,8 +97,29 @@
     syncIndexFromSelection();
     queueMicrotask(() => {
       syncViewportWidth();
-      syncFooterHeight();
+      syncViewportHeight();
     });
+  }
+
+  export function syncAllParamSliders() {
+    items = listExpressions();
+    localParamTick++;
+  }
+
+  export function syncParamChrome(): boolean {
+    const latest = listExpressions();
+    if (items.length !== latest.length) return false;
+    for (let i = 0; i < latest.length; i++) {
+      if (items[i].id !== latest[i].id) return false;
+    }
+    items = latest;
+    syncIndexFromSelection();
+    localParamTick++;
+    return true;
+  }
+
+  function slideMounted(i: number) {
+    return Math.abs(i - index) <= 1;
   }
 
   function currentRow() {
@@ -135,7 +164,7 @@
     }
     onSelectionSync?.();
     localParamTick++;
-    queueMicrotask(syncFooterHeight);
+    queueMicrotask(syncViewportHeight);
   }
 
   function goTo(next: number) {
@@ -147,13 +176,14 @@
     selectExpr(items[next]!.id);
     onSelectionSync?.();
     localParamTick++;
+    queueMicrotask(syncViewportHeight);
   }
 
   /** Block swipe only on explicit controls — not the math field (gesture lock handles that). */
   function swipeTargetBlocked(target: EventTarget | null) {
     if (!(target instanceof Element)) return false;
     return !!target.closest(
-      "button, input, textarea, select, .expr-param-block, .expr-pending-params, .mobile-expr-dot, .liquid-range, .liquid-thumb",
+      "button, input, textarea, select, .expr-param-block, .expr-param-side, .expr-pending-params, .mobile-expr-dot, .liquid-range, .liquid-thumb",
     );
   }
 
@@ -237,6 +267,7 @@
       selectExpr(items[next]!.id);
       onSelectionSync?.();
       localParamTick++;
+      queueMicrotask(syncViewportHeight);
     }
   }
 
@@ -244,7 +275,7 @@
     mobileUi = isMobileExprUi();
     queueMicrotask(() => {
       syncViewportWidth();
-      syncFooterHeight();
+      syncViewportHeight();
     });
   }
 
@@ -273,6 +304,24 @@
     syncViewportWidth();
     const ro = new ResizeObserver(() => syncViewportWidth());
     ro.observe(viewportEl);
+    return () => ro.disconnect();
+  });
+
+  $effect(() => {
+    void index;
+    void paramTick;
+    void items.length;
+    if (!viewportEl || typeof ResizeObserver === "undefined") return;
+    const card = viewportEl.querySelector(
+      '.mobile-expr-slide:not([aria-hidden="true"]) .mobile-expr-panel-card',
+    );
+    if (!(card instanceof HTMLElement)) {
+      queueMicrotask(syncViewportHeight);
+      return;
+    }
+    syncViewportHeight();
+    const ro = new ResizeObserver(() => syncViewportHeight());
+    ro.observe(card);
     return () => ro.disconnect();
   });
 </script>
@@ -327,40 +376,43 @@
               </button>
 
               <div class="mobile-expr-row-wrap">
-                <ExprRow
-                  bind:this={rowRefs[item.id]}
-                  {item}
-                  selected={i === index}
-                  {paramTick}
-                  suppressAutoCommit={isSuppressingAutoCommit}
-                  onExprChange={() => {
-                    localParamTick++;
-                    onExprChange();
-                    queueMicrotask(syncFooterHeight);
-                  }}
-                  onStructuralChange={() => refreshAfterStructural()}
-                  {onColorChange}
-                  onParamChange={() => {
-                    localParamTick++;
-                    (onParamChange ?? onExprChange)();
-                    queueMicrotask(syncFooterHeight);
-                  }}
-                  onSelect={(id) => {
-                    selectExpr(id);
-                    const idx = items.findIndex((e) => e.id === id);
-                    if (idx >= 0) goTo(idx);
-                  }}
-                  onFocusNav={(targetId, caret) => {
-                    const idx = items.findIndex((e) => e.id === targetId);
-                    if (idx >= 0) goTo(idx);
-                    queueMicrotask(() => rowRefs[targetId]?.focusAt(caret));
-                    onSelectionSync?.();
-                  }}
-                  onSplit={(focus) => refreshAfterStructural(focus)}
-                  onMerge={(focus) => refreshAfterStructural(focus)}
-                  onDragStart={() => {}}
-                  onScheduleCommit={scheduleCommitIfLeftExpr}
-                />
+                {#if slideMounted(i)}
+                  <ExprRow
+                    bind:this={rowRefs[item.id]}
+                    {item}
+                    selected={i === index}
+                    disableSplitMerge={true}
+                    {paramTick}
+                    suppressAutoCommit={isSuppressingAutoCommit}
+                    onExprChange={() => {
+                      localParamTick++;
+                      onExprChange();
+                      queueMicrotask(syncViewportHeight);
+                    }}
+                    onStructuralChange={() => refreshAfterStructural()}
+                    {onColorChange}
+                    onParamChange={() => {
+                      localParamTick++;
+                      (onParamChange ?? onExprChange)();
+                      queueMicrotask(syncViewportHeight);
+                    }}
+                    onSelect={(id) => {
+                      selectExpr(id);
+                      const idx = items.findIndex((e) => e.id === id);
+                      if (idx >= 0) goTo(idx);
+                    }}
+                    onFocusNav={(targetId, caret) => {
+                      const idx = items.findIndex((e) => e.id === targetId);
+                      if (idx >= 0) goTo(idx);
+                      queueMicrotask(() => rowRefs[targetId]?.focusAt(caret));
+                      onSelectionSync?.();
+                    }}
+                    onSplit={(focus) => refreshAfterStructural(focus)}
+                    onMerge={(focus) => refreshAfterStructural(focus)}
+                    onDragStart={() => {}}
+                    onScheduleCommit={scheduleCommitIfLeftExpr}
+                  />
+                {/if}
               </div>
 
               <button

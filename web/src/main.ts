@@ -6,7 +6,7 @@ import { mountExprList } from "./ui/expr-sidebar/mount.js";
 import { setExpressionsOnChange } from "./model/expressions.js";
 import { anyParamAnimating, ensureParamAnimationFromExprs } from "./model/params.js";
 import { syncExprCompileState, getExpressionErrorReport } from "./app/hud.js";
-import { initDom, els, initPanelResize, initPanelToggle, initPanelCollapse, initPanelDismiss, refreshPanelToggleChrome } from "./app/dom.js";
+import { initDom, els, initPanelResize, initPanelToggle, initPanelCollapse, initPanelDismiss, refreshPanelToggleChrome, runPanelTransition } from "./app/dom.js";
 import { initScene, bindClipUniforms, resetCameraView } from "./app/scene.js";
 import { initCompile, applyPreset } from "./app/compile.js";
 import {
@@ -62,8 +62,15 @@ initKeyframeHandler();
 function collapseToViewport() {
   setPanelCollapsed(true);
   refreshPanelToggleChrome();
+  runPanelTransition(resize);
   resize();
   state.exprListApi?.render();
+}
+
+function onPanelDismissSettled(collapsed: boolean) {
+  refreshPanelToggleChrome();
+  resize();
+  if (collapsed) state.exprListApi?.render();
 }
 
 state.exprListApi = mountExprList({
@@ -97,7 +104,7 @@ async function bootstrap() {
   initPanelResize(resize);
   initPanelToggle(resize);
   initPanelCollapse(collapseToViewport);
-  initPanelDismiss(collapseToViewport);
+  initPanelDismiss(onPanelDismissSettled, resize);
   els.clearExprs?.addEventListener("click", () => {
     state.exprListApi?.clearAll?.();
   });

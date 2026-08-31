@@ -31,6 +31,8 @@ export function mountExprList(opts: MountExprListOpts): ExprListApi {
 
   type FooterInst = InstanceType<typeof MobileExprFooter> & {
     syncFromList: () => void;
+    syncAllParamSliders: () => void;
+    syncParamChrome: () => boolean;
   };
   let footerInst: FooterInst | null = null;
   if (footerRoot) {
@@ -52,8 +54,15 @@ export function mountExprList(opts: MountExprListOpts): ExprListApi {
       inst.render(focus);
       footerInst?.syncFromList();
     },
-    syncAllParamSliders: () => inst.syncAllParamSliders(),
-    syncParamChrome: () => inst.syncParamChrome(),
+    syncAllParamSliders: () => {
+      inst.syncAllParamSliders();
+      footerInst?.syncAllParamSliders();
+    },
+    syncParamChrome: () => {
+      const sidebarOk = inst.syncParamChrome();
+      const footerOk = footerInst?.syncParamChrome() ?? true;
+      return sidebarOk && footerOk;
+    },
     clearAll: () => inst.clearAll(),
   };
 }
