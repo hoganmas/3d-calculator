@@ -215,6 +215,17 @@ function ensureTrailingEmptyExpr() {
   }
 }
 
+/** Id of the trailing blank row, if the list ends with one. */
+export function trailingEmptyExprId(): string | null {
+  if (!items.length) return null;
+  const last = items[items.length - 1]!;
+  return isEmptyLatex(last.latex) ? last.id : null;
+}
+
+function resolveMoveBeforeId(beforeId: string | null): string | null {
+  return beforeId ?? trailingEmptyExprId();
+}
+
 /**
  * Prefer inserting before the trailing blank when appending a non-empty row.
  * @param {number} at
@@ -380,7 +391,7 @@ export function commitAutoParams() {
 }
 
 /**
- * Move expression `id` so it sits before `beforeId` (or at end if `beforeId` is null).
+ * Move expression `id` so it sits before `beforeId` (or before the trailing blank when `beforeId` is null).
  * @param {string} id
  * @param {string | null} beforeId
  * @returns {boolean} true if order changed
@@ -389,7 +400,9 @@ export function moveExpr(id: string, beforeId: string | null) {
   const from = items.findIndex((e) => e.id === id);
   if (from < 0) return false;
   if (beforeId === id) return false;
-  let to = beforeId == null ? items.length : items.findIndex((e) => e.id === beforeId);
+  const resolvedBeforeId = resolveMoveBeforeId(beforeId);
+  if (resolvedBeforeId === id) return false;
+  let to = resolvedBeforeId == null ? items.length : items.findIndex((e) => e.id === resolvedBeforeId);
   if (to < 0) to = items.length;
   // Index after removing `from`.
   const dest = from < to ? to - 1 : to;

@@ -1,4 +1,4 @@
-import { moveExpr } from "../../model/expressions.js";
+import { moveExpr, trailingEmptyExprId } from "../../model/expressions.js";
 
 export interface DragState {
   id: string;
@@ -165,7 +165,7 @@ export class DragReorderController {
       return first.dataset.id ?? null;
     }
     if (clientY >= lastRect.top + lastRect.height * 0.5) {
-      return null;
+      return trailingEmptyExprId();
     }
     for (const row of others) {
       const rect = row.getBoundingClientRect();
@@ -200,28 +200,42 @@ export class DragReorderController {
   }
 
   private liveReorderToPointer(clientY: number) {
-    if (!this.dragState) return;
+    if (!this.dragState || !this.dragPlaceholder) return;
     const beforeId = this.resolveBeforeId(clientY, this.dragState.id);
     if (beforeId === this.liveBeforeId) return;
+
+    const ph = this.dragPlaceholder;
+    const currentNext = ph.nextElementSibling;
+    const currentBeforeId =
+      currentNext instanceof HTMLElement && currentNext.classList.contains("expr-row")
+        ? (currentNext.dataset.id ?? null)
+        : null;
+    if (currentBeforeId === beforeId) {
+      this.liveBeforeId = beforeId;
+      return;
+    }
 
     const prevRects = new Map<string, DOMRect>();
     for (const row of this.rowElements()) {
       if (row.dataset.id) prevRects.set(row.dataset.id, row.getBoundingClientRect());
     }
 
-    const row = this.listRoot.querySelector(
-      `.expr-row[data-id="${CSS.escape(this.dragState.id)}"]`,
-    );
-    if (!(row instanceof HTMLElement) || !this.dragPlaceholder) return;
-
-    const target = beforeId
-      ? this.listRoot.querySelector(`.expr-row[data-id="${CSS.escape(beforeId)}"]`)
-      : null;
-
-    if (target instanceof HTMLElement) {
-      this.listRoot.insertBefore(this.dragPlaceholder, target);
+    if (beforeId) {
+      const target = this.listRoot.querySelector(
+        `.expr-row[data-id="${CSS.escape(beforeId)}"]`,
+      );
+      if (!(target instanceof HTMLElement)) return;
+      this.listRoot.insertBefore(ph, target);
     } else {
-      this.listRoot.appendChild(this.dragPlaceholder);
+      const trailingId = trailingEmptyExprId();
+      const trailing = trailingId
+        ? this.listRoot.querySelector(`.expr-row[data-id="${CSS.escape(trailingId)}"]`)
+        : null;
+      if (trailing instanceof HTMLElement) {
+        this.listRoot.insertBefore(ph, trailing);
+      } else {
+        this.listRoot.appendChild(ph);
+      }
     }
 
     this.liveBeforeId = beforeId;
@@ -251,6 +265,7 @@ export class DragReorderController {
     } else if (this.liveBeforeId !== undefined) {
       beforeId = this.liveBeforeId;
     }
+    beforeId = beforeId ?? trailingEmptyExprId();
     this.liveBeforeId = undefined;
 
     if (this.dragFloat && this.dragPlaceholder?.parentNode) {
@@ -262,8 +277,8 @@ export class DragReorderController {
 
     moveExpr(state.id, beforeId);
     this.cb.onStructuralChange();
-    this.cb.onRender();
     this.cb.onReorderEnd();
+    this.cb.onRender();
   }
 
   destroy() {

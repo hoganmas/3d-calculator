@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy, onMount, tick } from "svelte";
   import type { ExprItem } from "../../types/models.js";
   import {
     listExpressions,
@@ -42,6 +42,8 @@
   let pendingFocus: { id: string; pos: number } | null = null;
 
   let rowRefs = $state<Record<string, ExprRow | undefined>>({});
+  /** Bumped after drag-reorder so Svelte remounts rows (imperative float breaks bindings). */
+  let listEpoch = $state(0);
   let dragCtrl: DragReorderController | null = null;
 
   function beginSuppressAutoCommit() {
@@ -161,9 +163,10 @@
     handleClear();
   }
 
-  onMount(() => {
+  onMount(async () => {
     items = listExpressions();
     selectedId = getSelectedId();
+    await tick();
     if (listRoot) {
       dragCtrl = new DragReorderController(listRoot, {
         onReorderStart: () => {
@@ -172,6 +175,8 @@
         },
         onReorderEnd: () => {
           listRoot?.classList.remove("is-reordering");
+          rowRefs = {};
+          listEpoch += 1;
         },
         onStructuralChange: () => onStructuralChange(),
         onRender: () => render(),
@@ -201,6 +206,7 @@
     </button>
   </div>
   <div class="expr-list" bind:this={listRoot} aria-label="Expressions">
+  {#key listEpoch}
   {#each items as item (item.id)}
     <ExprRow
       bind:this={rowRefs[item.id]}
@@ -232,5 +238,6 @@
       onScheduleCommit={scheduleCommitIfLeftExpr}
     />
   {/each}
+  {/key}
   </div>
 </div>
