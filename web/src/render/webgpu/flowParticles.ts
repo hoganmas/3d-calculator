@@ -1,5 +1,6 @@
 import type { PerspectiveCamera } from "three";
 import { gpu, PIPELINE_EPOCH } from "./gpuState.js";
+import { gpuWriteBuffer, submitEnc } from "./gpuSubmit.js";
 import { state } from "../../app/state.js";
 import { hasFlowGpuLayers } from "./flowGpu.js";
 import {
@@ -612,9 +613,9 @@ function recordRibbonDraw(
   instanceCount: number,
 ): void {
   if (vertexCount <= 0 || instanceCount <= 0) return;
-  device.queue.writeBuffer(
+  gpuWriteBuffer(
+    device,
     gpu.flowParticlesParamBuf!,
-    0,
     packFlowParticleParams(
       viewProj, ro, half, dirMatrix, fbW, fbH, cameraFovDeg, speedRange, drawSegCount, segStride,
     ),
@@ -638,7 +639,7 @@ function recordRibbonDraw(
   pass.setBindGroup(0, bg);
   pass.draw(vertexCount, instanceCount);
   pass.end();
-  device.queue.submit([enc.finish()]);
+  submitEnc(device, enc);
 }
 
 export function drawFlowParticlesPass(

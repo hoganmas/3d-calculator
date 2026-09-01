@@ -86,6 +86,8 @@ export interface GpuState {
   densBase: number;
   sceneM: number;
   sceneEpoch: number;
+  /** Last `sceneEpoch` written to `volumeBuf` (skip redundant per-frame uploads). */
+  volumeUploadEpoch: number;
   scenePacked: Float32Array | null;
   initFailed: boolean;
   initPromise: Promise<boolean> | null;
@@ -94,6 +96,8 @@ export interface GpuState {
   stampResolveBuf: GPUBuffer | null;
   stampReadBuf: GPUBuffer | null;
   stampReadPending: boolean;
+  /** At most one in-flight `onSubmittedWorkDone` sample (avoid per-frame GPU idle waits). */
+  presentWorkSamplePending: boolean;
   profileBakeMs: number;
   profileMarchMs: number;
   profileMarchFbW: number;
@@ -180,6 +184,7 @@ export const gpu: GpuState = {
   densBase: 0,
   sceneM: 0,
   sceneEpoch: 0,
+  volumeUploadEpoch: -1,
   scenePacked: null,
   initFailed: false,
   initPromise: null,
@@ -188,6 +193,7 @@ export const gpu: GpuState = {
   stampResolveBuf: null,
   stampReadBuf: null,
   stampReadPending: false,
+  presentWorkSamplePending: false,
   profileBakeMs: 0,
   profileMarchMs: 0,
   profileMarchFbW: 0,
@@ -212,7 +218,7 @@ export const gpu: GpuState = {
   flowParticlesPerLayer: 0,
 };
 
-export const PIPELINE_EPOCH = 77;
+export const PIPELINE_EPOCH = 78;
 export const labelVertScratch = new Float32Array(18 * 6);
 
 export function resetPipelinesOnDeviceLost(): void {
@@ -227,4 +233,6 @@ export function resetPipelinesOnDeviceLost(): void {
   gpu.labelAtlasTex = gpu.labelAtlasSamp = null;
   gpu.labelVertexBuf = null;
   gpu.labelAtlasDirty = true;
+  gpu.volumeUploadEpoch = -1;
+  gpu.presentWorkSamplePending = false;
 }

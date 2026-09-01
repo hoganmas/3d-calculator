@@ -43,6 +43,7 @@ function ensureVolumeBuf(floatCount: number): void {
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
   gpu.volumeCapacity = aligned;
+  gpu.volumeUploadEpoch = -1;
   if (old) {
     void device.queue.onSubmittedWorkDone().then(() => {
       try { old.destroy(); } catch { /* device lost */ }
@@ -189,13 +190,14 @@ export function uploadSceneVolumes(scene: SceneUploadPayload | null): SceneUploa
 
   gpu.sceneEpoch++;
   ensureVolumeBuf(Math.max(volN, packedFloats > 0 ? packedFloats : volN));
-  if (gpu.scenePacked && gpu.volumeBuf) gpu.device.queue.writeBuffer(gpu.volumeBuf, 0, gpu.scenePacked);
+  if (gpu.scenePacked && gpu.volumeBuf) {
+    gpu.device.queue.writeBuffer(gpu.volumeBuf, 0, gpu.scenePacked);
+    gpu.volumeUploadEpoch = gpu.sceneEpoch;
+  }
   writeLayerColors(gpu.device, gpu.colorBuf, gpu.densGradStops);
 
   gpu.profileBakeMs = gpu.profileBakeMs * 0.5 + (performance.now() - t0) * 0.5;
   gpu.profileGridM = M;
-  const anyKf = gpu.sceneConstraints.some((c) => c.K > 1);
-  gpu.profileMethod = anyKf ? "gpu-kf-scene" : "cpu-idct-scene";
 
   if (flow.length > 0) {
     ensureFlowParticleBuffers(flow.length, half);

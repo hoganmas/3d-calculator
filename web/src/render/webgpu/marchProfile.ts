@@ -3,7 +3,6 @@ import type { ClipGpuProfile } from "./marchTypes.js";
 
 export function noteGpuPresent(submitWallAt: number): void {
   const now = performance.now();
-  gpu.profilePresentWallMs = gpu.profilePresentWallMs * 0.85 + (now - submitWallAt) * 0.15;
   if (gpu.lastPresentAt > 0) {
     gpu.profilePresentIntervalMs = gpu.profilePresentIntervalMs * 0.85 + (now - gpu.lastPresentAt) * 0.15;
   } else {
@@ -43,7 +42,9 @@ export function scheduleStampReadback(): void {
     readBuf.unmap();
     gpu.stampReadPending = false;
     if (stamps[1] > stamps[0]) {
-      gpu.profileMarchMs = gpu.profileMarchMs * 0.7 + Number(stamps[1] - stamps[0]) / 1e6 * 0.3;
+      const ms = Number(stamps[1] - stamps[0]) / 1e6;
+      gpu.profileMarchMs = gpu.profileMarchMs * 0.7 + ms * 0.3;
+      gpu.profilePresentWallMs = gpu.profilePresentWallMs * 0.7 + ms * 0.3;
     }
   }).catch(() => { gpu.stampReadPending = false; });
 }

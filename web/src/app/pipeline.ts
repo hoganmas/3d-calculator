@@ -703,7 +703,7 @@ export function uploadFit(
       logKeyframeBake(fromAnim ? "play/anim" : "bake");
     }
     state.lastNCoeff = (deg + 1) ** 3 * layers.length;
-    if (Number.isFinite(fitRel)) state.lastFitRel = fitRel;
+    state.lastFitRel = fitRel;
 
     for (const iso of isosurfaceLayers) {
       if (!iso.keyframes?.length) continue;
