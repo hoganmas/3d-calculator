@@ -32,6 +32,9 @@ export const MAX_FLOW_PARTICLE_COUNT = 32000;
 export const TRAIL_PUSH_INTERVAL = 3;
 /** When count × trailSegs exceeds this, draw every Nth segment (GPU LOD). */
 const DRAW_LOD_INSTANCE_THRESHOLD = 25000;
+/** Vertical pixel count `trailWidth` is calibrated against (display, not march buffer).
+ *  400 ≈ HTML default 2× downscale on an 800px-tall view, so width matches `npm run dev`. */
+const RIBBON_WIDTH_REF_PX = 400;
 const PROFILE_SMOOTH = 0.12;
 
 export type FlowParticleMetrics = {
@@ -589,7 +592,9 @@ function packFlowParticleParams(
   const vMax = effectiveFlowVMax();
   f[45] = Math.max(half * 0.2, dt * vMax * 2.5 * TRAIL_PUSH_INTERVAL);
   const fovRad = (cameraFovDeg * Math.PI) / 180;
-  f[46] = (2 * Math.tan(fovRad / 2)) / Math.max(fbH, 1);
+  // World scale from FOV only — do not divide by march-buffer height, or
+  // downscaled mobile targets make ribbons several times thicker.
+  f[46] = (2 * Math.tan(fovRad / 2)) / RIBBON_WIDTH_REF_PX;
   u[47] = gpu.sceneM >>> 0;
   f[48] = gpu.flowVelBase;
   return f;

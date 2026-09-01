@@ -51,8 +51,8 @@ export async function run() {
       name: "vector quality maps to particles and trail steps",
       fn: () => {
         assert(qualityToParticleCount(0) < qualityToParticleCount(100), "more particles at high Q");
-        assert(qualityToTrailSteps(0) < qualityToTrailSteps(100), "longer trails at high Q");
         assert(qualityToParticleCount(50) === 1000, "default Q matches HTML particle count");
+        assert(qualityToTrailSteps(20) === 32, "mobile-boot Q keeps full trail length");
         assert(qualityToTrailSteps(50) === 32, "default Q matches HTML trail length");
         const inferred = inferQualityFromSettings({
           marchDownscale: 2,

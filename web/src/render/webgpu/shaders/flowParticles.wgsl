@@ -124,9 +124,9 @@ fn ribbonSide(tangent: vec3f, world: vec3f) -> vec3f {
 }
 
 fn ribbonHalfWidthWorld(world: vec3f, widthMix: f32) -> f32 {
-  let dist = max(length(world - u.ro), u.half * 0.06);
-  let halfWPx = max(0.5 * u.trailWidth * u.half / dist * widthMix, 0.25);
-  return halfWPx * dist * u.ribbonPxToWorld;
+  // World half-width from trailWidth × a FOV scale that does not include
+  // march-buffer height (that lives in u.ribbonPxToWorld).
+  return max(0.5 * u.trailWidth * u.half * u.ribbonPxToWorld * widthMix, u.half * 0.002);
 }
 
 struct VSOut {
