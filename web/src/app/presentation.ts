@@ -23,7 +23,7 @@ import {
   boxHelper,
 } from "./scene.js";
 import { clipQuad, useGpuClipPath } from "./webglFallback.js";
-import { initKeyboardInsets } from "./keyboardInsets.js";
+import { initKeyboardInsets, VIEWPORT_SYNC_EVENT } from "./keyboardInsets.js";
 
 function formatBoundsSize(n: number) {
   const rounded = Math.round(n * 10) / 10;
@@ -298,6 +298,7 @@ export function initPresentation() {
   window.addEventListener("resize", resize);
   initVisualViewportResize();
   initKeyboardInsets();
+  window.addEventListener(VIEWPORT_SYNC_EVENT, resize);
   resize();
 }
 
@@ -313,6 +314,11 @@ function initVisualViewportResize() {
   if (!vv) return;
   vv.addEventListener("resize", resize);
   vv.addEventListener("scroll", () => {
+    // When the keyboard is open, visualViewport scroll drives layout — don't reset it.
+    if (document.documentElement.dataset.keyboardOpen === "true") {
+      resize();
+      return;
+    }
     pinDocumentScroll();
     resize();
   });

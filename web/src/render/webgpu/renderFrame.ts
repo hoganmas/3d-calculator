@@ -9,16 +9,21 @@ import {
   packDrawParamsIso,
   packDrawParamsBeer,
   packSsaoParams,
-  writeLayerColors,
 } from "./uniforms.js";
 import { packGridParams, syncClipGpuWorldGrid, uploadAxisLabelBillboards } from "./gridOverlay.js";
 import { state } from "../../app/state.js";
 import { ensureMarchTargets, ensureVolumeTargets, resizeClipGpuCanvas } from "./marchCanvas.js";
-import { noteGpuPresent, scheduleStampReadback } from "./marchProfile.js";
+import {
+  beginGpuFrame,
+  endGpuFrame,
+  gpuWriteBuffer,
+  sampleGpuPresent,
+  submitEnc,
+  withStampWrites,
+} from "./gpuSubmit.js";
 import { hasFlowGpuLayers } from "./flowGpu.js";
 import {
   drawFlowParticlesPass,
-  ensureFlowParticlesPipeline,
   tickFlowParticles,
 } from "./flowParticles.js";
 import {
@@ -84,7 +89,7 @@ function clearMarchTargets(
   const normalView = targets.normalTex.createView();
 
   const enc = device.createCommandEncoder();
-  const pass = enc.beginRenderPass({
+  const pass = enc.beginRenderPass(withStampWrites({
     colorAttachments: [
       {
         view: sceneView,
@@ -111,9 +116,9 @@ function clearMarchTargets(
       depthLoadOp: "clear",
       depthStoreOp: "store",
     },
-  });
+  }, "begin"));
   pass.end();
-  device.queue.submit([enc.finish()]);
+  submitEnc(device, enc);
 }
 
 function drawIsoConstraints(
@@ -134,7 +139,8 @@ function drawIsoConstraints(
   const depthView = targets.depthTex.createView();
   const normalView = targets.normalTex.createView();
 
-  for (const c of gpu.sceneConstraints) {
+  for (let ci = 0; ci < gpu.sceneConstraints.length; ci++) {
+    const c = gpu.sceneConstraints[ci];
     const stride = c.frameStride || 0;
     const base0 = c.base + (c.i0 | 0) * stride;
     const base1 = c.base + (c.i1 | 0) * stride;
@@ -142,9 +148,9 @@ function drawIsoConstraints(
     const c0 = c.color || DEFAULT_ISO_RGB;
     const c1 = c.color2 || DEFAULT_ISO_RGB2;
     const stops = c.colors || [c0, c1];
-    device.queue.writeBuffer(
+    gpuWriteBuffer(
+      device,
       drawParamBuf,
-      0,
       packDrawParamsIso(
         marchW, marchH, Mgrid, steps, half, scale, c.isoLevel, base0, ro, dirMatrix,
         c0, c1,
@@ -175,7 +181,7 @@ function drawIsoConstraints(
     pass.setBindGroup(0, bg);
     pass.draw(3);
     pass.end();
-    device.queue.submit([enc.finish()]);
+    submitEnc(device, enc);
   }
 }
 
@@ -194,9 +200,9 @@ function drawSsaoPass(
   const occlIsoView = targets.occlIsoTex.createView();
   const normalView = targets.normalTex.createView();
 
-  device.queue.writeBuffer(
+  gpuWriteBuffer(
+    device,
     ssaoParamBuf,
-    0,
     packSsaoParams(
       marchW, marchH, half,
       Math.max(0.2, half * 0.18),
@@ -227,7 +233,7 @@ function drawSsaoPass(
   pass.setBindGroup(0, bg);
   pass.draw(3);
   pass.end();
-  device.queue.submit([enc.finish()]);
+  submitEnc(device, enc);
   return aoView;
 }
 
@@ -248,9 +254,9 @@ function drawBeerPass(
   const occlIsoView = targets.occlIsoTex.createView();
   const occlSurfView = targets.occlSurfTex.createView();
 
-  device.queue.writeBuffer(
+  gpuWriteBuffer(
+    device,
     drawParamBufBeer,
-    0,
     packDrawParamsBeer(
       volW,
       volH,
@@ -290,7 +296,7 @@ function drawBeerPass(
   pass.setBindGroup(0, bg);
   pass.draw(3);
   pass.end();
-  device.queue.submit([enc.finish()]);
+  submitEnc(device, enc);
 }
 
 function compositeVolumeOntoScene(
@@ -319,7 +325,7 @@ function compositeVolumeOntoScene(
   pass.setBindGroup(0, bg);
   pass.draw(3);
   pass.end();
-  device.queue.submit([enc.finish()]);
+  submitEnc(device, enc);
 }
 
 function drawFxaaPass(
@@ -328,10 +334,11 @@ function drawFxaaPass(
   swapView: GPUTextureView,
   marchW: number,
   marchH: number,
+  stampEnd: boolean,
 ): void {
   const { device, fxaaPipeline, fxaaParamBuf, fxaaSampler } = handles;
   const inv = new Float32Array([1 / marchW, 1 / marchH, 0, 0]);
-  device.queue.writeBuffer(fxaaParamBuf, 0, inv);
+  gpuWriteBuffer(device, fxaaParamBuf, inv);
   const bg = device.createBindGroup({
     layout: fxaaPipeline.getBindGroupLayout(0),
     entries: [
@@ -341,19 +348,20 @@ function drawFxaaPass(
     ],
   });
   const enc = device.createCommandEncoder();
-  const pass = enc.beginRenderPass({
+  const passDesc: GPURenderPassDescriptor = {
     colorAttachments: [{
       view: swapView,
       clearValue: { r: 0, g: 0, b: 0, a: 0 },
       loadOp: "clear",
       storeOp: "store",
     }],
-  });
+  };
+  const pass = enc.beginRenderPass(stampEnd ? withStampWrites(passDesc, "end") : passDesc);
   pass.setPipeline(fxaaPipeline);
   pass.setBindGroup(0, bg);
   pass.draw(3);
   pass.end();
-  device.queue.submit([enc.finish()]);
+  submitEnc(device, enc);
 }
 
 function drawGridOverlay(
@@ -384,9 +392,9 @@ function drawGridOverlay(
         e[3 * 4 + r] * v[c * 4 + 3];
     }
   }
-  device.queue.writeBuffer(
+  gpuWriteBuffer(
+    device,
     gridParamBuf,
-    0,
     packGridParams(viewProj, ro, half, dirMatrix, outW, outH),
   );
   const labelVertCount = gpu.labelPipeline
@@ -426,7 +434,7 @@ function drawGridOverlay(
   }
 
   pass.end();
-  device.queue.submit([enc.finish()]);
+  submitEnc(device, enc);
 }
 
 export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
@@ -445,15 +453,14 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
 
   gpu.profileMarchFbW = marchW;
   gpu.profileMarchFbH = marchH;
-  gpu.profileMethod = sameRes
-    ? "gpu-iso+ssao+beer+grid+fxaa"
-    : "gpu-iso+ssao+beer(volFB)+blit+grid+fxaa";
   gpu.profileGridM = Mgrid;
 
-  if (gpu.scenePacked && gpu.volumeBuf) {
-    device.queue.writeBuffer(volumeBuf, 0, gpu.scenePacked);
+  beginGpuFrame();
+
+  if (gpu.scenePacked && gpu.volumeBuf && gpu.volumeUploadEpoch !== gpu.sceneEpoch) {
+    gpuWriteBuffer(device, volumeBuf, gpu.scenePacked);
+    gpu.volumeUploadEpoch = gpu.sceneEpoch;
   }
-  writeLayerColors(device, colorBuf, gpu.densGradStops);
 
   let sceneView = targets.sceneColorTex.createView();
   const swapView = ctx.getCurrentTexture().createView();
@@ -461,7 +468,8 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
   clearMarchTargets(device, targets);
   drawIsoConstraints(handles, targets, sceneView, marchW, marchH, Mgrid, isoSteps, half, scale, ro, dirMatrix);
 
-  if (gpu.sceneConstraints.length > 0) {
+  const ranSsao = gpu.sceneConstraints.length > 0;
+  if (ranSsao) {
     sceneView = drawSsaoPass(handles, targets, sceneView, marchW, marchH, half, ro, dirMatrix);
   }
 
@@ -471,9 +479,9 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
       // Fast path: beer composites directly into the iso-resolution scene.
       const occlIsoView = targets.occlIsoTex.createView();
       const occlSurfView = targets.occlSurfTex.createView();
-      device.queue.writeBuffer(
+      gpuWriteBuffer(
+        device,
         handles.drawParamBufBeer,
-        0,
         packDrawParamsBeer(
           marchW, marchH, Mgrid, volumeSteps, half, scale,
           gpu.densBase, gpu.densLayerCount, ro, dirMatrix, gpu.flowLayerStart,
@@ -499,7 +507,7 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
       pass.setBindGroup(0, bg);
       pass.draw(3);
       pass.end();
-      device.queue.submit([enc.finish()]);
+      submitEnc(device, enc);
     } else {
       drawBeerPass(
         handles, targets, targets.volColorTex.createView(),
@@ -509,7 +517,8 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
     }
   }
 
-  if (hasFlowGpuLayers()) {
+  const ranFlow = hasFlowGpuLayers();
+  if (ranFlow) {
     const viewDir: [number, number, number] = [
       -dirMatrix[2],
       -dirMatrix[5],
@@ -528,18 +537,25 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
     );
   }
 
-  drawFxaaPass(handles, sceneView, swapView, marchW, marchH);
+  drawFxaaPass(handles, sceneView, swapView, marchW, marchH, true);
   const occlForGrid = ranBeer
     ? targets.occlSurfTex.createView()
     : targets.occlIsoTex.createView();
-  if (state.showGridAxes) {
+  const ranGrid = !!state.showGridAxes;
+  if (ranGrid) {
     drawGridOverlay(handles, occlForGrid, camera, swapView, half, dirMatrix, ro, outW, outH);
   }
 
+  const method: string[] = ["gpu-iso"];
+  if (ranSsao) method.push("ssao");
+  if (ranBeer) method.push(sameRes ? "beer" : "beer(volFB)+blit");
+  if (ranFlow) method.push("flow");
+  method.push("fxaa");
+  if (ranGrid) method.push("grid");
+  gpu.profileMethod = method.join("+");
+
   const submitWallAt = performance.now();
-  void device.queue.onSubmittedWorkDone().then(() => {
-    noteGpuPresent(submitWallAt);
-    scheduleStampReadback();
-  });
+  endGpuFrame(device);
+  sampleGpuPresent(submitWallAt);
   return true;
 }

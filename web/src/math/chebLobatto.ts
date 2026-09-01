@@ -600,26 +600,7 @@ export function fitChebyshevLobatto3D(
   let l2Ms = 0;
   if (!opts.skipL2) {
     t0 = performance.now();
-    const { dens, M } = idctLobatto3D(cheb, N, n);
-    let num = 0;
-    let den = 0;
-    const probes = 10;
-    for (let ix = 0; ix < probes; ix++) {
-      for (let iy = 0; iy < probes; iy++) {
-        for (let iz = 0; iz < probes; iz++) {
-          const x = -half + (2 * half * (ix + 0.5)) / probes;
-          const y = -half + (2 * half * (iy + 0.5)) / probes;
-          const z = -half + (2 * half * (iz + 0.5)) / probes;
-          const truth = fn(x, y, z);
-          // Trilinear-ish: nearest Lobatto grid cell center for quick L2 probe
-          const approx = dens[densIndexNearest(ix, iy, iz, probes, M)] ?? 0;
-          const d = approx - truth;
-          num += d * d;
-          den += truth * truth;
-        }
-      }
-    }
-    fitRelL2 = Math.sqrt(num) / (Math.sqrt(den) + 1e-15);
+    fitRelL2 = probeRelL2Lobatto(cheb, N, half, fn, 8);
     l2Ms = performance.now() - t0;
   }
 
@@ -635,13 +616,6 @@ export function fitChebyshevLobatto3D(
     reusedSamples: 0,
   };
   return { cheb, mono: null, deg: N, half, fitRelL2, fMin, fMax, timing, lobatto };
-}
-
-function densIndexNearest(ix: number, iy: number, iz: number, probes: number, M: number): number {
-  const mx = Math.min(M - 1, Math.round((ix / (probes - 1)) * (M - 1)));
-  const my = Math.min(M - 1, Math.round((iy / (probes - 1)) * (M - 1)));
-  const mz = Math.min(M - 1, Math.round((iz / (probes - 1)) * (M - 1)));
-  return mx + my * M + mz * M * M;
 }
 
 /**

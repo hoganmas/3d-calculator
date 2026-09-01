@@ -13,6 +13,11 @@ struct DrawParams {
   m1: vec4f,
   m2: vec4f,
   flowLayerStart: f32,
+  _p2: f32,
+  _p3: f32,
+  _p4: f32,
+  densBlend: array<vec4f, 8>,
+  densT: array<vec4f, 2>,
 }
 
 @group(0) @binding(0) var<uniform> draw: DrawParams;
@@ -80,6 +85,15 @@ fn sampleLayer(base: u32, p: vec3f) -> f32 {
               mix(mix(c001, c101, tx), mix(c011, c111, tx), ty), tz);
 }
 
+fn densBlendT(L: u32) -> f32 {
+  let v = draw.densT[select(0u, 1u, L >= 4u)];
+  let i = L % 4u;
+  if (i == 0u) { return v.x; }
+  if (i == 1u) { return v.y; }
+  if (i == 2u) { return v.z; }
+  return v.w;
+}
+
 @fragment
 fn fsMain(in: VSOut) -> FSOut {
   var out: FSOut;
@@ -140,7 +154,23 @@ fn fsMain(in: VSOut) -> FSOut {
     var sigma = 0.0; var emitAcc = vec3f(0.0);
     for (var L: u32 = 0u; L < {{MAX_DENS_LAYERS}}u; L++) {
       if (L >= nLay) { break; }
-      var dval = sampleLayer(densBase + L * volN, p);
+      var dval = 0.0;
+      let packed = draw.densBlend[L];
+      let stride = u32(packed.y);
+      if (stride > 0u) {
+        let base0 = u32(packed.x) + u32(packed.z) * stride;
+        let bt = densBlendT(L);
+        if (bt <= 1e-5 || packed.z == packed.w) {
+          dval = sampleLayer(base0, p);
+        } else if (bt >= 0.999) {
+          dval = sampleLayer(u32(packed.x) + u32(packed.w) * stride, p);
+        } else {
+          let base1 = u32(packed.x) + u32(packed.w) * stride;
+          dval = mix(sampleLayer(base0, p), sampleLayer(base1, p), bt);
+        }
+      } else {
+        dval = sampleLayer(densBase + L * volN, p);
+      }
       if (dval != dval) { dval = 0.0; }
       var col: vec3f;
       let isFlow = f32(L) >= draw.flowLayerStart && draw.flowLayerStart >= 0.0;

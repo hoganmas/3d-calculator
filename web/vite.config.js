@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import fs from "node:fs";
 import path from "node:path";
+import basicSsl from "@vitejs/plugin-basic-ssl";
 
 /** When a `.js` import has no file on disk, resolve the sibling `.ts` (TS migration). */
 function resolveTsFromJs() {
@@ -20,7 +21,7 @@ function resolveTsFromJs() {
 
 export default defineConfig({
   base: "/",
-  plugins: [svelte(), resolveTsFromJs()],
+  plugins: [svelte(), resolveTsFromJs(), basicSsl()],
   optimizeDeps: {
     // Pre-bundle large ESM deps added after first dev start (avoids 504 Outdated Optimize Dep).
     include: ["mathlive", "@cortex-js/compute-engine", "three"],

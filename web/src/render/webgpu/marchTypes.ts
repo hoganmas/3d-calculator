@@ -103,6 +103,12 @@ export function acquireMarchGpuHandles(): MarchGpuHandles | null {
   ) {
     return null;
   }
+  if (gpu.drawParamBufBeer.size < 512) {
+    gpu.drawParamBufBeer = gpu.device.createBuffer({
+      size: 512,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+  }
   return {
     device: gpu.device,
     ctx: gpu.ctx,

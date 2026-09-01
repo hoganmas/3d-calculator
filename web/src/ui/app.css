@@ -1414,10 +1414,10 @@
           calc(var(--mobile-chrome-pad) + var(--safe-left));
       }
       html[data-panel-layout="horizontal"]:not([data-panel-collapsed="true"]) #panel {
-        top: calc(var(--safe-top) + 6px + var(--vv-top, 0px));
+        top: calc(var(--safe-top) + 6px);
         left: calc(var(--safe-left) + var(--mobile-chrome-pad));
         right: calc(var(--safe-right) + var(--mobile-chrome-pad));
-        bottom: calc(var(--safe-bottom) + 6px + var(--vv-bottom, 0px));
+        bottom: calc(var(--safe-bottom) + 6px);
         border-radius: var(--panel-radius);
         background: var(--glass-bg-strong);
         backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
@@ -1513,17 +1513,17 @@
       }
       html[data-panel-layout="horizontal"],
       html[data-panel-layout="horizontal"] body {
-        /* 100% is the large viewport on iOS, so the page is slightly taller than
-           the visible area while Safari chrome is showing. */
-        height: 100dvh;
-        max-height: 100dvh;
+        height: var(--vv-height, 100dvh);
+        max-height: var(--vv-height, 100dvh);
         overflow: hidden;
         overscroll-behavior: none;
       }
       html[data-panel-layout="horizontal"] body {
         position: fixed;
-        inset: 0;
+        left: 0;
+        right: 0;
         width: 100%;
+        top: var(--vv-offset-top, 0px);
       }
       html[data-panel-layout="horizontal"] #app {
         height: 100%;

@@ -5,6 +5,7 @@ import {
   DEFAULT_DENS_RGB2,
   DEFAULT_ISO_RGB,
   DEFAULT_ISO_RGB2,
+  gpu,
   type RgbTriplet,
 } from "./gpuState.js";
 
@@ -75,7 +76,7 @@ export function packDrawParamsBeer(
   M: Float64Array | Float32Array | number[],
   flowLayerStart: number = -1,
 ): ArrayBuffer {
-  const buf = new ArrayBuffer(256);
+  const buf = new ArrayBuffer(512);
   const u32 = new Uint32Array(buf);
   const f32 = new Float32Array(buf);
   u32[0] = fbW | 0; u32[1] = fbH | 0; u32[2] = gridM | 0; u32[3] = steps | 0;
@@ -85,6 +86,24 @@ export function packDrawParamsBeer(
   f32[16] = M[3]; f32[17] = M[4]; f32[18] = M[5];
   f32[20] = M[6]; f32[21] = M[7]; f32[22] = M[8];
   f32[24] = flowLayerStart;
+  const volN = gridM * gridM * gridM;
+  for (let L = 0; L < MAX_DENS_LAYERS; L++) {
+    const d = gpu.densLayers[L];
+    const o = 28 + L * 4;
+    if (d && d.K > 0) {
+      f32[o] = d.base;
+      f32[o + 1] = d.frameStride || volN;
+      f32[o + 2] = d.i0 | 0;
+      f32[o + 3] = d.i1 | 0;
+      f32[60 + L] = Number.isFinite(d.t) ? d.t : 0;
+    } else if (L < layerCount) {
+      f32[o] = densBaseOff + L * volN;
+      f32[o + 1] = volN;
+      f32[o + 2] = 0;
+      f32[o + 3] = 0;
+      f32[60 + L] = 0;
+    }
+  }
   return buf;
 }
 

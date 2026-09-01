@@ -151,12 +151,19 @@ export function getKeyframeLayerRole(layerId: string): KeyframeRole | null {
  */
 export function syncIsoKeyframesToSceneBake(
   layerId: string,
-  sceneBake: { isosurfaceLayers: { id?: string; keyframes?: KeyframeFrame[]; blend?: { i0: number; i1: number; t: number } }[]; M: number },
+  sceneBake: {
+    isosurfaceLayers: { id?: string; keyframes?: KeyframeFrame[]; blend?: { i0: number; i1: number; t: number } }[];
+    cloudLayers?: { id?: string; dens?: Float32Array; keyframes?: KeyframeFrame[]; blend?: { i0: number; i1: number; t: number } }[];
+    M: number;
+  },
   uploadM?: number,
 ): number {
   const cache = caches.get(layerId);
-  if (!cache || cache.role !== "isosurface") return sceneBake.M;
-  const layer = sceneBake.isosurfaceLayers.find((x) => x.id === layerId);
+  if (!cache || (cache.role !== "isosurface" && cache.role !== "cloud")) return sceneBake.M;
+  const layer =
+    cache.role === "cloud"
+      ? sceneBake.cloudLayers?.find((x) => x.id === layerId)
+      : sceneBake.isosurfaceLayers.find((x) => x.id === layerId);
   if (!layer) return sceneBake.M;
   const st = getParam(cache.paramNames[0]!);
   const value = st?.value ?? cache.mins[0]!;
@@ -164,12 +171,15 @@ export function syncIsoKeyframesToSceneBake(
   layer.blend = { i0: blend.i0, i1: blend.i1, t: blend.t };
   const blendM = isoBlendSceneM(cache, blend.i0, blend.i1, blend.t);
   if (blendM <= 0) return sceneBake.M;
-  // Only force a shared uploadM when this layer actually has frames at that M.
   const M =
     uploadM && uploadM > 0 && cache.frames.some((fr) => frameAtGridM(fr, uploadM))
       ? uploadM
       : blendM;
   layer.keyframes = materializeKeyframeFramesAtM(cache.frames, M);
+  if (cache.role === "cloud") {
+    const dens = layer.keyframes[blend.i0]?.dens || layer.keyframes[0]?.dens;
+    if (dens) (layer as { dens?: Float32Array }).dens = dens;
+  }
   sceneBake.M = Math.max(sceneBake.M, M);
   return M;
 }
@@ -177,7 +187,7 @@ export function syncIsoKeyframesToSceneBake(
 /** Grid M for the current iso blend pair (matches displayBlendForValue snap semantics). */
 export function getIsoBlendSceneM(layerId: string): number {
   const cache = caches.get(layerId);
-  if (!cache || cache.role !== "isosurface") return 0;
+  if (!cache || (cache.role !== "isosurface" && cache.role !== "cloud")) return 0;
   const st = getParam(cache.paramNames[0]!);
   const value = st?.value ?? cache.mins[0]!;
   const blend = displayBlendForValue(cache, value);
@@ -187,7 +197,7 @@ export function getIsoBlendSceneM(layerId: string): number {
 /** Promote staged pair when both slots share a staging degree (display path is read-only). */
 export function refreshIsoBlendDisplay(layerId: string): number[] {
   const cache = caches.get(layerId);
-  if (!cache || cache.role !== "isosurface") return [];
+  if (!cache || (cache.role !== "isosurface" && cache.role !== "cloud")) return [];
   const st = getParam(cache.paramNames[0]!);
   if (!st) return [];
   const { i0, i1 } = segmentForValue(cache, st.value);

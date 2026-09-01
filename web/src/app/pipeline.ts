@@ -45,6 +45,7 @@ import {
   uploadSceneVolumes,
   uploadSceneColors,
   setConstraintKeyframeBlends,
+  setDensKeyframeBlends,
 } from "../render/webgpu/march.js";
 import { reseedFlowParticles } from "../render/webgpu/flowParticles.js";
 import { wireQualityControls } from "./quality.js";
@@ -132,20 +133,25 @@ const lastGpuBlendByLayer = new Map<
 >();
 
 export function tickGpuKeyframeBlends() {
-  const isoLayers = state.lastSceneBake?.isosurfaceLayers;
-  if (!isoLayers?.length || !isClipBakeGpuReady()) return false;
-  /** @type {{ id: string, i0: number, i1: number, t: number }[]} */
-  const blends = [];
+  if (!isClipBakeGpuReady() || !state.lastSceneBake) return false;
+  const isoLayers = state.lastSceneBake.isosurfaceLayers || [];
+  const cloudLayers = state.lastSceneBake.cloudLayers || [];
+  const isoBlends: { id: string; i0: number; i1: number; t: number }[] = [];
+  const densBlends: { id: string; i0: number; i1: number; t: number }[] = [];
   let needReupload = false;
   let targetM = 0;
-  for (const c of isoLayers) {
-    if (!c?.id || !Array.isArray(c.keyframes) || !c.keyframes.length) continue;
+
+  const tickLayer = (
+    c: { id?: string; keyframes?: KeyframeFrame[]; blend?: KeyframeBlend },
+    into: { id: string; i0: number; i1: number; t: number }[],
+  ) => {
+    if (!c?.id || !Array.isArray(c.keyframes) || !c.keyframes.length) return;
     const promoted = refreshIsoBlendDisplay(c.id);
     if (promoted.length) needReupload = true;
     const layerM = getIsoBlendSceneM(c.id);
     if (layerM > 0) targetM = Math.max(targetM, layerM);
     const b = peekKeyframeBlend(c.id);
-    if (!b) continue;
+    if (!b) return;
     if (layerM > 0 && layerM !== gpu.sceneM) needReupload = true;
     const a0 = c.keyframes[b.i0];
     const a1 = c.keyframes[b.i1];
@@ -159,10 +165,17 @@ export function tickGpuKeyframeBlends() {
     tearLogBlendChange(c.id, lastGpuBlendByLayer.get(c.id) ?? null, next);
     lastGpuBlendByLayer.set(c.id, next);
     c.blend = { i0: b.i0, i1: b.i1, t: b.t };
-    blends.push(b);
-  }
-  if (needReupload && state.lastSceneBake && targetM > 0) {
+    into.push(b);
+  };
+
+  for (const c of isoLayers) tickLayer(c, isoBlends);
+  for (const c of cloudLayers) tickLayer(c, densBlends);
+
+  if (needReupload && targetM > 0) {
     for (const c of isoLayers) {
+      if (c?.id) targetM = Math.max(targetM, getIsoBlendSceneM(c.id));
+    }
+    for (const c of cloudLayers) {
       if (c?.id) targetM = Math.max(targetM, getIsoBlendSceneM(c.id));
     }
     if (targetM <= 0) return needReupload;
@@ -170,12 +183,16 @@ export function tickGpuKeyframeBlends() {
     for (const c of isoLayers) {
       if (c?.id) syncIsoKeyframesToSceneBake(c.id, state.lastSceneBake, targetM);
     }
+    for (const c of cloudLayers) {
+      if (c?.id) syncIsoKeyframesToSceneBake(c.id, state.lastSceneBake, targetM);
+    }
     tearLog("iso-blend-reupload", { targetM, gpuM: gpu.sceneM });
     bakeChebVolume();
     state.clipDirty = true;
   }
-  if (!blends.length) return needReupload;
-  setConstraintKeyframeBlends(blends);
+  if (!isoBlends.length && !densBlends.length) return needReupload;
+  if (isoBlends.length) setConstraintKeyframeBlends(isoBlends);
+  if (densBlends.length) setDensKeyframeBlends(densBlends);
   state.clipDirty = true;
   return true;
 }
@@ -267,6 +284,7 @@ export function uploadFit(
     let keyframedCount = 0;
     let keyframeBaked = false;
     let isoGpuUploadNeeded = false;
+    let densGpuUploadNeeded = false;
     let densKeyframedCpu = false;
 
     // Anim ticks: only refit layers that depend on dirty params; reuse the rest.
@@ -338,7 +356,7 @@ export function uploadFit(
 
       if (reuseDens) {
         if (prevHasKf && prev.keyframes?.[0]) {
-          M = Math.round(Math.cbrt(prev.keyframes[0].dens.length)) || M;
+          M = Math.round(Math.cbrt(prev.keyframes[0]?.dens?.length ?? 0)) || M;
         } else if (prev.dens) {
           M = Math.round(Math.cbrt(prev.dens.length)) || M;
         } else if (prev.fx) {
@@ -383,7 +401,22 @@ export function uploadFit(
             fitRel: prev.fitRel,
           });
         } else {
-          cloudLayers.push({ id: L.item.id, dens: prev.dens!, color, color2, colors });
+          if (prevHasKf) {
+            const dens = prev.keyframes![0]?.dens || prev.dens;
+            cloudLayers.push({
+              id: L.item.id,
+              dens: dens!,
+              keyframes: prev.keyframes,
+              blend: prev.blend ?? { i0: 0, i1: 0, t: 0 },
+              color,
+              color2,
+              colors,
+              cheb: prev.cheb,
+              fitRel: prev.fitRel,
+            });
+          } else {
+            cloudLayers.push({ id: L.item.id, dens: prev.dens!, color, color2, colors });
+          }
         }
         if (!cheb && prev.cheb) {
           cheb = prev.cheb;
@@ -394,7 +427,7 @@ export function uploadFit(
         continue;
       }
 
-      // Keyframe path: animated slider(s) → GPU blend (iso 1D) / CPU multilinear (cloud, iso N-D).
+      // Keyframe path: animated slider(s) → GPU blend (iso/cloud 1D) / CPU multilinear (N-D).
       const kfParams =
         isSplashContentReady() &&
         isClipBakeGpuReady() &&
@@ -476,6 +509,41 @@ export function uploadFit(
               cheb = sample.cheb;
               fitRel = sample.fitRel ?? fitRel;
             }
+          }
+        } else if (paramNames.length === 1) {
+          const sample = ensureLayerKeyframes({
+            layerId: L.item.id,
+            latex: L.item.latex,
+            role: "cloud",
+            isoLevel: L.compiled?.isoLevel ?? 0,
+            paramNames,
+            compiled: L.compiled,
+            baseParams,
+            half,
+            deg,
+            deferSyncBake: deferKf,
+          });
+          if (sample.baked) keyframeBaked = true;
+          if (sample.gpuUploadNeeded || (memKf && !prevHasKf)) densGpuUploadNeeded = true;
+          M = sample.M || M;
+          const dens =
+            sample.frames[sample.blend.i0]?.dens ||
+            sample.frames[0]?.dens ||
+            new Float32Array(Math.max(1, M * M * M));
+          cloudLayers.push({
+            id: L.item.id,
+            dens,
+            keyframes: sample.frames,
+            blend: sample.blend,
+            color,
+            color2,
+            colors,
+            cheb: sample.cheb,
+            fitRel: sample.fitRel,
+          });
+          if (!cheb && sample.cheb) {
+            cheb = sample.cheb;
+            fitRel = sample.fitRel ?? fitRel;
           }
         } else {
           const sample = sampleLayerKeyframes({
@@ -703,7 +771,7 @@ export function uploadFit(
       logKeyframeBake(fromAnim ? "play/anim" : "bake");
     }
     state.lastNCoeff = (deg + 1) ** 3 * layers.length;
-    if (Number.isFinite(fitRel)) state.lastFitRel = fitRel;
+    state.lastFitRel = fitRel;
 
     for (const iso of isosurfaceLayers) {
       if (!iso.keyframes?.length) continue;
@@ -726,12 +794,16 @@ export function uploadFit(
     const prevM = lastBake?.M ?? 0;
     const sceneHasIsoKf = isosurfaceLayers.some((c) => (c.keyframes?.length ?? 0) > 1);
     const gpuHasIsoKf = gpu.sceneConstraints.some((c) => (c.K ?? 1) > 1);
+    const sceneHasDensKf = cloudLayers.some((c) => (c.keyframes?.length ?? 0) > 1);
+    const gpuHasDensKf = gpu.densLayers.some((c) => (c.K ?? 1) > 1);
     const needUpload =
       fittedCount > 0 ||
       densKeyframedCpu ||
       !fromAnim ||
       isoGpuUploadNeeded ||
+      densGpuUploadNeeded ||
       (fromAnim && sceneHasIsoKf && !gpuHasIsoKf) ||
+      (fromAnim && sceneHasDensKf && !gpuHasDensKf) ||
       (fromAnim && keyframedCount > 0 && prevM > 0 && prevM !== M);
     tearLog("uploadFit", {
       fromAnim,
@@ -785,6 +857,16 @@ export function uploadFit(
     } else if (keyframedCount > 0) {
       setConstraintKeyframeBlends(
         isosurfaceLayers
+          .filter((c) => c.blend && c.id != null)
+          .map((c) => ({
+            id: c.id!,
+            i0: c.blend!.i0,
+            i1: c.blend!.i1,
+            t: c.blend!.t,
+          })),
+      );
+      setDensKeyframeBlends(
+        cloudLayers
           .filter((c) => c.blend && c.id != null)
           .map((c) => ({
             id: c.id!,
@@ -853,18 +935,15 @@ export function applyRenderHyperparams() {
 export function initKeyframeHandler() {
   /** Async keyframe fills: iso blend-pair promote → full GPU upload; off-blend → CPU sync only. */
   setKeyframeProgressHandler(({ layerId, index, frame, readyCount, K, done, promoted }) => {
-    if (index >= 0 && frame && state.lastSceneBake?.isosurfaceLayers) {
-      const c = state.lastSceneBake.isosurfaceLayers.find((x) => x.id === layerId);
-      if (c && Array.isArray(c.keyframes)) {
-        if (promoted?.length && getKeyframeLayerRole(layerId) === "isosurface") {
-          if (isClipBakeGpuReady()) {
-            const M = syncIsoKeyframesToSceneBake(layerId, state.lastSceneBake);
-            tearLog("iso-promote-upload", { layerId, promoted, sceneM: M, gpuM: gpu.sceneM });
-            bakeChebVolume();
-            state.clipDirty = true;
-          }
+    if (index >= 0 && frame && state.lastSceneBake) {
+      const role = getKeyframeLayerRole(layerId);
+      if (promoted?.length && (role === "isosurface" || role === "cloud")) {
+        if (isClipBakeGpuReady()) {
+          const M = syncIsoKeyframesToSceneBake(layerId, state.lastSceneBake);
+          tearLog("iso-promote-upload", { layerId, promoted, sceneM: M, gpuM: gpu.sceneM, role });
+          bakeChebVolume();
+          state.clipDirty = true;
         }
-        // Iso GPU buffers hold display frames only; staging commits stay in cache until promote.
       }
     }
     if (done) {

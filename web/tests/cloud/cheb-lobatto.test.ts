@@ -76,6 +76,15 @@ export async function run() {
       },
     },
     {
+      name: "Lobatto fitRelL2 is small for a degree-2 polynomial",
+      fn: () => {
+        const fn = compileExpr("x^2+y^2+z^2").bind({});
+        const fit = fitChebyshevLobatto3D(fn, 1, 8);
+        assert(Number.isFinite(fit.fitRelL2), "fitRelL2 finite");
+        assert(fit.fitRelL2 < 0.05, `fitRelL2 too high: ${fit.fitRelL2}`);
+      },
+    },
+    {
       name: "refineLobatto3D reuses samples and matches full fit",
       fn: () => {
         const fn = compileExpr("x^2+y^2+z^2").bind({});

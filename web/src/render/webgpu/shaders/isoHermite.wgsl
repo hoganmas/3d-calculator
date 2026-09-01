@@ -242,10 +242,18 @@ fn sampleFieldHermite4(base: u32, p: vec3f) -> vec4f {
   );
 }
 
+/** Ray-walk interpolant: cheap trilinear. Hermite is reserved for hit normals. */
 fn sampleVolume(p: vec3f) -> f32 {
-let a = sampleFieldHermite4(u32(draw.volBase), p);
-  let b = sampleFieldHermite4(u32(draw.volBaseB), p);
-  return mix(a.x, b.x, draw.blendT);
+  let baseA = u32(draw.volBase);
+  let t = draw.blendT;
+  if (t <= 1e-5) {
+    return sampleFieldBase(baseA, p);
+  }
+  let baseB = u32(draw.volBaseB);
+  if (t >= 0.999) {
+    return sampleFieldBase(baseB, p);
+  }
+  return mix(sampleFieldBase(baseA, p), sampleFieldBase(baseB, p), t);
 }
 
 fn fieldAt(p: vec3f) -> f32 {
@@ -297,9 +305,16 @@ fn cellBracketsIso(p: vec3f) -> bool {
 
 /** ∇f of the active iso interpolant (world space). */
 fn fieldGrad(p: vec3f) -> vec3f {
-let a = sampleFieldHermite4(u32(draw.volBase), p);
+  let t = draw.blendT;
+  if (t <= 1e-5) {
+    return sampleFieldHermite4(u32(draw.volBase), p).yzw;
+  }
+  if (t >= 0.999) {
+    return sampleFieldHermite4(u32(draw.volBaseB), p).yzw;
+  }
+  let a = sampleFieldHermite4(u32(draw.volBase), p);
   let b = sampleFieldHermite4(u32(draw.volBaseB), p);
-  return mix(a.yzw, b.yzw, draw.blendT);
+  return mix(a.yzw, b.yzw, t);
 }
 
 {{GRADIENT_WGSL}}

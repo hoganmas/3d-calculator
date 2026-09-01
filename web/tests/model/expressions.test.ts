@@ -23,6 +23,7 @@ import {
   setExpressions,
   setExpressionsOnChange,
   splitExprAt,
+  trailingEmptyExprId,
   updateExpr,
   updateExprSilent,
 } from "../../src/model/expressions.ts";
@@ -120,6 +121,76 @@ export async function run() {
         assert(moveExpr("e2", "e1"), "moved");
         assert(listExpressions()[0]?.id === "e2", "e2 first");
         assert(!moveExpr("e1", "e1"), "no-op self move");
+      },
+    },
+    {
+      name: "moveExpr beforeId null inserts before trailing blank",
+      fn: () => {
+        clearExpressions();
+        setExpressions([
+          { id: "e1", latex: "a" },
+          { id: "e2", latex: "b" },
+        ]);
+        const blankId = trailingEmptyExprId();
+        assert(blankId != null, "trailing blank exists");
+        assert(moveExpr("e1", null), "moved to end");
+        const rows = listExpressions();
+        assert(rows[0]?.id === "e2", "e2 first");
+        assert(rows[1]?.id === "e1", "e1 before blank");
+        assert(rows[2]?.id === blankId, "trailing blank last");
+        assert(!String(rows[2]?.latex ?? "").trim(), "last row still blank");
+      },
+    },
+    {
+      name: "moveExpr to end keeps exactly one trailing blank",
+      fn: () => {
+        clearExpressions();
+        setExpressions([
+          { id: "e1", latex: "a" },
+          { id: "e2", latex: "b" },
+          { id: "e3", latex: "c" },
+        ]);
+        moveExpr("e1", null);
+        const rows = listExpressions();
+        const blanks = rows.filter((e) => !String(e.latex ?? "").trim());
+        assert(blanks.length === 1, "single trailing blank");
+        assert(blanks[0]?.id === rows[rows.length - 1]?.id, "blank at end");
+        assert(rows[rows.length - 2]?.id === "e1", "moved row before blank");
+      },
+    },
+    {
+      name: "moveExpr to end then removeExpr stays consistent",
+      fn: () => {
+        clearExpressions();
+        setExpressions([
+          { id: "e1", latex: "a" },
+          { id: "e2", latex: "b" },
+        ]);
+        moveExpr("e1", null);
+        removeExpr("e1");
+        const rows = listExpressions();
+        assert(rows.some((e) => e.id === "e2"), "e2 remains");
+        assert(rows.filter((e) => !String(e.latex ?? "").trim()).length === 1, "one trailing blank");
+        assert(!String(rows[rows.length - 1]?.latex ?? "").trim(), "blank last");
+      },
+    },
+    {
+      name: "moveExpr reorder then removeExpr on moved row",
+      fn: () => {
+        clearExpressions();
+        setExpressions([
+          { id: "e1", latex: "a" },
+          { id: "e2", latex: "b" },
+          { id: "e3", latex: "c" },
+        ]);
+        const blankId = trailingEmptyExprId();
+        moveExpr("e3", "e1");
+        removeExpr("e3");
+        const rows = listExpressions();
+        assert(rows.some((e) => e.id === "e1"), "e1 remains");
+        assert(rows.some((e) => e.id === "e2"), "e2 remains");
+        assert(!rows.some((e) => e.id === "e3"), "e3 removed");
+        assert(rows[rows.length - 1]?.id === blankId, "trailing blank preserved");
       },
     },
     {

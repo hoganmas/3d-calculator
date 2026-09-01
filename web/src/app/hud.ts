@@ -162,7 +162,7 @@ export function buildMetricsReport() {
     `js_frame_ms     ${state.cpuMsSmooth.toFixed(2)}`,
     `gpu_path        ${useGpuClipPath() ? "webgpu" : "cpu/webgl"}`,
     `gpu_method      ${p.method || "—"}`,
-    `iso_interp      tricubic Hermite`,
+    `iso_interp      trilinear march / Hermite n`,
     `expr_kind       ${state.lastExprMeta.kind}`,
     `shade           ${state.lastExprMeta.shade}`,
     `iso_level       ${readIsoLevel()}`,
