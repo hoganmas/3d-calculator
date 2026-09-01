@@ -7,6 +7,7 @@ export {
   uploadSceneColors,
   uploadSceneVolumes,
   setConstraintKeyframeBlends,
+  setDensKeyframeBlends,
   patchConstraintKeyframeFrame,
   hasUploadedVolume,
 } from "./sceneUpload.js";

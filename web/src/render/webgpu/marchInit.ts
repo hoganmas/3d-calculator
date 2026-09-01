@@ -118,7 +118,7 @@ export async function initClipBakeGpu(
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
       gpu.drawParamBufBeer = gpu.device.createBuffer({
-        size: 256,
+        size: 512,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
       gpu.fxaaParamBuf = gpu.device.createBuffer({

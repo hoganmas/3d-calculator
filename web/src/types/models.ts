@@ -79,6 +79,7 @@ export interface CloudLayer {
   cheb?: Float32Array;
   fitRel?: number;
   keyframes?: KeyframeFrame[];
+  blend?: KeyframeBlend;
 }
 
 export interface IsosurfaceLayer {

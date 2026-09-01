@@ -24,6 +24,16 @@ export interface GpuSceneConstraint {
   t: number;
 }
 
+export interface GpuDensLayer {
+  id: string | null;
+  base: number;
+  frameStride: number;
+  K: number;
+  i0: number;
+  i1: number;
+  t: number;
+}
+
 /** Shared mutable WebGPU march state (single device lifetime). */
 export interface GpuState {
   device: GPUDevice | null;
@@ -84,6 +94,7 @@ export interface GpuState {
   densGradStops: RgbTriplet[][];
   densLayerCount: number;
   densBase: number;
+  densLayers: GpuDensLayer[];
   sceneM: number;
   sceneEpoch: number;
   /** Last `sceneEpoch` written to `volumeBuf` (skip redundant per-frame uploads). */
@@ -182,6 +193,7 @@ export const gpu: GpuState = {
   densGradStops: [],
   densLayerCount: 0,
   densBase: 0,
+  densLayers: [],
   sceneM: 0,
   sceneEpoch: 0,
   volumeUploadEpoch: -1,
@@ -218,7 +230,7 @@ export const gpu: GpuState = {
   flowParticlesPerLayer: 0,
 };
 
-export const PIPELINE_EPOCH = 78;
+export const PIPELINE_EPOCH = 79;
 export const labelVertScratch = new Float32Array(18 * 6);
 
 export function resetPipelinesOnDeviceLost(): void {

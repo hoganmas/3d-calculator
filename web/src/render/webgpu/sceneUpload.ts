@@ -103,7 +103,12 @@ export function uploadSceneVolumes(scene: SceneUploadPayload | null): SceneUploa
       : 1;
     consFloats += K * consStride * volN;
   }
-  const totalFloats = consFloats + dens.length * volN + flow.length * volN * 3;
+  let densFloats = 0;
+  for (const d of dens) {
+    const K = Array.isArray(d.keyframes) && d.keyframes.length > 0 ? d.keyframes.length : 1;
+    densFloats += K * volN;
+  }
+  const totalFloats = consFloats + densFloats + flow.length * volN * 3;
   gpu.scenePacked = totalFloats > 0 ? new Float32Array(Math.max(volN, totalFloats)) : null;
   let off = 0;
   const putVol = (src: Float32Array | undefined, ctx?: { layerId?: string; slot?: number; field?: string }) => {
@@ -171,9 +176,32 @@ export function uploadSceneVolumes(scene: SceneUploadPayload | null): SceneUploa
   gpu.densBase = off;
   gpu.densPacked = dens.length > 0;
   gpu.flowLayerStart = flow.length > 0 ? scalarDens.length : -1;
+  gpu.densLayers = [];
   if (gpu.densPacked && gpu.scenePacked) {
     for (let i = 0; i < dens.length; i++) {
-      putVol(dens[i]!.dens, { layerId: dens[i]!.id, field: "dens" });
+      const layer = dens[i]!;
+      const base = off;
+      const frames = Array.isArray(layer.keyframes) && layer.keyframes.length > 0
+        ? layer.keyframes
+        : null;
+      if (frames) {
+        for (let fi = 0; fi < frames.length; fi++) {
+          putVol(frames[fi]!.dens, { layerId: layer.id, slot: fi, field: "dens" });
+        }
+      } else {
+        putVol(layer.dens, { layerId: layer.id, field: "dens" });
+      }
+      const blend = layer.blend || { i0: 0, i1: 0, t: 0 };
+      const K = frames ? frames.length : 1;
+      gpu.densLayers.push({
+        id: layer.id || null,
+        base,
+        frameStride: volN,
+        K,
+        i0: Math.max(0, Math.min(K - 1, blend.i0 | 0)),
+        i1: Math.max(0, Math.min(K - 1, blend.i1 | 0)),
+        t: Number.isFinite(blend.t) ? blend.t : 0,
+      });
     }
   }
   gpu.flowVelBase = off;
@@ -254,6 +282,22 @@ export function setConstraintKeyframeBlends(blends: KeyframeBlendPatch[] | null 
     c.i0 = Math.max(0, Math.min((c.K || 1) - 1, b.i0 | 0));
     c.i1 = Math.max(0, Math.min((c.K || 1) - 1, b.i1 | 0));
     c.t = Number.isFinite(b.t) ? b.t : 0;
+  }
+}
+
+export function setDensKeyframeBlends(blends: KeyframeBlendPatch[] | null | undefined): void {
+  if (!blends?.length || !gpu.densLayers.length) return;
+  const byId = new Map<string, KeyframeBlendPatch>();
+  for (const b of blends) {
+    if (b?.id != null) byId.set(b.id, b);
+  }
+  for (let i = 0; i < gpu.densLayers.length; i++) {
+    const d = gpu.densLayers[i];
+    const b = (d.id != null && byId.get(d.id)) || blends[i];
+    if (!b) continue;
+    d.i0 = Math.max(0, Math.min((d.K || 1) - 1, b.i0 | 0));
+    d.i1 = Math.max(0, Math.min((d.K || 1) - 1, b.i1 | 0));
+    d.t = Number.isFinite(b.t) ? b.t : 0;
   }
 }
 
