@@ -1,4 +1,5 @@
 import {
+  inferQualityFromSettings,
   qualityToDeg,
   qualityToIsoMarchDownscale,
   qualityToIsoSteps,
@@ -51,6 +52,18 @@ export async function run() {
       fn: () => {
         assert(qualityToParticleCount(0) < qualityToParticleCount(100), "more particles at high Q");
         assert(qualityToTrailSteps(0) < qualityToTrailSteps(100), "longer trails at high Q");
+        assert(qualityToParticleCount(50) === 1000, "default Q matches HTML particle count");
+        assert(qualityToTrailSteps(50) === 32, "default Q matches HTML trail length");
+        const inferred = inferQualityFromSettings({
+          marchDownscale: 2,
+          isoMarchDownscale: 2,
+          deg: 32,
+          steps: 16,
+          isoSteps: 32,
+          flowParticleCount: 1000,
+          flowTrailSteps: 32,
+        });
+        assert(inferred.vectorQuality === 50, "HTML flow settings infer default vector quality");
       },
     },
   ]);

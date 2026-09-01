@@ -42,15 +42,19 @@ export function qualityToDeg(q: number): number {
   return Math.min(128, Math.max(8, Math.round(12 + (clampQ(q) / 100) * 52)));
 }
 
-/** Particles seeded per flow layer. */
+/** Particles seeded per flow layer. Quality 50 matches HTML / `npm run dev` (1000). */
 export function qualityToParticleCount(q: number): number {
-  const raw = 300 + (clampQ(q) / 100) * 7700;
+  const t = clampQ(q) / 100;
+  const raw = t <= 0.5
+    ? 300 + (t / 0.5) * 700
+    : 1000 + ((t - 0.5) / 0.5) * 7000;
   return Math.min(32000, Math.max(100, Math.round(raw / 100) * 100));
 }
 
-/** Trail history length for flow ribbons. */
+/** Trail history length. Quality 50 matches HTML / `npm run dev` (32, the max). */
 export function qualityToTrailSteps(q: number): number {
-  return Math.min(32, Math.max(2, Math.round(8 + (clampQ(q) / 100) * 24)));
+  const raw = 8 + (clampQ(q) / 50) * 24;
+  return Math.min(32, Math.max(2, Math.round(raw)));
 }
 
 function inferFromMap(
@@ -61,7 +65,8 @@ function inferFromMap(
   let bestErr = Infinity;
   for (let q = 0; q <= 100; q++) {
     const err = Math.abs(map(q) - value);
-    if (err < bestErr) {
+    const closerToDefault = Math.abs(q - 50) < Math.abs(bestQ - 50);
+    if (err < bestErr || (err === bestErr && closerToDefault)) {
       bestErr = err;
       bestQ = q;
     }
@@ -86,8 +91,8 @@ function inferPrecisionQuality(deg: number): number {
 }
 
 function inferVectorQuality(particles: number, trailSteps: number): number {
-  const particleQ = clampQ(((particles - 300) / 7700) * 100);
-  const trailQ = clampQ(((trailSteps - 8) / 24) * 100);
+  const particleQ = inferFromMap(particles, qualityToParticleCount);
+  const trailQ = inferFromMap(trailSteps, qualityToTrailSteps);
   return Math.round((particleQ + trailQ) / 2);
 }
 
