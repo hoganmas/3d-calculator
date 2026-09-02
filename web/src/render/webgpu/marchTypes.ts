@@ -60,25 +60,23 @@ export interface MarchGpuHandles {
   volumeBuf: GPUBuffer;
   colorBuf: GPUBuffer;
   fxaaParamBuf: GPUBuffer;
-  ssaoParamBuf: GPUBuffer;
   fxaaSampler: GPUSampler;
   gridParamBuf: GPUBuffer;
   isoPipeline: GPURenderPipeline;
   isoRefinePipeline: GPURenderPipeline;
   isoUpsamplePipeline: GPURenderPipeline;
   beerPipeline: GPURenderPipeline;
-  ssaoPipeline: GPURenderPipeline;
   fxaaPipeline: GPURenderPipeline;
   gridPipeline: GPURenderPipeline;
   drawParamBuf: GPUBuffer;
   drawParamBufBeer: GPUBuffer;
+  drawParamBufRefine: GPUBuffer;
   isoUpsampleParamBuf: GPUBuffer;
 }
 
-/** Offscreen march textures (iso / SSAO / Beer pass). */
+/** Offscreen march textures (iso / Beer pass). */
 export interface MarchTargets {
   sceneColorTex: GPUTexture;
-  sceneColorAoTex: GPUTexture;
   occlIsoTex: GPUTexture;
   occlSurfTex: GPUTexture;
   depthTex: GPUTexture;
@@ -101,11 +99,11 @@ export interface MarchRaySetup {
 export function acquireMarchGpuHandles(): MarchGpuHandles | null {
   if (
     !isClipBakeGpuReady() || !gpu.ctx || !gpu.volumeBuf || !gpu.colorBuf ||
-    !gpu.fxaaParamBuf || !gpu.ssaoParamBuf || !gpu.fxaaSampler || !gpu.gridParamBuf ||
+    !gpu.fxaaParamBuf || !gpu.fxaaSampler || !gpu.gridParamBuf ||
     !gpu.device || !gpu.isoPipeline || !gpu.isoRefinePipeline || !gpu.isoUpsamplePipeline ||
-    !gpu.beerPipeline || !gpu.ssaoPipeline ||
+    !gpu.beerPipeline ||
     !gpu.fxaaPipeline || !gpu.blitPipeline || !gpu.blitSampler || !gpu.gridPipeline ||
-    !gpu.drawParamBuf || !gpu.drawParamBufBeer || !gpu.isoUpsampleParamBuf
+    !gpu.drawParamBuf || !gpu.drawParamBufBeer || !gpu.drawParamBufRefine || !gpu.isoUpsampleParamBuf
   ) {
     return null;
   }
@@ -121,39 +119,36 @@ export function acquireMarchGpuHandles(): MarchGpuHandles | null {
     volumeBuf: gpu.volumeBuf,
     colorBuf: gpu.colorBuf,
     fxaaParamBuf: gpu.fxaaParamBuf,
-    ssaoParamBuf: gpu.ssaoParamBuf,
     fxaaSampler: gpu.fxaaSampler,
     gridParamBuf: gpu.gridParamBuf,
     isoPipeline: gpu.isoPipeline,
     isoRefinePipeline: gpu.isoRefinePipeline,
     isoUpsamplePipeline: gpu.isoUpsamplePipeline,
     beerPipeline: gpu.beerPipeline,
-    ssaoPipeline: gpu.ssaoPipeline,
     fxaaPipeline: gpu.fxaaPipeline,
     gridPipeline: gpu.gridPipeline,
     drawParamBuf: gpu.drawParamBuf,
     drawParamBufBeer: gpu.drawParamBufBeer,
+    drawParamBufRefine: gpu.drawParamBufRefine,
     isoUpsampleParamBuf: gpu.isoUpsampleParamBuf,
   };
 }
 
 export function acquireMarchTargets(): MarchTargets | null {
   const sceneColorTex = gpu.sceneColorTex;
-  const sceneColorAoTex = gpu.sceneColorAoTex;
   const occlIsoTex = gpu.occlIsoTex;
   const occlSurfTex = gpu.occlSurfTex;
   const depthTex = gpu.depthTex;
   const normalTex = gpu.normalTex;
   const volColorTex = gpu.volColorTex;
   if (
-    !sceneColorTex || !sceneColorAoTex || !occlIsoTex || !occlSurfTex ||
+    !sceneColorTex || !occlIsoTex || !occlSurfTex ||
     !depthTex || !normalTex || !volColorTex
   ) {
     return null;
   }
   return {
     sceneColorTex,
-    sceneColorAoTex,
     occlIsoTex,
     occlSurfTex,
     depthTex,

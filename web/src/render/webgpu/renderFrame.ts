@@ -8,13 +8,14 @@ import {
 import {
   packDrawParamsIso,
   packDrawParamsBeer,
-  packSsaoParams,
 } from "./uniforms.js";
 import { packGridParams, syncClipGpuWorldGrid, uploadAxisLabelBillboards } from "./gridOverlay.js";
 import { state } from "../../app/state.js";
-import { ensureMarchTargets, ensureIsoCoarseTargets, ensureVolumeTargets, resizeClipGpuCanvas } from "./marchCanvas.js";
+import { clampIsoStepsForTier, coarseIsoSteps } from "../../app/deviceTier.js";
+import { ensureMarchTargets, ensureIsoCoarseTargets, ensureIsoMidTargets, ensureVolumeTargets, resizeClipGpuCanvas } from "./marchCanvas.js";
 import {
   isoFineFramebufferSize,
+  isoMidFramebufferSize,
   isoRefineEnabled,
 } from "./isoRefine.js";
 import { isIsoRefineDebugEnabled } from "../../app/isoRefineDebug.js";
@@ -61,6 +62,7 @@ function buildRaySetup(
   composeW: number;
   composeH: number;
   refine: boolean;
+  midRefine: boolean;
 } | null {
   if (gpu.densLayerCount < 1 && gpu.sceneConstraints.length < 1 && !hasFlowGpuLayers()) return null;
 
@@ -85,9 +87,11 @@ function buildRaySetup(
   const { fw: composeW, fh: composeH } = refine
     ? isoFineFramebufferSize(marchW, marchH, outW, outH, fineDown)
     : { fw: marchW, fh: marchH };
+  const midSize = refine ? isoMidFramebufferSize(marchW, marchH, outW, outH, fineDown) : null;
 
   resizeClipGpuCanvas(outW, outH);
   if (refine) ensureIsoCoarseTargets(marchW, marchH);
+  if (midSize) ensureIsoMidTargets(midSize.mw, midSize.mh);
   ensureMarchTargets(composeW, composeH);
   ensureVolumeTargets(volW, volH);
   syncClipGpuWorldGrid(h);
@@ -98,6 +102,7 @@ function buildRaySetup(
   return {
     handles, targets, ro, dirMatrix, half: h,
     marchW, marchH, volW, volH, outW, outH, composeW, composeH, refine,
+    midRefine: !!midSize,
   };
 }
 
@@ -164,6 +169,7 @@ function drawIsoConstraints(
   scale: number,
   ro: [number, number, number],
   dirMatrix: ReturnType<typeof offsetDirMatrix>,
+  stampBegin = false,
 ): void {
   const { device, isoPipeline, drawParamBuf, volumeBuf } = handles;
   const sceneView = sceneTex.createView();
@@ -198,19 +204,38 @@ function drawIsoConstraints(
         { binding: 1, resource: { buffer: volumeBuf } },
       ],
     });
-    const enc = device.createCommandEncoder();
-    const pass = enc.beginRenderPass({
+    const first = ci === 0;
+    const load: GPULoadOp = first ? "clear" : "load";
+    const desc: GPURenderPassDescriptor = {
       colorAttachments: [
-        { view: sceneView, loadOp: "load", storeOp: "store" },
-        { view: occlIsoView, loadOp: "load", storeOp: "store" },
-        { view: normalView, loadOp: "load", storeOp: "store" },
+        {
+          view: sceneView,
+          loadOp: load,
+          clearValue: { r: 0, g: 0, b: 0, a: 0 },
+          storeOp: "store",
+        },
+        {
+          view: occlIsoView,
+          loadOp: load,
+          clearValue: { r: 1, g: 0, b: 0, a: 1 },
+          storeOp: "store",
+        },
+        {
+          view: normalView,
+          loadOp: load,
+          clearValue: { r: 0, g: 0, b: 0, a: 0 },
+          storeOp: "store",
+        },
       ],
       depthStencilAttachment: {
         view: depthView,
-        depthLoadOp: "load",
+        depthClearValue: 1,
+        depthLoadOp: first ? "clear" : "load",
         depthStoreOp: "store",
       },
-    });
+    };
+    const enc = device.createCommandEncoder();
+    const pass = enc.beginRenderPass(stampBegin && first ? withStampWrites(desc, "begin") : desc);
     pass.setPipeline(isoPipeline);
     pass.setBindGroup(0, bg);
     setPassViewport(pass, sceneTex.width, sceneTex.height);
@@ -220,19 +245,30 @@ function drawIsoConstraints(
   }
 }
 
-function upsampleIsoToFine(
+interface IsoGBuffer {
+  color: GPUTexture;
+  occl: GPUTexture;
+  normal: GPUTexture;
+  depth: GPUTexture;
+}
+
+function acquireIsoMidGBuffer(): IsoGBuffer | null {
+  const color = gpu.isoMidColorTex;
+  const occl = gpu.isoMidOcclTex;
+  const normal = gpu.isoMidNormalTex;
+  const depth = gpu.isoMidDepthTex;
+  if (!color || !occl || !normal || !depth) return null;
+  return { color, occl, normal, depth };
+}
+
+function upsampleIso(
   handles: MarchGpuHandles,
-  targets: MarchTargets,
-  composeW: number,
-  composeH: number,
+  src: { color: GPUTexture; occl: GPUTexture; normal: GPUTexture },
+  dest: IsoGBuffer,
 ): boolean {
-  const color = gpu.isoCoarseColorTex;
-  const occl = gpu.isoCoarseOcclTex;
-  const normal = gpu.isoCoarseNormalTex;
-  if (!color || !occl || !normal) return false;
   const { device, isoUpsamplePipeline, isoUpsampleParamBuf } = handles;
-  const fw = targets.sceneColorTex.width;
-  const fh = targets.sceneColorTex.height;
+  const fw = dest.color.width;
+  const fh = dest.color.height;
   const debug = isIsoRefineDebugEnabled() ? 1 : 0;
   const params = new Uint32Array([fw | 0, fh | 0, debug, 0]);
   gpuWriteBuffer(device, isoUpsampleParamBuf, params);
@@ -240,20 +276,20 @@ function upsampleIsoToFine(
     layout: isoUpsamplePipeline.getBindGroupLayout(0),
     entries: [
       { binding: 0, resource: { buffer: isoUpsampleParamBuf } },
-      { binding: 1, resource: color.createView() },
-      { binding: 2, resource: occl.createView() },
-      { binding: 3, resource: normal.createView() },
+      { binding: 1, resource: src.color.createView() },
+      { binding: 2, resource: src.occl.createView() },
+      { binding: 3, resource: src.normal.createView() },
     ],
   });
   const enc = device.createCommandEncoder();
   const pass = enc.beginRenderPass({
     colorAttachments: [
-      { view: targets.sceneColorTex.createView(), loadOp: "clear", clearValue: { r: 0, g: 0, b: 0, a: 0 }, storeOp: "store" },
-      { view: targets.occlIsoTex.createView(), loadOp: "clear", clearValue: { r: 1, g: 0, b: 0, a: 1 }, storeOp: "store" },
-      { view: targets.normalTex.createView(), loadOp: "clear", clearValue: { r: 0, g: 0, b: 0, a: 0 }, storeOp: "store" },
+      { view: dest.color.createView(), loadOp: "clear", clearValue: { r: 0, g: 0, b: 0, a: 0 }, storeOp: "store" },
+      { view: dest.occl.createView(), loadOp: "clear", clearValue: { r: 1, g: 0, b: 0, a: 1 }, storeOp: "store" },
+      { view: dest.normal.createView(), loadOp: "clear", clearValue: { r: 0, g: 0, b: 0, a: 0 }, storeOp: "store" },
     ],
     depthStencilAttachment: {
-      view: targets.depthTex.createView(),
+      view: dest.depth.createView(),
       depthClearValue: 1,
       depthLoadOp: "clear",
       depthStoreOp: "store",
@@ -270,9 +306,8 @@ function upsampleIsoToFine(
 
 function drawIsoRefine(
   handles: MarchGpuHandles,
-  targets: MarchTargets,
-  composeW: number,
-  composeH: number,
+  dest: IsoGBuffer,
+  srcOccl: GPUTexture,
   Mgrid: number,
   steps: number,
   half: number,
@@ -280,14 +315,12 @@ function drawIsoRefine(
   ro: [number, number, number],
   dirMatrix: ReturnType<typeof offsetDirMatrix>,
 ): void {
-  const coarseOccl = gpu.isoCoarseOcclTex;
-  if (!coarseOccl) return;
-  const { device, isoRefinePipeline, drawParamBuf, volumeBuf } = handles;
-  const sceneView = targets.sceneColorTex.createView();
-  const occlIsoView = targets.occlIsoTex.createView();
-  const depthView = targets.depthTex.createView();
-  const normalView = targets.normalTex.createView();
-  const coarseOcclView = coarseOccl.createView();
+  const { device, isoRefinePipeline, drawParamBufRefine, volumeBuf } = handles;
+  const sceneView = dest.color.createView();
+  const occlIsoView = dest.occl.createView();
+  const depthView = dest.depth.createView();
+  const normalView = dest.normal.createView();
+  const srcOcclView = srcOccl.createView();
 
   for (let ci = 0; ci < gpu.sceneConstraints.length; ci++) {
     const c = gpu.sceneConstraints[ci];
@@ -300,9 +333,9 @@ function drawIsoRefine(
     const stops = c.colors || [c0, c1];
     gpuWriteBuffer(
       device,
-      drawParamBuf,
+      drawParamBufRefine,
       packDrawParamsIso(
-        targets.sceneColorTex.width, targets.sceneColorTex.height,
+        dest.color.width, dest.color.height,
         Mgrid, steps, half, scale, c.isoLevel, base0, ro, dirMatrix,
         c0, c1,
         base1, blendT, stops,
@@ -313,9 +346,9 @@ function drawIsoRefine(
     const bg = device.createBindGroup({
       layout: isoRefinePipeline.getBindGroupLayout(0),
       entries: [
-        { binding: 0, resource: { buffer: drawParamBuf } },
+        { binding: 0, resource: { buffer: drawParamBufRefine } },
         { binding: 1, resource: { buffer: volumeBuf } },
-        { binding: 2, resource: coarseOcclView },
+        { binding: 2, resource: srcOcclView },
       ],
     });
     const enc = device.createCommandEncoder();
@@ -333,64 +366,62 @@ function drawIsoRefine(
     });
     pass.setPipeline(isoRefinePipeline);
     pass.setBindGroup(0, bg);
-    setPassViewport(pass, targets.sceneColorTex.width, targets.sceneColorTex.height);
+    setPassViewport(pass, dest.color.width, dest.color.height);
     pass.draw(3);
     pass.end();
     submitEnc(device, enc);
   }
 }
 
-function drawSsaoPass(
+/** Coarse occupancy, optional 4× mid remarch, then slider-sized compose. */
+function runIsoRefineLadder(
   handles: MarchGpuHandles,
   targets: MarchTargets,
-  sceneView: GPUTextureView,
   marchW: number,
   marchH: number,
+  midRefine: boolean,
+  Mgrid: number,
+  occSteps: number,
+  isoSteps: number,
   half: number,
+  scale: number,
   ro: [number, number, number],
   dirMatrix: ReturnType<typeof offsetDirMatrix>,
-): GPUTextureView {
-  const { device, ssaoPipeline, ssaoParamBuf } = handles;
-  const aoView = targets.sceneColorAoTex.createView();
-  const occlIsoView = targets.occlIsoTex.createView();
-  const normalView = targets.normalTex.createView();
+): "mid" | "two" | false {
+  const coarseColor = gpu.isoCoarseColorTex;
+  const coarseOccl = gpu.isoCoarseOcclTex;
+  const coarseNormal = gpu.isoCoarseNormalTex;
+  const coarseDepth = gpu.isoCoarseDepthTex;
+  if (!coarseColor || !coarseOccl || !coarseNormal || !coarseDepth) return false;
 
-  gpuWriteBuffer(
-    device,
-    ssaoParamBuf,
-    packSsaoParams(
-      targets.sceneColorAoTex.width, targets.sceneColorAoTex.height, half,
-      Math.max(0.2, half * 0.18),
-      0.85,
-      0.03,
-      ro, dirMatrix,
-    ),
+  const coarseSrc = { color: coarseColor, occl: coarseOccl, normal: coarseNormal };
+  const fine: IsoGBuffer = {
+    color: targets.sceneColorTex,
+    occl: targets.occlIsoTex,
+    normal: targets.normalTex,
+    depth: targets.depthTex,
+  };
+
+  drawIsoConstraints(
+    handles, coarseColor, coarseOccl, coarseNormal, coarseDepth,
+    marchW, marchH, Mgrid, occSteps, half, scale, ro, dirMatrix,
+    true,
   );
-  const bg = device.createBindGroup({
-    layout: ssaoPipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: ssaoParamBuf } },
-      { binding: 1, resource: sceneView },
-      { binding: 2, resource: occlIsoView },
-      { binding: 3, resource: normalView },
-    ],
-  });
-  const enc = device.createCommandEncoder();
-  const pass = enc.beginRenderPass({
-    colorAttachments: [{
-      view: aoView,
-      clearValue: { r: 0, g: 0, b: 0, a: 0 },
-      loadOp: "clear",
-      storeOp: "store",
-    }],
-  });
-  pass.setPipeline(ssaoPipeline);
-  pass.setBindGroup(0, bg);
-  setPassViewport(pass, targets.sceneColorAoTex.width, targets.sceneColorAoTex.height);
-  pass.draw(3);
-  pass.end();
-  submitEnc(device, enc);
-  return aoView;
+
+  const mid = midRefine ? acquireIsoMidGBuffer() : null;
+  if (mid && upsampleIso(handles, coarseSrc, mid)) {
+    drawIsoRefine(handles, mid, coarseOccl, Mgrid, isoSteps, half, scale, ro, dirMatrix);
+    if (upsampleIso(handles, { color: mid.color, occl: mid.occl, normal: mid.normal }, fine)) {
+      drawIsoRefine(handles, fine, mid.occl, Mgrid, isoSteps, half, scale, ro, dirMatrix);
+      return "mid";
+    }
+  }
+
+  if (upsampleIso(handles, coarseSrc, fine)) {
+    drawIsoRefine(handles, fine, coarseOccl, Mgrid, isoSteps, half, scale, ro, dirMatrix);
+    return "two";
+  }
+  return false;
 }
 
 function drawBeerPass(
@@ -604,10 +635,11 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
     handles, targets, ro, dirMatrix, half, marchW, marchH, volW, volH,
     composeW, composeH,
   } = setup;
-  let { refine } = setup;
+  let { refine, midRefine } = setup;
   const { device, ctx, volumeBuf, colorBuf } = handles;
   const { camera, scale, steps } = params;
-  const isoSteps = Math.min(192, Math.max(16, (params.isoSteps ?? steps) | 0));
+  const isoSteps = clampIsoStepsForTier(params.isoSteps ?? steps, state.deviceTier);
+  const occSteps = coarseIsoSteps(isoSteps, state.deviceTier);
   const volumeSteps = Math.min(96, Math.max(8, steps | 0));
   const Mgrid = gpu.sceneM;
   const sameRes = volW === composeW && volH === composeH;
@@ -618,6 +650,14 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
       !gpu.isoCoarseNormalTex || !gpu.isoCoarseDepthTex)
   ) {
     refine = false;
+    midRefine = false;
+  }
+  if (
+    midRefine &&
+    (!gpu.isoMidColorTex || !gpu.isoMidOcclTex ||
+      !gpu.isoMidNormalTex || !gpu.isoMidDepthTex)
+  ) {
+    midRefine = false;
   }
 
   gpu.profileMarchFbW = composeW;
@@ -633,30 +673,14 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
 
   const swapTex = ctx.getCurrentTexture();
 
+  let refinePath: "mid" | "two" | false = false;
   if (refine) {
-    clearIsoGBuffer(
-      device,
-      gpu.isoCoarseColorTex!,
-      gpu.isoCoarseOcclTex!,
-      gpu.isoCoarseNormalTex!,
-      gpu.isoCoarseDepthTex!,
-      true,
+    refinePath = runIsoRefineLadder(
+      handles, targets, marchW, marchH, midRefine,
+      Mgrid, occSteps, isoSteps, half, scale, ro, dirMatrix,
     );
-    drawIsoConstraints(
-      handles,
-      gpu.isoCoarseColorTex!,
-      gpu.isoCoarseOcclTex!,
-      gpu.isoCoarseNormalTex!,
-      gpu.isoCoarseDepthTex!,
-      marchW, marchH, Mgrid, isoSteps, half, scale, ro, dirMatrix,
-    );
-    if (upsampleIsoToFine(handles, targets, composeW, composeH)) {
-      drawIsoRefine(
-        handles, targets, composeW, composeH, Mgrid, isoSteps, half, scale, ro, dirMatrix,
-      );
-    } else {
+    if (!refinePath) {
       refine = false;
-      clearMarchTargets(device, targets);
       drawIsoConstraints(
         handles,
         targets.sceneColorTex,
@@ -666,8 +690,7 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
         composeW, composeH, Mgrid, isoSteps, half, scale, ro, dirMatrix,
       );
     }
-  } else {
-    clearMarchTargets(device, targets);
+  } else if (gpu.sceneConstraints.length > 0) {
     drawIsoConstraints(
       handles,
       targets.sceneColorTex,
@@ -675,19 +698,15 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
       targets.normalTex,
       targets.depthTex,
       composeW, composeH, Mgrid, isoSteps, half, scale, ro, dirMatrix,
+      true,
     );
+  } else {
+    clearMarchTargets(device, targets);
   }
 
-  let sceneView = targets.sceneColorTex.createView();
-  const sceneFbW = targets.sceneColorTex.width;
-  const sceneFbH = targets.sceneColorTex.height;
-
-  const ranSsao = gpu.sceneConstraints.length > 0;
-  if (ranSsao) {
-    sceneView = drawSsaoPass(handles, targets, sceneView, composeW, composeH, half, ro, dirMatrix);
-  }
-  const presentW = ranSsao ? targets.sceneColorAoTex.width : sceneFbW;
-  const presentH = ranSsao ? targets.sceneColorAoTex.height : sceneFbH;
+  const sceneView = targets.sceneColorTex.createView();
+  const presentW = targets.sceneColorTex.width;
+  const presentH = targets.sceneColorTex.height;
 
   const ranBeer = gpu.densLayerCount > 0 && gpu.densPacked;
   if (ranBeer) {
@@ -768,8 +787,9 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
 
   drawFxaaPass(handles, sceneView, swapTex, true);
 
-  const method: string[] = [refine ? "gpu-iso-refine" : "gpu-iso"];
-  if (ranSsao) method.push("ssao");
+  const method: string[] = [
+    refinePath === "mid" ? "gpu-iso-refine-mid" : refine ? "gpu-iso-refine" : "gpu-iso",
+  ];
   if (ranBeer) method.push(sameRes ? "beer" : "beer(volFB)+blit");
   if (ranFlow) method.push("flow");
   method.push("fxaa");

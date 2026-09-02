@@ -54,6 +54,7 @@ import { fitVectorField } from "../math/fitVector.js";
 import { listExpressions, inferLayerRole } from "../model/expressions.js";
 import { els, viewportSize } from "./dom.js";
 import { state, FIT_DEBOUNCE_MS } from "./state.js";
+import { clampIsoStepsForTier } from "./deviceTier.js";
 import { layerNeedsRefit } from "./layerFitPolicy.js";
 import type {
   ChebFitTiming,
@@ -923,9 +924,10 @@ export function scheduleUploadFit(delay = FIT_DEBOUNCE_MS, opts = {}) {
 export function applyRenderHyperparams() {
   const densScale = Number(els.scale.value) || 1;
   const steps = Math.min(96, Math.max(8, Number(els.steps.value) || 32));
-  const isoSteps = Math.min(192, Math.max(16, Number(els.isoSteps?.value) || steps));
+  const isoStepsIn = Math.min(192, Math.max(16, Number(els.isoSteps?.value) || steps));
   els.steps.value = String(steps);
-  if (els.isoSteps) els.isoSteps.value = String(isoSteps);
+  if (els.isoSteps) els.isoSteps.value = String(isoStepsIn);
+  const isoSteps = clampIsoStepsForTier(isoStepsIn, state.deviceTier);
   clipUniforms.uScale.value = densScale;
   clipUniforms.uSteps.value = steps;
   clipUniforms.uIsoSteps.value = isoSteps;

@@ -117,16 +117,16 @@ export async function initClipBakeGpu(
         size: 256,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
+      gpu.drawParamBufRefine = gpu.device.createBuffer({
+        size: 256,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      });
       gpu.drawParamBufBeer = gpu.device.createBuffer({
         size: 512,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
       gpu.fxaaParamBuf = gpu.device.createBuffer({
         size: 16,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-      });
-      gpu.ssaoParamBuf = gpu.device.createBuffer({
-        size: 128,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
       gpu.isoUpsampleParamBuf = gpu.device.createBuffer({

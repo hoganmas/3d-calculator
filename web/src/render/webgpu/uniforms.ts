@@ -109,28 +109,6 @@ export function packDrawParamsBeer(
   return buf;
 }
 
-export function packSsaoParams(
-  fbW: number,
-  fbH: number,
-  half: number,
-  radius: number,
-  strength: number,
-  bias: number,
-  ro: number[],
-  M: Float64Array | Float32Array | number[],
-): ArrayBuffer {
-  const buf = new ArrayBuffer(128);
-  const u32 = new Uint32Array(buf);
-  const f32 = new Float32Array(buf);
-  u32[0] = fbW | 0; u32[1] = fbH | 0;
-  f32[4] = half; f32[5] = radius; f32[6] = strength; f32[7] = bias;
-  f32[8] = ro[0]; f32[9] = ro[1]; f32[10] = ro[2];
-  f32[12] = M[0]; f32[13] = M[1]; f32[14] = M[2];
-  f32[16] = M[3]; f32[17] = M[4]; f32[18] = M[5];
-  f32[20] = M[6]; f32[21] = M[7]; f32[22] = M[8];
-  return buf;
-}
-
 export function writeLayerColors(
   device: GPUDevice | null,
   colorBuf: GPUBuffer | null,

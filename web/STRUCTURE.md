@@ -39,7 +39,7 @@ src/
       marchCanvas.ts        Overlay canvas + offscreen targets
       marchInit.ts          Device init + pipeline bootstrap
       gridOverlay.ts        World grid, axes, axis-label billboards
-      renderFrame.ts        Per-frame iso / SSAO / Beer / FXAA pass graph
+      renderFrame.ts        Per-frame iso / Beer / FXAA pass graph
       gpuState.ts           Shared GPU device / texture state
       uniforms.ts           Draw-param packing + layer color upload
       sceneUpload.ts        Volume upload + keyframe patch
@@ -52,7 +52,7 @@ src/
         flowParticles.wgsl
         isoHermite.wgsl
         isoTrilinear.wgsl
-        beer.wgsl, grid.wgsl, axisLabel.wgsl, fxaa.wgsl, ssao.wgsl
+        beer.wgsl, grid.wgsl, axisLabel.wgsl, fxaa.wgsl
   types/
     models.ts               Shared TS domain types (ExprItem, SceneBake, …)
   ui/

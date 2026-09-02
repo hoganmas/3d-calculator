@@ -66,8 +66,10 @@ export function syncQualitySlidersFromSettings() {
   syncQualitySliderDom();
 }
 
-export function applyQualityFromState(opts: { refit?: boolean; reseedFlow?: boolean } = {}) {
-  if (!isProdUi()) return;
+export function applyQualityFromState(
+  opts: { refit?: boolean; reseedFlow?: boolean; force?: boolean } = {},
+) {
+  if (!isProdUi() && !opts.force) return;
 
   const marchDownscale = qualityToMarchDownscale(state.scalarQuality);
   const isoMarchDownscale = qualityToIsoMarchDownscale(state.surfaceQuality);

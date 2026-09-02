@@ -1,5 +1,7 @@
 import {
   isoFineFramebufferSize,
+  isoMidFramebufferSize,
+  isoMidRefineEnabled,
   isoNeedRefineFromCoarse2x2,
   isoDilatedOccupancyNeedsRefine,
   isoRefineKindFromCoarse2x2,
@@ -25,9 +27,29 @@ export async function run() {
         const q50 = isoFineFramebufferSize(50, 38, 800, 600, 4);
         assert(q50.fw === 200 && q50.fh === 150, "q=50 compose is 4×");
         assert(isoRefineEnabled(50, 38, 800, 600, 4), "16× occupancy refines into 4× compose");
+        const mobileDump = isoFineFramebufferSize(197, 321, 393, 641, 2);
+        assert(mobileDump.fw === 197 && mobileDump.fh === 321, "2× slider composes at half, not display");
+        const mobileFloor = isoFineFramebufferSize(25, 40, 393, 641, 4);
+        assert(mobileFloor.fw === 98 && mobileFloor.fh === 160, "mobile 4× floor is viewport/4");
         const q0 = isoFineFramebufferSize(50, 38, 800, 600, 16);
         assert(q0.fw === 50 && q0.fh === 38, "q=0 compose matches 16× occupancy");
         assert(!isoRefineEnabled(50, 38, 800, 600, 16), "no refine when fine equals coarse");
+      },
+    },
+    {
+      name: "4× mid ladder only when compose is finer than 4×",
+      fn: () => {
+        const q100 = isoMidFramebufferSize(50, 38, 800, 600, 1);
+        assert(!!q100 && q100.mw === 200 && q100.mh === 150, "q=100 mid is 4×");
+        assert(isoMidRefineEnabled(50, 38, 800, 600, 1), "16× → 4× → 1×");
+        const q75 = isoMidFramebufferSize(50, 38, 800, 600, 2);
+        assert(!!q75 && q75.mw === 200 && q75.mh === 150, "q≈75 mid is 4× between 16× and 2×");
+        assert(isoMidRefineEnabled(50, 38, 800, 600, 2), "16× → 4× → 2×");
+        assert(!isoMidRefineEnabled(50, 38, 800, 600, 4), "q=50 compose is already 4×");
+        assert(!isoMidRefineEnabled(50, 38, 800, 600, 8), "no mid coarser than compose");
+        assert(!isoMidRefineEnabled(50, 38, 800, 600, 16), "no mid when compose equals coarse");
+        assert(!isoMidRefineEnabled(200, 150, 800, 600, 1), "no mid when occupancy is already 4×");
+        assert(!isoMidRefineEnabled(25, 40, 393, 641, 4), "mobile 4× floor skips the mid pass");
       },
     },
     {

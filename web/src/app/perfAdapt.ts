@@ -31,19 +31,20 @@ export function getDeviceTier(): DeviceTier {
 
 /** Apply boot-time quality defaults for touch / low-end devices (fresh sessions only). */
 export function applyBootPerfTier(restoredDocument: boolean) {
-  if (!isProdUi() || restoredDocument) return;
-
   const tier = detectDeviceTier({ webGpuFailed: state.webGpuFailed });
   state.deviceTier = tier;
+  if (tier === "mobile") maybeAutoCollapsePanel();
+  if (restoredDocument) return;
+  // Dev HTML defaults are desktop-ish (2× iso / 32 steps). Still apply the
+  // mobile/tablet preset so `npm run dev` on a phone is not 21fps by default.
+  if (!isProdUi() && tier === "desktop") return;
 
   const preset = bootQualityForTier(tier);
   state.precisionQuality = preset.precisionQuality;
   state.scalarQuality = preset.scalarQuality;
   state.surfaceQuality = preset.surfaceQuality;
   state.vectorQuality = preset.vectorQuality;
-  applyQualityFromState({ refit: false });
-
-  if (tier === "mobile") maybeAutoCollapsePanel();
+  applyQualityFromState({ refit: false, force: true });
 }
 
 function maybeAutoCollapsePanel() {

@@ -10,7 +10,6 @@ import {
   getGridShader,
   getAxisLabelShader,
   getFxaaShader,
-  getSsaoShader,
   getBlitShader,
 } from "./shaders/compose.js";
 
@@ -32,7 +31,7 @@ export async function ensurePipelinesForDegree(_deg: number): Promise<PipelineBu
   if (!gpu.device) return false;
   if (
     gpu.isoPipeline && gpu.isoRefinePipeline && gpu.isoUpsamplePipeline &&
-    gpu.beerPipeline && gpu.fxaaPipeline && gpu.ssaoPipeline &&
+    gpu.beerPipeline && gpu.fxaaPipeline &&
     gpu.gridPipeline && gpu.labelPipeline && gpu.blitPipeline &&
     gpu.builtEpoch === PIPELINE_EPOCH
   ) {
@@ -41,7 +40,7 @@ export async function ensurePipelinesForDegree(_deg: number): Promise<PipelineBu
 
   startupBegin("gpu.pipelines.compile-shaders");
   gpu.canvasFormat = navigator.gpu.getPreferredCanvasFormat();
-  const [isoMod, isoRefineMod, isoUpMod, beerMod, gridMod, labelMod, fxaaMod, ssaoMod, blitMod] = await Promise.all([
+  const [isoMod, isoRefineMod, isoUpMod, beerMod, gridMod, labelMod, fxaaMod, blitMod] = await Promise.all([
     compileChecked("iso", getIsoShader(MAX_GRAD_STOPS)),
     compileChecked("isoRefine", getIsoRefineShader(MAX_GRAD_STOPS)),
     compileChecked("isoUpsample", getIsoUpsampleShader()),
@@ -49,7 +48,6 @@ export async function ensurePipelinesForDegree(_deg: number): Promise<PipelineBu
     compileChecked("grid", getGridShader()),
     compileChecked("axisLabel", getAxisLabelShader()),
     compileChecked("fxaa", getFxaaShader()),
-    compileChecked("ssao", getSsaoShader()),
     compileChecked("blit", getBlitShader()),
   ]);
   startupEnd("gpu.pipelines.compile-shaders");
@@ -211,22 +209,6 @@ export async function ensurePipelinesForDegree(_deg: number): Promise<PipelineBu
   }
 
   device.pushErrorScope("validation");
-  const nextSsao = device.createRenderPipeline({
-    layout: "auto",
-    vertex: { module: ssaoMod, entryPoint: "vsMain" },
-    fragment: {
-      module: ssaoMod,
-      entryPoint: "fsMain",
-      targets: [{ format: gpu.canvasFormat }],
-    },
-    primitive: { topology: "triangle-list" },
-  });
-  {
-    const err = await device.popErrorScope();
-    if (err) throw new Error(`ssao: ${err.message}`);
-  }
-
-  device.pushErrorScope("validation");
   const nextFxaa = device.createRenderPipeline({
     layout: "auto",
     vertex: { module: fxaaMod, entryPoint: "vsMain" },
@@ -273,7 +255,6 @@ export async function ensurePipelinesForDegree(_deg: number): Promise<PipelineBu
   gpu.beerPipeline = nextBeer;
   gpu.gridPipeline = nextGrid;
   gpu.labelPipeline = nextLabel;
-  gpu.ssaoPipeline = nextSsao;
   gpu.fxaaPipeline = nextFxaa;
   gpu.blitPipeline = nextBlit;
   gpu.builtEpoch = PIPELINE_EPOCH;

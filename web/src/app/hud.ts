@@ -12,11 +12,12 @@ import { perfAdaptHudSuffix } from "./perfAdapt.js";
 import {
   isoCoarseDownscale,
   isoMarchDownscale,
+  effectiveIsoMarchDownscale,
   marchDownscale,
   marchFramebufferSize,
   volumeFramebufferSize,
 } from "./presentation.js";
-import { isoFineFramebufferSize } from "../render/webgpu/isoRefine.js";
+import { isoFineFramebufferSize, isoMidFramebufferSize } from "../render/webgpu/isoRefine.js";
 import { isIsoRefineDebugEnabled } from "./isoRefineDebug.js";
 import { compileAllExprs, fmtParamNum } from "./compile.js";
 import {
@@ -138,7 +139,7 @@ export function hudText() {
       ? ` · ${lastErrorReport.errorCount} expr err`
       : "";
   const clip = ` · rAF ${state.frameDtSmooth.toFixed(0)}ms · ${submit}${gpuSplit}${present}${errHint} · vol ${state.lastVolumeM}³`;
-  const refineDbg = isIsoRefineDebugEnabled() ? " · iso-debug cyan=lo orange=edge magenta=isox" : "";
+  const refineDbg = isIsoRefineDebugEnabled() ? " · iso-debug cyan=lo orange=fine magenta=isox" : "";
   return `clip-grid · ${hudFpsText()} · ${state.cpuMsSmooth.toFixed(1)}ms js${clip}${refineDbg} · ${Math.round(w * pr)}×${Math.round(h * pr)}`;
 }
 
@@ -147,8 +148,11 @@ export function buildMetricsReport() {
   const fbH = Math.max(1, renderer.domElement.height);
   const p = getClipGpuProfile();
   const { mw, mh } = marchFramebufferSize();
-  const fineDown = isoMarchDownscale();
+  const sliderDown = isoMarchDownscale();
+  const fineDown = effectiveIsoMarchDownscale();
   const refine = isoFineFramebufferSize(mw, mh, fbW, fbH, fineDown);
+  const mid = isoMidFramebufferSize(mw, mh, fbW, fbH, fineDown);
+  const isoDownNote = sliderDown !== fineDown ? ` (slider ${sliderDown}×)` : "";
   const lines = [
     `poly-cloud metrics  ${new Date().toISOString()}`,
     `deg             ${state.fitDeg}`,
@@ -158,11 +162,12 @@ export function buildMetricsReport() {
     `box_size        ${2 * clipUniforms.uHalf.value}`,
     `vol_downscale   ${marchDownscale()}×`,
     `iso_coarse      ${isoCoarseDownscale()}×`,
-    `iso_downscale   ${fineDown}×`,
+    `iso_downscale   ${fineDown}×${isoDownNote}`,
     `vol_resolution  ${(100 / marchDownscale()).toFixed(1)}%`,
     `iso_resolution  ${(100 / fineDown).toFixed(1)}%`,
     `viewport        ${fbW}×${fbH}`,
     `iso_fb_req      ${mw}×${mh}`,
+    `iso_mid_fb      ${mid ? `${mid.mw}×${mid.mh}` : "—"}`,
     `iso_refine_fb   ${refine.fw}×${refine.fh}`,
     `vol_fb_req      ${volumeFramebufferSize().mw}×${volumeFramebufferSize().mh}`,
     `gpu_march_fb    ${p.marchFbW && p.marchFbH ? `${p.marchFbW}×${p.marchFbH}` : "—"}`,
@@ -170,9 +175,10 @@ export function buildMetricsReport() {
     `loop_ms         ${state.frameDtSmooth.toFixed(2)}`,
     `js_frame_ms     ${state.cpuMsSmooth.toFixed(2)}`,
     `gpu_path        ${useGpuClipPath() ? "webgpu" : "cpu/webgl"}`,
+    `device_tier     ${state.deviceTier}`,
     `gpu_method      ${p.method || "—"}`,
     `iso_interp      trilinear march / Hermite n`,
-    `iso_refine_dbg  ${isIsoRefineDebugEnabled() ? "cyan=coarse orange=edge magenta=isox" : "off"}`,
+    `iso_refine_dbg  ${isIsoRefineDebugEnabled() ? "cyan=lo orange=fine-edge magenta=isox" : "off"}`,
     `expr_kind       ${state.lastExprMeta.kind}`,
     `shade           ${state.lastExprMeta.shade}`,
     `iso_level       ${readIsoLevel()}`,

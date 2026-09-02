@@ -3,6 +3,10 @@ import {
   bootQualityForTier,
   detectDeviceTier,
   webGpuPowerPreference,
+  isoComposeDownscaleFloor,
+  effectiveIsoComposeDownscale,
+  coarseIsoSteps,
+  clampIsoStepsForTier,
 } from "../../src/app/deviceTier.ts";
 import { qualityToTrailSteps } from "../../src/app/qualityMapping.ts";
 import { assert } from "../helpers/assert.ts";
@@ -69,6 +73,26 @@ export async function run() {
       fn: () => {
         assert(webGpuPowerPreference("mobile") === "low-power", "mobile low-power");
         assert(webGpuPowerPreference("desktop") === "high-performance", "desktop perf");
+      },
+    },
+    {
+      name: "mobile compose floor is 4× and raises a 2× slider",
+      fn: () => {
+        assert(isoComposeDownscaleFloor("mobile") === 4, "mobile floor");
+        assert(isoComposeDownscaleFloor("tablet") === 2, "tablet floor");
+        assert(isoComposeDownscaleFloor("desktop") === 1, "desktop no floor");
+        assert(effectiveIsoComposeDownscale(2, "mobile") === 4, "2× slider becomes 4×");
+        assert(effectiveIsoComposeDownscale(8, "mobile") === 8, "8× stays 8×");
+        assert(effectiveIsoComposeDownscale(1, "desktop") === 1, "desktop 1× stays");
+      },
+    },
+    {
+      name: "mobile iso-step caps",
+      fn: () => {
+        assert(coarseIsoSteps(32, "mobile") === 16, "occupancy 16 steps");
+        assert(coarseIsoSteps(32, "desktop") === 32, "desktop occupancy keeps steps");
+        assert(clampIsoStepsForTier(44, "mobile") === 32, "boot q=25 steps cap at 32");
+        assert(clampIsoStepsForTier(64, "desktop") === 64, "desktop keeps 64");
       },
     },
   ]);

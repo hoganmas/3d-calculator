@@ -47,3 +47,32 @@ export function bootQualityForTier(tier: DeviceTier): BootQualityPreset {
 export function webGpuPowerPreference(tier: DeviceTier): GPUPowerPreference {
   return tier === "mobile" ? "low-power" : "high-performance";
 }
+
+/** Finest iso compose divisor floor. Mobile Hermite refine at 2×/1× misses 30fps. */
+export function isoComposeDownscaleFloor(tier: DeviceTier): number {
+  switch (tier) {
+    case "mobile":
+      return 4;
+    case "tablet":
+      return 2;
+    default:
+      return 1;
+  }
+}
+
+export function effectiveIsoComposeDownscale(slider: number, tier: DeviceTier): number {
+  const n = Math.min(16, Math.max(1, Math.round(slider) || 1));
+  return Math.max(n, isoComposeDownscaleFloor(tier));
+}
+
+/** Occupancy pass can be coarser than the Hermite refine. Shader clamps to ≥16. */
+export function coarseIsoSteps(isoSteps: number, tier: DeviceTier): number {
+  const steps = Math.min(192, Math.max(16, isoSteps | 0));
+  return tier === "mobile" ? Math.min(steps, 16) : steps;
+}
+
+/** Cap refine iso-step count so boot quality 25 (44 steps) does not outrun HTML's 32. */
+export function clampIsoStepsForTier(isoSteps: number, tier: DeviceTier): number {
+  const max = tier === "mobile" ? 32 : 192;
+  return Math.min(max, Math.max(16, isoSteps | 0));
+}
