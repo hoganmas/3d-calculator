@@ -137,7 +137,7 @@ export function hudText() {
       ? ` · ${lastErrorReport.errorCount} expr err`
       : "";
   const clip = ` · rAF ${state.frameDtSmooth.toFixed(0)}ms · ${submit}${gpuSplit}${present}${errHint} · vol ${state.lastVolumeM}³`;
-  const refineDbg = isIsoRefineDebugEnabled() ? " · iso-debug cyan=lo orange=hi" : "";
+  const refineDbg = isIsoRefineDebugEnabled() ? " · iso-debug cyan=lo orange=edge magenta=isox" : "";
   return `clip-grid · ${hudFpsText()} · ${state.cpuMsSmooth.toFixed(1)}ms js${clip}${refineDbg} · ${Math.round(w * pr)}×${Math.round(h * pr)}`;
 }
 
@@ -169,7 +169,7 @@ export function buildMetricsReport() {
     `gpu_path        ${useGpuClipPath() ? "webgpu" : "cpu/webgl"}`,
     `gpu_method      ${p.method || "—"}`,
     `iso_interp      trilinear march / Hermite n`,
-    `iso_refine_dbg  ${isIsoRefineDebugEnabled() ? "cyan=coarse orange=hi-res" : "off"}`,
+    `iso_refine_dbg  ${isIsoRefineDebugEnabled() ? "cyan=coarse orange=edge magenta=isox" : "off"}`,
     `expr_kind       ${state.lastExprMeta.kind}`,
     `shade           ${state.lastExprMeta.shade}`,
     `iso_level       ${readIsoLevel()}`,

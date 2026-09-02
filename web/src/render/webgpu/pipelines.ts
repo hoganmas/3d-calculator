@@ -59,10 +59,6 @@ export async function ensurePipelinesForDegree(_deg: number): Promise<PipelineBu
     color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
     alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
   };
-  const blendMin: GPUBlendState = {
-    color: { srcFactor: "one", dstFactor: "one", operation: "min" },
-    alpha: { srcFactor: "one", dstFactor: "one", operation: "min" },
-  };
 
   const { device } = gpu;
 
@@ -75,7 +71,8 @@ export async function ensurePipelinesForDegree(_deg: number): Promise<PipelineBu
       entryPoint: "fsMain",
       targets: [
         { format: gpu.canvasFormat, blend: blendPremul },
-        { format: "rgba16float", blend: blendMin },
+        // Replace (not min): occl.g is the front iso's layer id for intersection refine.
+        { format: "rgba16float" },
         { format: "rgba8unorm" },
       ],
     },
@@ -100,7 +97,8 @@ export async function ensurePipelinesForDegree(_deg: number): Promise<PipelineBu
       entryPoint: "fsRefine",
       targets: [
         { format: gpu.canvasFormat, blend: blendPremul },
-        { format: "rgba16float", blend: blendMin },
+        // Replace (not min): occl.g is the front iso's layer id for intersection refine.
+        { format: "rgba16float" },
         { format: "rgba8unorm" },
       ],
     },

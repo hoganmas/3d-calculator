@@ -40,6 +40,7 @@ export function packDrawParamsIso(
   blendT: number = 0,
   gradRgbs: RgbTriplet[] | null = null,
   debugTint: boolean = false,
+  layerIndex: number = 0,
 ): ArrayBuffer {
   const buf = new ArrayBuffer(256);
   const u32 = new Uint32Array(buf);
@@ -55,7 +56,7 @@ export function packDrawParamsIso(
   f32[25] = blendT;
   const stops = normalizeRgbStops(gradRgbs, absorb, emit);
   f32[26] = stops.length;
-  f32[27] = 0;
+  f32[27] = Math.max(0, layerIndex | 0);
   for (let i = 0; i < MAX_GRAD_STOPS; i++) {
     const c = stops[Math.min(i, stops.length - 1)];
     const o = 28 + i * 4;

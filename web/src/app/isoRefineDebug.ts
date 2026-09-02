@@ -1,4 +1,4 @@
-/** False-color iso refine: cyan = coarse upsample, orange = hi-res edge remarch.
+/** False-color iso refine: cyan = coarse, orange = occupancy edge, magenta = iso intersection.
  *  Enable via ?isoRefineDebug=1, localStorage laplacianIsoRefineDebug=1,
  *  or window.__laplacianIsoRefineDebug(true). */
 
@@ -28,7 +28,7 @@ export function setIsoRefineDebugEnabled(on: boolean): void {
   if (on) localStorage.setItem("laplacianIsoRefineDebug", "1");
   else localStorage.removeItem("laplacianIsoRefineDebug");
   console.log(
-    `[iso-refine] debug ${on ? "ON — cyan = coarse upsample, orange = hi-res remarch" : "disabled"}`,
+    `[iso-refine] debug ${on ? "ON — cyan = coarse, orange = edge, magenta = iso intersection" : "disabled"}`,
   );
 }
 
@@ -44,7 +44,7 @@ export function initIsoRefineDebug(): void {
   };
   if (isIsoRefineDebugEnabled()) {
     console.log(
-      "[iso-refine] debug ON — cyan = coarse upsample, orange = hi-res remarch. " +
+      "[iso-refine] debug ON — cyan = coarse, orange = edge, magenta = iso intersection. " +
         "Toggle: __laplacianIsoRefineDebug(false)",
     );
   }

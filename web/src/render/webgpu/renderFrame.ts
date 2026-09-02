@@ -186,6 +186,8 @@ function drawIsoConstraints(
         sceneTex.width, sceneTex.height, Mgrid, steps, half, scale, c.isoLevel, base0, ro, dirMatrix,
         c0, c1,
         base1, blendT, stops,
+        false,
+        ci + 1,
       ),
     );
     const bg = device.createBindGroup({
@@ -304,6 +306,7 @@ function drawIsoRefine(
         c0, c1,
         base1, blendT, stops,
         isIsoRefineDebugEnabled(),
+        ci + 1,
       ),
     );
     const bg = device.createBindGroup({

@@ -1,8 +1,11 @@
 import {
   isoFineFramebufferSize,
   isoNeedRefineFromCoarse2x2,
+  isoRefineKindFromCoarse2x2,
   isoRefineEnabled,
   ISO_OCC_HIT,
+  ISO_REFINE_EDGE,
+  ISO_REFINE_INTERSECT,
 } from "../../src/render/webgpu/isoRefine.ts";
 import { assert } from "../helpers/assert.ts";
 import { runSuite } from "../helpers/runner.ts";
@@ -30,6 +33,27 @@ export async function run() {
         assert(isoNeedRefineFromCoarse2x2(0.2, 1, 1, 1), "mixed occupancy refines");
         assert(isoNeedRefineFromCoarse2x2(0.1, 0.1, 0.1, 0.5), "depth crease refines");
         assert(ISO_OCC_HIT > 0.9, "hit threshold near far plane");
+      },
+    },
+    {
+      name: "2×2 mixed iso layers refine as intersection",
+      fn: () => {
+        assert(
+          !isoNeedRefineFromCoarse2x2(0.2, 0.2, 0.21, 0.19, 1, 1, 1, 1),
+          "same layer stays coarse",
+        );
+        assert(
+          isoNeedRefineFromCoarse2x2(0.2, 0.2, 0.21, 0.19, 1, 2, 1, 1),
+          "two isos in a 2×2 remarch",
+        );
+        assert(
+          isoRefineKindFromCoarse2x2(0.2, 0.2, 0.21, 0.19, 1, 2, 1, 1) === ISO_REFINE_INTERSECT,
+          "mixed layers are intersection, not just an edge",
+        );
+        assert(
+          isoRefineKindFromCoarse2x2(0.2, 1, 1, 1) === ISO_REFINE_EDGE,
+          "silhouette stays edge",
+        );
       },
     },
   ]);

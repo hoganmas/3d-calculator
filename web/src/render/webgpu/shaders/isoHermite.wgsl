@@ -15,7 +15,7 @@ struct DrawParams {
   volBaseB: f32,
   blendT: f32,
   gradCount: f32,
-  _padG: f32,
+  layerIndex: f32,
   g0: vec4f,
   g1: vec4f,
   g2: vec4f,
@@ -462,7 +462,7 @@ fn marchIso(ro: vec3f, rd: vec3f, tEnter: f32, tExit: f32) -> FSOut {
         let d = clamp(hit / far, 0.0, 0.999);
         let n = isoNormal(p, rd);
         out.color = shadeIso(p, rd, n);
-        out.occl = vec4f(d, 0.0, 0.0, 1.0);
+        out.occl = vec4f(d, draw.layerIndex, 0.0, 1.0);
         out.normal = vec4f(n * 0.5 + 0.5, 1.0);
         out.depth = d;
         return out;
