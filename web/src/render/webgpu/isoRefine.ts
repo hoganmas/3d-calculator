@@ -52,14 +52,20 @@ export function isoRefineKindFromCoarse2x2(
   id10 = 0,
   id01 = 0,
   id11 = 0,
+  b00 = 0,
+  b10 = 0,
+  b01 = 0,
+  b11 = 0,
 ): number {
   const ds = [d00, d10, d01, d11];
   const ids = [id00, id10, id01, id11];
+  const bounds = [b00, b10, b01, b11];
   let nHit = 0;
   let dMin = 1;
   let dMax = 0;
   let id0 = 0;
   let mixedIso = false;
+  let nearBound = false;
   for (let i = 0; i < 4; i++) {
     const d = ds[i];
     if (d < ISO_OCC_HIT) {
@@ -71,6 +77,7 @@ export function isoRefineKindFromCoarse2x2(
         if (id0 === 0) id0 = id;
         else if (id !== id0) mixedIso = true;
       }
+      if (bounds[i] > 0.5) nearBound = true;
     } else {
       dMax = Math.max(dMax, 1);
     }
@@ -78,10 +85,11 @@ export function isoRefineKindFromCoarse2x2(
   if (mixedIso) return ISO_REFINE_INTERSECT;
   if (nHit > 0 && nHit < 4) return ISO_REFINE_EDGE;
   if (nHit === 4 && dMax - dMin > ISO_DEPTH_CREASE) return ISO_REFINE_EDGE;
+  if (nearBound) return ISO_REFINE_EDGE;
   return ISO_REFINE_NONE;
 }
 
-/** Mixed occupancy, a depth crease, or two isos in the four covering coarse samples. */
+/** Mixed occupancy, depth crease, iso intersection, or a hit on a box face. */
 export function isoNeedRefineFromCoarse2x2(
   d00: number,
   d10: number,
@@ -91,6 +99,17 @@ export function isoNeedRefineFromCoarse2x2(
   id10 = 0,
   id01 = 0,
   id11 = 0,
+  b00 = 0,
+  b10 = 0,
+  b01 = 0,
+  b11 = 0,
 ): boolean {
-  return isoRefineKindFromCoarse2x2(d00, d10, d01, d11, id00, id10, id01, id11) !== ISO_REFINE_NONE;
+  return isoRefineKindFromCoarse2x2(
+    d00, d10, d01, d11, id00, id10, id01, id11, b00, b10, b01, b11,
+  ) !== ISO_REFINE_NONE;
+}
+
+/** True when a 4×4 coarse neighborhood (2×2 footprint + 1-texel ring) is mixed. */
+export function isoDilatedOccupancyNeedsRefine(nHit: number, nTexels = 16): boolean {
+  return nHit > 0 && nHit < nTexels;
 }

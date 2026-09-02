@@ -241,8 +241,17 @@ function applyDisplaySize(
   if (els.hud && getHudText) els.hud.textContent = getHudText();
 }
 
+let lastDisplayW = 0;
+let lastDisplayH = 0;
+
 export function resize() {
   const { vw, vh } = viewportSize();
+  // iOS visualViewport scroll/URL-bar animation fires resize constantly.
+  // Rebuilding the march targets on a no-op size change makes the coarse
+  // grid crawl, which shows up as cyan flicker along the box on mobile.
+  if (vw === lastDisplayW && vh === lastDisplayH) return;
+  lastDisplayW = vw;
+  lastDisplayH = vh;
   applyDisplaySize(vw, vh, vw, vh, { markClipDirty: true });
   // Present canvas at display resolution; raymarch targets stay at mw×mh.
   resizeClipGpuCanvas(vw, vh);

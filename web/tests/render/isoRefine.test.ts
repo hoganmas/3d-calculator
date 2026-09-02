@@ -1,6 +1,7 @@
 import {
   isoFineFramebufferSize,
   isoNeedRefineFromCoarse2x2,
+  isoDilatedOccupancyNeedsRefine,
   isoRefineKindFromCoarse2x2,
   isoRefineEnabled,
   ISO_OCC_HIT,
@@ -54,6 +55,13 @@ export async function run() {
           isoRefineKindFromCoarse2x2(0.2, 1, 1, 1) === ISO_REFINE_EDGE,
           "silhouette stays edge",
         );
+        assert(
+          isoNeedRefineFromCoarse2x2(0.2, 0.2, 0.21, 0.19, 1, 1, 1, 1, 1, 0, 0, 0),
+          "box-face hit remarchs even when occupancy is flat",
+        );
+        assert(!isoDilatedOccupancyNeedsRefine(16), "4×4 all hits stays coarse");
+        assert(!isoDilatedOccupancyNeedsRefine(0), "4×4 all miss stays empty");
+        assert(isoDilatedOccupancyNeedsRefine(15), "1-texel ring miss remarchs silhouette band");
       },
     },
   ]);

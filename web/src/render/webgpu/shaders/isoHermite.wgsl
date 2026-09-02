@@ -361,6 +361,14 @@ fn shadeIso(p: vec3f, rd: vec3f, n: vec3f) -> vec4f {
   return vec4f(rgb, 1.0);
 }
 
+/** 1 if the hit is on/near a fit-box face (clamped field + grainy ∇f). */
+fn isoNearBoxFace(p: vec3f) -> f32 {
+  let half = max(draw.half, 1e-6);
+  let q = abs(p) / half;
+  let faceDist = 1.0 - max(q.x, max(q.y, q.z));
+  return select(0.0, 1.0, faceDist < 0.03);
+}
+
 fn isoNormal(p: vec3f, rd: vec3f) -> vec3f {
   // Evaluate ∇f slightly inside the fit domain — endpoint clamp makes
   // boundary gradients noisy (grain where isos meet the box faces).
@@ -462,7 +470,7 @@ fn marchIso(ro: vec3f, rd: vec3f, tEnter: f32, tExit: f32) -> FSOut {
         let d = clamp(hit / far, 0.0, 0.999);
         let n = isoNormal(p, rd);
         out.color = shadeIso(p, rd, n);
-        out.occl = vec4f(d, draw.layerIndex, 0.0, 1.0);
+        out.occl = vec4f(d, draw.layerIndex, isoNearBoxFace(p), 1.0);
         out.normal = vec4f(n * 0.5 + 0.5, 1.0);
         out.depth = d;
         return out;

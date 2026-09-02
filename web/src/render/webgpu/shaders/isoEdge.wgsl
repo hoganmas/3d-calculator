@@ -18,37 +18,48 @@ fn isoRefineKind(occlTex: texture_2d<f32>, fineW: f32, fineH: f32, fragPos: vec2
   let src = isoCoarseTexel(occlTex, fineW, fineH, fragPos);
   let x0 = i32(floor(src.x));
   let y0 = i32(floor(src.y));
-  var nHit = 0u;
+  var nHit2 = 0u;
+  var nHit4 = 0u;
   var dMin = 1.0;
   var dMax = 0.0;
   var id0 = 0.0;
   var mixedIso = false;
-  for (var iy = 0; iy < 2; iy++) {
-    for (var ix = 0; ix < 2; ix++) {
+  var nearBound = false;
+  // 4×4 = bilinear 2×2 plus a 1-texel ring. On mobile the coarse texel is
+  // several screen pixels, so the ring is the crawling cyan band inside the
+  // box silhouette.
+  for (var iy = -1; iy <= 2; iy++) {
+    for (var ix = -1; ix <= 2; ix++) {
       let x = u32(clamp(x0 + ix, 0, i32(dims.x) - 1));
       let y = u32(clamp(y0 + iy, 0, i32(dims.y) - 1));
+      let inFoot = (ix >= 0 && ix <= 1 && iy >= 0 && iy <= 1);
       let o = textureLoad(occlTex, vec2u(x, y), 0);
       let d = o.r;
       if (d < ISO_OCC_HIT) {
-        nHit += 1u;
-        dMin = min(dMin, d);
-        dMax = max(dMax, d);
-        let id = round(o.g);
-        if (id >= 0.5) {
-          if (id0 < 0.5) {
-            id0 = id;
-          } else if (abs(id - id0) > 0.5) {
-            mixedIso = true;
+        nHit4 += 1u;
+        if (inFoot) {
+          nHit2 += 1u;
+          dMin = min(dMin, d);
+          dMax = max(dMax, d);
+          let id = round(o.g);
+          if (id >= 0.5) {
+            if (id0 < 0.5) {
+              id0 = id;
+            } else if (abs(id - id0) > 0.5) {
+              mixedIso = true;
+            }
           }
+          if (o.b > 0.5) { nearBound = true; }
         }
-      } else {
+      } else if (inFoot) {
         dMax = max(dMax, 1.0);
       }
     }
   }
   if (mixedIso) { return ISO_REFINE_INTERSECT; }
-  if (nHit > 0u && nHit < 4u) { return ISO_REFINE_EDGE; }
-  if (nHit == 4u && (dMax - dMin) > ISO_DEPTH_CREASE) { return ISO_REFINE_EDGE; }
+  if (nHit4 > 0u && nHit4 < 16u) { return ISO_REFINE_EDGE; }
+  if (nHit2 == 4u && (dMax - dMin) > ISO_DEPTH_CREASE) { return ISO_REFINE_EDGE; }
+  if (nearBound) { return ISO_REFINE_EDGE; }
   return ISO_REFINE_NONE;
 }
 
