@@ -39,8 +39,12 @@ import { isSplashContentReady, markSplashFrameReady } from "./splash.js";
 import { startupMark } from "./startupProfile.js";
 import { syncKeyframeLoadBar } from "./keyframeLoadBar.js";
 import { tickPerfAdapt } from "./perfAdapt.js";
+import { shouldPresentThreeJs, threeJsPresentIntervalMs } from "./loopPacing.js";
 
 let splashFrameReported = false;
+let lastThreeJsPresentAt = 0;
+let lastThreeJsFbW = 0;
+let lastThreeJsFbH = 0;
 
 function reportSplashFrameReady() {
   if (splashFrameReported) return;
@@ -50,17 +54,7 @@ function reportSplashFrameReady() {
   markSplashFrameReady();
 }
 
-function frame(rafNow: number) {
-  const t0 = performance.now();
-  if (state.lastRafAt > 0) {
-    const rafDt = rafNow > 0 ? rafNow - state.lastRafAt : t0 - state.lastRafAt;
-    if (rafDt > 0 && rafDt < 500) {
-      state.frameDtSmooth = state.frameDtSmooth * 0.85 + rafDt * 0.15;
-    }
-  }
-  state.lastRafAt = rafNow > 0 ? rafNow : t0;
-  state.loopFpsFrames++;
-
+function tickSimulation(t0: number) {
   // Named param animation → Chebyshev refit (throttled).
   if (anyParamAnimating()) {
     const tSec = t0 / 1000;
@@ -82,7 +76,7 @@ function frame(rafNow: number) {
         }
       }
       state.exprListApi?.syncAllParamSliders?.();
-      // GPU iso keyframes: blend every frame so the thumb + field stay continuous.
+      // GPU iso keyframes: blend every rAF so the thumb + field stay continuous.
       tickGpuKeyframeBlends();
       if (t0 - state.lastAnimFitAt >= ANIM_FIT_MIN_MS) {
         state.lastAnimFitAt = t0;
@@ -113,30 +107,62 @@ function frame(rafNow: number) {
     if (els.hud) els.hud.textContent = hudText();
     refreshMetricsDump();
   }
+}
+
+function presentThreeJs(now: number, gpuPath: boolean) {
+  const w = renderer.domElement.width;
+  const h = renderer.domElement.height;
+  const resized = w !== lastThreeJsFbW || h !== lastThreeJsFbH;
+  const interval = threeJsPresentIntervalMs(state.deviceTier, gpuPath);
+  if (!resized && !shouldPresentThreeJs(now, lastThreeJsPresentAt, interval)) return;
+
+  lavaBg.setTime(now / 1000);
+  lavaBg.syncCamera(camera);
+  renderer.autoClear = true;
+  renderer.render(scene, camera);
+  lastThreeJsPresentAt = now;
+  lastThreeJsFbW = w;
+  lastThreeJsFbH = h;
+}
+
+function presentGpuClip(gpuPath: boolean) {
+  if (!isClipBakeGpuReady()) return;
+  if (hasUploadedVolume() && gpuPath) {
+    drawClipGpuFrame();
+    return;
+  }
+  if (!hasUploadedVolume()) {
+    const { vw, vh } = viewportSize();
+    clearClipGpuFrame(vw, vh);
+    state.densSubmittedThisFrame = false;
+  }
+}
+
+function frame(rafNow: number) {
+  const t0 = performance.now();
+  if (state.lastRafAt > 0) {
+    const rafDt = rafNow > 0 ? rafNow - state.lastRafAt : t0 - state.lastRafAt;
+    if (rafDt > 0 && rafDt < 500) {
+      state.frameDtSmooth = state.frameDtSmooth * 0.85 + rafDt * 0.15;
+    }
+  }
+  state.lastRafAt = rafNow > 0 ? rafNow : t0;
+  state.loopFpsFrames++;
+
+  tickSimulation(t0);
 
   controls.update();
   clipUniforms.uCameraPos.value.copy(camera.position);
 
-  if (!useGpuClipPath()) {
+  const gpuPath = useGpuClipPath();
+  if (!gpuPath) {
     syncClipCpuVolume();
   }
 
-  lavaBg.setTime(t0 / 1000);
-  lavaBg.syncCamera(camera);
-  renderer.autoClear = true;
-  renderer.render(scene, camera);
+  presentThreeJs(t0, gpuPath);
+  presentGpuClip(gpuPath);
 
-  if (isClipBakeGpuReady()) {
-    if (hasUploadedVolume() && useGpuClipPath()) {
-      drawClipGpuFrame();
-    } else if (!hasUploadedVolume()) {
-      const { vw, vh } = viewportSize();
-      clearClipGpuFrame(vw, vh);
-      state.densSubmittedThisFrame = false;
-    }
-  }
-
-  if (!useGpuClipPath()) {
+  if (!gpuPath) {
     labelRenderer.render(labelScene, camera);
   }
 
