@@ -1,5 +1,8 @@
 import gradientWgsl from "./common/gradient.wgsl?raw";
 import isoHermiteWgsl from "./isoHermite.wgsl?raw";
+import isoEdgeWgsl from "./isoEdge.wgsl?raw";
+import isoUpsampleWgsl from "./isoUpsample.wgsl?raw";
+import isoRefineAppendWgsl from "./isoRefineAppend.wgsl?raw";
 import beerWgsl from "./beer.wgsl?raw";
 import gridWgsl from "./grid.wgsl?raw";
 import axisLabelWgsl from "./axisLabel.wgsl?raw";
@@ -26,6 +29,16 @@ export function getIsoShader(maxGradStops: number): string {
     GRADIENT_WGSL: gradientBlock(maxGradStops),
     MAX_GRAD_STOPS: maxGradStops,
   });
+}
+
+export function getIsoRefineShader(maxGradStops: number): string {
+  return getIsoShader(maxGradStops) + "\n" + inject(isoRefineAppendWgsl, {
+    ISO_EDGE_WGSL: isoEdgeWgsl,
+  });
+}
+
+export function getIsoUpsampleShader(): string {
+  return inject(isoUpsampleWgsl, { ISO_EDGE_WGSL: isoEdgeWgsl });
 }
 
 export function getBeerShader(maxGradStops: number, maxDensLayers: number): string {

@@ -2,6 +2,7 @@ import {
   inferQualityFromSettings,
   qualityToDeg,
   qualityToIsoMarchDownscale,
+  qualityToIsoRefineDownscale,
   qualityToIsoSteps,
   qualityToMarchDownscale,
   qualityToParticleCount,
@@ -20,6 +21,8 @@ export async function run() {
         assert(qualityToMarchDownscale(0) === 8, "low quality downscales heavily");
         assert(qualityToMarchDownscale(100) === 1, "max quality full resolution");
         assert(qualityToIsoMarchDownscale(50) === qualityToMarchDownscale(50), "iso uses same curve");
+        assert(qualityToIsoRefineDownscale(50) === 1, "refine compose is display-sized");
+        assert(qualityToIsoRefineDownscale(100) === 1, "max quality refine is full res");
       },
     },
     {

@@ -1,0 +1,36 @@
+import {
+  isoFineFramebufferSize,
+  isoNeedRefineFromCoarse2x2,
+  isoRefineEnabled,
+  ISO_OCC_HIT,
+} from "../../src/render/webgpu/isoRefine.ts";
+import { assert } from "../helpers/assert.ts";
+import { runSuite } from "../helpers/runner.ts";
+
+export async function run() {
+  return runSuite("render / iso-refine", [
+    {
+      name: "fine size is the display framebuffer",
+      fn: () => {
+        const full = isoFineFramebufferSize(800, 600, 800, 600);
+        assert(full.fw === 800 && full.fh === 600, "1× coarse stays display");
+        assert(!isoRefineEnabled(800, 600, 800, 600), "no refine at 1×");
+        const half = isoFineFramebufferSize(400, 300, 800, 600);
+        assert(half.fw === 800 && half.fh === 600, "2× coarse composes at display");
+        assert(isoRefineEnabled(400, 300, 800, 600), "refine when display > coarse");
+        const quarter = isoFineFramebufferSize(200, 150, 800, 600);
+        assert(quarter.fw === 800 && quarter.fh === 600, "4× coarse still composes at display");
+      },
+    },
+    {
+      name: "2×2 occupancy edge test",
+      fn: () => {
+        assert(!isoNeedRefineFromCoarse2x2(1, 1, 1, 1), "all miss is interior empty");
+        assert(!isoNeedRefineFromCoarse2x2(0.2, 0.2, 0.21, 0.19), "flat hit is interior");
+        assert(isoNeedRefineFromCoarse2x2(0.2, 1, 1, 1), "mixed occupancy refines");
+        assert(isoNeedRefineFromCoarse2x2(0.1, 0.1, 0.1, 0.5), "depth crease refines");
+        assert(ISO_OCC_HIT > 0.9, "hit threshold near far plane");
+      },
+    },
+  ]);
+}

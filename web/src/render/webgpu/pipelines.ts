@@ -4,6 +4,8 @@ import { MAX_DENS_LAYERS } from "./gpuState.js";
 import { startupBegin, startupEnd } from "../../app/startupProfile.js";
 import {
   getIsoShader,
+  getIsoRefineShader,
+  getIsoUpsampleShader,
   getBeerShader,
   getGridShader,
   getAxisLabelShader,
@@ -29,7 +31,8 @@ async function compileChecked(label: string, code: string): Promise<GPUShaderMod
 export async function ensurePipelinesForDegree(_deg: number): Promise<PipelineBuildResult | false> {
   if (!gpu.device) return false;
   if (
-    gpu.isoPipeline && gpu.beerPipeline && gpu.fxaaPipeline && gpu.ssaoPipeline &&
+    gpu.isoPipeline && gpu.isoRefinePipeline && gpu.isoUpsamplePipeline &&
+    gpu.beerPipeline && gpu.fxaaPipeline && gpu.ssaoPipeline &&
     gpu.gridPipeline && gpu.labelPipeline && gpu.blitPipeline &&
     gpu.builtEpoch === PIPELINE_EPOCH
   ) {
@@ -38,8 +41,10 @@ export async function ensurePipelinesForDegree(_deg: number): Promise<PipelineBu
 
   startupBegin("gpu.pipelines.compile-shaders");
   gpu.canvasFormat = navigator.gpu.getPreferredCanvasFormat();
-  const [isoMod, beerMod, gridMod, labelMod, fxaaMod, ssaoMod, blitMod] = await Promise.all([
+  const [isoMod, isoRefineMod, isoUpMod, beerMod, gridMod, labelMod, fxaaMod, ssaoMod, blitMod] = await Promise.all([
     compileChecked("iso", getIsoShader(MAX_GRAD_STOPS)),
+    compileChecked("isoRefine", getIsoRefineShader(MAX_GRAD_STOPS)),
+    compileChecked("isoUpsample", getIsoUpsampleShader()),
     compileChecked("beer", getBeerShader(MAX_GRAD_STOPS, MAX_DENS_LAYERS)),
     compileChecked("grid", getGridShader()),
     compileChecked("axisLabel", getAxisLabelShader()),
@@ -84,6 +89,56 @@ export async function ensurePipelinesForDegree(_deg: number): Promise<PipelineBu
   {
     const err = await device.popErrorScope();
     if (err) throw new Error(`iso: ${err.message}`);
+  }
+
+  device.pushErrorScope("validation");
+  const nextIsoRefine = device.createRenderPipeline({
+    layout: "auto",
+    vertex: { module: isoRefineMod, entryPoint: "vsMain" },
+    fragment: {
+      module: isoRefineMod,
+      entryPoint: "fsRefine",
+      targets: [
+        { format: gpu.canvasFormat, blend: blendPremul },
+        { format: "rgba16float", blend: blendMin },
+        { format: "rgba8unorm" },
+      ],
+    },
+    primitive: { topology: "triangle-list" },
+    depthStencil: {
+      format: "depth32float",
+      depthWriteEnabled: true,
+      depthCompare: "less",
+    },
+  });
+  {
+    const err = await device.popErrorScope();
+    if (err) throw new Error(`isoRefine: ${err.message}`);
+  }
+
+  device.pushErrorScope("validation");
+  const nextIsoUpsample = device.createRenderPipeline({
+    layout: "auto",
+    vertex: { module: isoUpMod, entryPoint: "vsMain" },
+    fragment: {
+      module: isoUpMod,
+      entryPoint: "fsMain",
+      targets: [
+        { format: gpu.canvasFormat },
+        { format: "rgba16float" },
+        { format: "rgba8unorm" },
+      ],
+    },
+    primitive: { topology: "triangle-list" },
+    depthStencil: {
+      format: "depth32float",
+      depthWriteEnabled: true,
+      depthCompare: "always",
+    },
+  });
+  {
+    const err = await device.popErrorScope();
+    if (err) throw new Error(`isoUpsample: ${err.message}`);
   }
 
   device.pushErrorScope("validation");
@@ -215,6 +270,8 @@ export async function ensurePipelinesForDegree(_deg: number): Promise<PipelineBu
   }
 
   gpu.isoPipeline = nextIso;
+  gpu.isoRefinePipeline = nextIsoRefine;
+  gpu.isoUpsamplePipeline = nextIsoUpsample;
   gpu.beerPipeline = nextBeer;
   gpu.gridPipeline = nextGrid;
   gpu.labelPipeline = nextLabel;

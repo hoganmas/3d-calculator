@@ -62,12 +62,15 @@ export interface MarchGpuHandles {
   fxaaSampler: GPUSampler;
   gridParamBuf: GPUBuffer;
   isoPipeline: GPURenderPipeline;
+  isoRefinePipeline: GPURenderPipeline;
+  isoUpsamplePipeline: GPURenderPipeline;
   beerPipeline: GPURenderPipeline;
   ssaoPipeline: GPURenderPipeline;
   fxaaPipeline: GPURenderPipeline;
   gridPipeline: GPURenderPipeline;
   drawParamBuf: GPUBuffer;
   drawParamBufBeer: GPUBuffer;
+  isoUpsampleParamBuf: GPUBuffer;
 }
 
 /** Offscreen march textures (iso / SSAO / Beer pass). */
@@ -97,9 +100,10 @@ export function acquireMarchGpuHandles(): MarchGpuHandles | null {
   if (
     !isClipBakeGpuReady() || !gpu.ctx || !gpu.volumeBuf || !gpu.colorBuf ||
     !gpu.fxaaParamBuf || !gpu.ssaoParamBuf || !gpu.fxaaSampler || !gpu.gridParamBuf ||
-    !gpu.device || !gpu.isoPipeline || !gpu.beerPipeline || !gpu.ssaoPipeline ||
+    !gpu.device || !gpu.isoPipeline || !gpu.isoRefinePipeline || !gpu.isoUpsamplePipeline ||
+    !gpu.beerPipeline || !gpu.ssaoPipeline ||
     !gpu.fxaaPipeline || !gpu.blitPipeline || !gpu.blitSampler || !gpu.gridPipeline ||
-    !gpu.drawParamBuf || !gpu.drawParamBufBeer
+    !gpu.drawParamBuf || !gpu.drawParamBufBeer || !gpu.isoUpsampleParamBuf
   ) {
     return null;
   }
@@ -119,12 +123,15 @@ export function acquireMarchGpuHandles(): MarchGpuHandles | null {
     fxaaSampler: gpu.fxaaSampler,
     gridParamBuf: gpu.gridParamBuf,
     isoPipeline: gpu.isoPipeline,
+    isoRefinePipeline: gpu.isoRefinePipeline,
+    isoUpsamplePipeline: gpu.isoUpsamplePipeline,
     beerPipeline: gpu.beerPipeline,
     ssaoPipeline: gpu.ssaoPipeline,
     fxaaPipeline: gpu.fxaaPipeline,
     gridPipeline: gpu.gridPipeline,
     drawParamBuf: gpu.drawParamBuf,
     drawParamBufBeer: gpu.drawParamBufBeer,
+    isoUpsampleParamBuf: gpu.isoUpsampleParamBuf,
   };
 }
 

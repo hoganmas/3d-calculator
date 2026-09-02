@@ -478,8 +478,7 @@ fn marchIso(ro: vec3f, rd: vec3f, tEnter: f32, tExit: f32) -> FSOut {
   return out;
 }
 
-@fragment
-fn fsMain(in: VSOut) -> FSOut {
+fn marchPixel(fragPos: vec2f) -> FSOut {
   var out: FSOut;
   out.color = vec4f(0.0);
   out.occl = vec4f(1.0, 0.0, 0.0, 1.0);
@@ -487,8 +486,8 @@ fn fsMain(in: VSOut) -> FSOut {
   out.depth = 1.0;
 
   let fbW = f32(draw.fbW); let fbH = f32(draw.fbH);
-  let ndcX = -1.0 + 2.0 * in.pos.x / fbW;
-  let ndcY = 1.0 - 2.0 * in.pos.y / fbH;
+  let ndcX = -1.0 + 2.0 * fragPos.x / fbW;
+  let ndcY = 1.0 - 2.0 * fragPos.y / fbH;
   let xy1 = vec3f(ndcX, ndcY, 1.0);
   let rd = vec3f(dot(draw.m0.xyz, xy1), dot(draw.m1.xyz, xy1), dot(draw.m2.xyz, xy1));
   let ro = draw.ro; let half = draw.half;
@@ -517,4 +516,9 @@ fn fsMain(in: VSOut) -> FSOut {
     return out;
   }
   return hit;
+}
+
+@fragment
+fn fsMain(in: VSOut) -> FSOut {
+  return marchPixel(in.pos.xy);
 }

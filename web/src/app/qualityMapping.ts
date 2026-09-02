@@ -20,6 +20,11 @@ export function qualityToIsoMarchDownscale(q: number): number {
   return qualityToMarchDownscale(q);
 }
 
+/** Compose/refine divisor: display-sized (1×). Coarse iso still uses the surface-quality downscale. */
+export function qualityToIsoRefineDownscale(_q: number): number {
+  return 1;
+}
+
 /** Beer / scalar-volume ray-march step count. */
 export function qualityToVolumeSteps(q: number): number {
   const raw = 12 + (clampQ(q) / 100) * 56;

@@ -15,6 +15,7 @@ import {
   marchFramebufferSize,
   volumeFramebufferSize,
 } from "./presentation.js";
+import { isoFineFramebufferSize } from "../render/webgpu/isoRefine.js";
 import { compileAllExprs, fmtParamNum } from "./compile.js";
 import {
   collectExpressionErrors,
@@ -142,6 +143,8 @@ export function buildMetricsReport() {
   const fbW = Math.max(1, renderer.domElement.width);
   const fbH = Math.max(1, renderer.domElement.height);
   const p = getClipGpuProfile();
+  const { mw, mh } = marchFramebufferSize();
+  const refine = isoFineFramebufferSize(mw, mh, fbW, fbH);
   const lines = [
     `poly-cloud metrics  ${new Date().toISOString()}`,
     `deg             ${state.fitDeg}`,
@@ -154,7 +157,8 @@ export function buildMetricsReport() {
     `vol_resolution  ${(100 / marchDownscale()).toFixed(1)}%`,
     `iso_resolution  ${(100 / isoMarchDownscale()).toFixed(1)}%`,
     `viewport        ${fbW}×${fbH}`,
-    `iso_fb_req      ${marchFramebufferSize().mw}×${marchFramebufferSize().mh}`,
+    `iso_fb_req      ${mw}×${mh}`,
+    `iso_refine_fb   ${refine.fw}×${refine.fh}`,
     `vol_fb_req      ${volumeFramebufferSize().mw}×${volumeFramebufferSize().mh}`,
     `gpu_march_fb    ${p.marchFbW && p.marchFbH ? `${p.marchFbW}×${p.marchFbH}` : "—"}`,
     `loop_fps        ${Math.round(state.loopFps)}`,

@@ -25,6 +25,7 @@ import {
   themeColors,
 } from "./scene.js";
 import {
+  applyCameraComposition,
   compositionNdcOffsetX,
   compositionNdcOffsetY,
   marchFramebufferSize,
@@ -274,6 +275,7 @@ export function drawClipGpuFrame() {
   if (!useGpuClipPath()) return false;
 
   camera.updateMatrixWorld(true);
+  applyCameraComposition(vw, vh);
   const t0 = performance.now();
   const ok = renderClipFrameGpu({
     camera,

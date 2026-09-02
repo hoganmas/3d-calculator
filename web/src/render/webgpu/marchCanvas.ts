@@ -97,13 +97,52 @@ function ensureVolColorTex(w: number, h: number): void {
   gpu.volColorH = h;
 }
 
-/** Iso / SSAO / compose targets at surface-quality resolution. */
+const COARSE_USAGE = GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING;
+
+function ensureIsoCoarseColorTex(w: number, h: number): void {
+  if (gpu.isoCoarseColorTex && gpu.isoCoarseW === w && gpu.isoCoarseH === h) return;
+  destroyTexture(gpu.isoCoarseColorTex);
+  destroyTexture(gpu.isoCoarseOcclTex);
+  destroyTexture(gpu.isoCoarseNormalTex);
+  destroyTexture(gpu.isoCoarseDepthTex);
+  gpu.isoCoarseColorTex = gpu.isoCoarseOcclTex = gpu.isoCoarseNormalTex = gpu.isoCoarseDepthTex = null;
+  if (!gpu.device) return;
+  gpu.isoCoarseColorTex = gpu.device.createTexture({
+    size: [w, h],
+    format: gpu.canvasFormat,
+    usage: COARSE_USAGE,
+  });
+  gpu.isoCoarseOcclTex = gpu.device.createTexture({
+    size: [w, h],
+    format: "rgba16float",
+    usage: COARSE_USAGE,
+  });
+  gpu.isoCoarseNormalTex = gpu.device.createTexture({
+    size: [w, h],
+    format: "rgba8unorm",
+    usage: COARSE_USAGE,
+  });
+  gpu.isoCoarseDepthTex = gpu.device.createTexture({
+    size: [w, h],
+    format: "depth32float",
+    usage: GPUTextureUsage.RENDER_ATTACHMENT,
+  });
+  gpu.isoCoarseW = w;
+  gpu.isoCoarseH = h;
+}
+
+/** Iso / SSAO / compose targets at surface-quality resolution (fine, after refine). */
 export function ensureMarchTargets(w: number, h: number): void {
   ensureOcclIsoTex(w, h);
   ensureDepthTex(w, h);
   ensureNormalTex(w, h);
   ensureSceneColorTex(w, h);
   ensureSceneColorAoTex(w, h);
+}
+
+/** Coarse iso G-buffer used as the occupancy source for edge refine. */
+export function ensureIsoCoarseTargets(w: number, h: number): void {
+  ensureIsoCoarseColorTex(w, h);
 }
 
 /** Beer / volume targets at scalar-quality resolution (may differ from iso). */

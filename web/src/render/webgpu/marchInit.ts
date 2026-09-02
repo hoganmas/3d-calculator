@@ -129,6 +129,10 @@ export async function initClipBakeGpu(
         size: 128,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
+      gpu.isoUpsampleParamBuf = gpu.device.createBuffer({
+        size: 16,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      });
       gpu.gridParamBuf = gpu.device.createBuffer({
         size: 256,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,

@@ -24,6 +24,7 @@ import {
 export {
   qualityToDeg,
   qualityToIsoMarchDownscale,
+  qualityToIsoRefineDownscale,
   qualityToIsoSteps,
   qualityToMarchDownscale,
   qualityToParticleCount,
