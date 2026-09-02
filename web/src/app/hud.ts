@@ -16,6 +16,7 @@ import {
   volumeFramebufferSize,
 } from "./presentation.js";
 import { isoFineFramebufferSize } from "../render/webgpu/isoRefine.js";
+import { isIsoRefineDebugEnabled } from "./isoRefineDebug.js";
 import { compileAllExprs, fmtParamNum } from "./compile.js";
 import {
   collectExpressionErrors,
@@ -136,7 +137,8 @@ export function hudText() {
       ? ` · ${lastErrorReport.errorCount} expr err`
       : "";
   const clip = ` · rAF ${state.frameDtSmooth.toFixed(0)}ms · ${submit}${gpuSplit}${present}${errHint} · vol ${state.lastVolumeM}³`;
-  return `clip-grid · ${hudFpsText()} · ${state.cpuMsSmooth.toFixed(1)}ms js${clip} · ${Math.round(w * pr)}×${Math.round(h * pr)}`;
+  const refineDbg = isIsoRefineDebugEnabled() ? " · iso-debug cyan=lo orange=hi" : "";
+  return `clip-grid · ${hudFpsText()} · ${state.cpuMsSmooth.toFixed(1)}ms js${clip}${refineDbg} · ${Math.round(w * pr)}×${Math.round(h * pr)}`;
 }
 
 export function buildMetricsReport() {
@@ -167,6 +169,7 @@ export function buildMetricsReport() {
     `gpu_path        ${useGpuClipPath() ? "webgpu" : "cpu/webgl"}`,
     `gpu_method      ${p.method || "—"}`,
     `iso_interp      trilinear march / Hermite n`,
+    `iso_refine_dbg  ${isIsoRefineDebugEnabled() ? "cyan=coarse orange=hi-res" : "off"}`,
     `expr_kind       ${state.lastExprMeta.kind}`,
     `shade           ${state.lastExprMeta.shade}`,
     `iso_level       ${readIsoLevel()}`,

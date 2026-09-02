@@ -6,7 +6,7 @@ struct DrawParams {
   half: f32,
   scale: f32,
   isoLevel: f32,
-  _pad0: f32,
+  debugTint: f32,
   ro: vec3f,
   volBase: f32,
   m0: vec4f,

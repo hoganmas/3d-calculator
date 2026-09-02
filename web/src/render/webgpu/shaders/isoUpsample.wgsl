@@ -1,7 +1,7 @@
 struct IsoUpParams {
   fineW: u32,
   fineH: u32,
-  _p0: u32,
+  debugTint: u32,
   _p1: u32,
 }
 
@@ -53,7 +53,7 @@ fn fsMain(in: VSOut) -> FSOut {
   let fineH = f32(max(u.fineH, 1u));
   // Framebuffer pixels, same space as marchPixel / the box overlay — not clip UVs.
   let src = isoCoarseTexel(occlTex, fineW, fineH, in.pos.xy);
-  let c = loadBilinearAt(colorTex, src);
+  var c = loadBilinearAt(colorTex, src);
   let n = loadBilinearAt(normalTex, src);
   let ocl = loadBilinearAt(occlTex, src);
   if (isoNeedRefine(occlTex, fineW, fineH, in.pos.xy)) {
@@ -62,6 +62,9 @@ fn fsMain(in: VSOut) -> FSOut {
     out.normal = vec4f(0.0);
     out.depth = 1.0;
     return out;
+  }
+  if (u.debugTint != 0u && c.a > 0.001) {
+    c = isoDebugTint(c, vec3f(0.15, 0.82, 1.0));
   }
   out.color = c;
   out.occl = ocl;

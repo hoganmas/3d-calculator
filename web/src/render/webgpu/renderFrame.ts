@@ -17,6 +17,7 @@ import {
   isoFineFramebufferSize,
   isoRefineEnabled,
 } from "./isoRefine.js";
+import { isIsoRefineDebugEnabled } from "../../app/isoRefineDebug.js";
 import {
   beginGpuFrame,
   endGpuFrame,
@@ -229,7 +230,8 @@ function upsampleIsoToFine(
   const { device, isoUpsamplePipeline, isoUpsampleParamBuf } = handles;
   const fw = targets.sceneColorTex.width;
   const fh = targets.sceneColorTex.height;
-  const params = new Uint32Array([fw | 0, fh | 0, 0, 0]);
+  const debug = isIsoRefineDebugEnabled() ? 1 : 0;
+  const params = new Uint32Array([fw | 0, fh | 0, debug, 0]);
   gpuWriteBuffer(device, isoUpsampleParamBuf, params);
   const bg = device.createBindGroup({
     layout: isoUpsamplePipeline.getBindGroupLayout(0),
@@ -301,6 +303,7 @@ function drawIsoRefine(
         Mgrid, steps, half, scale, c.isoLevel, base0, ro, dirMatrix,
         c0, c1,
         base1, blendT, stops,
+        isIsoRefineDebugEnabled(),
       ),
     );
     const bg = device.createBindGroup({

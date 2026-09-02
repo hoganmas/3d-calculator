@@ -39,12 +39,13 @@ export function packDrawParamsIso(
   volBaseB: number = volBase,
   blendT: number = 0,
   gradRgbs: RgbTriplet[] | null = null,
+  debugTint: boolean = false,
 ): ArrayBuffer {
   const buf = new ArrayBuffer(256);
   const u32 = new Uint32Array(buf);
   const f32 = new Float32Array(buf);
   u32[0] = fbW | 0; u32[1] = fbH | 0; u32[2] = gridM | 0; u32[3] = steps | 0;
-  f32[4] = half; f32[5] = scale; f32[6] = isoLevel; f32[7] = 0;
+  f32[4] = half; f32[5] = scale; f32[6] = isoLevel; f32[7] = debugTint ? 1 : 0;
   f32[8] = ro[0]; f32[9] = ro[1]; f32[10] = ro[2];
   f32[11] = volBase;
   f32[12] = M[0]; f32[13] = M[1]; f32[14] = M[2];

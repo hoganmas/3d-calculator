@@ -13,5 +13,9 @@ fn fsRefine(in: VSOut) -> FSOut {
     discard;
     return out;
   }
-  return marchPixel(in.pos.xy);
+  var hit = marchPixel(in.pos.xy);
+  if (draw.debugTint > 0.5 && hit.color.a > 0.001) {
+    hit.color = isoDebugTint(hit.color, vec3f(1.0, 0.36, 0.08));
+  }
+  return hit;
 }

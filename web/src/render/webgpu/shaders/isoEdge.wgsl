@@ -37,3 +37,11 @@ fn isoNeedRefine(occlTex: texture_2d<f32>, fineW: f32, fineH: f32, fragPos: vec2
   return false;
 }
 
+/** Keep lighting, swap albedo — cyan coarse / orange refine in debug mode. */
+fn isoDebugTint(c: vec4f, rgb: vec3f) -> vec4f {
+  if (c.a < 0.001) { return c; }
+  let lin = c.rgb / max(c.a, 1e-4);
+  let lum = clamp(dot(lin, vec3f(0.299, 0.587, 0.114)), 0.08, 1.0);
+  return vec4f(rgb * lum * c.a, c.a);
+}
+
