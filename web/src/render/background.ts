@@ -141,7 +141,7 @@ export interface LavaBackground {
 }
 
 export function createLavaBackground(colors: LavaColors): LavaBackground {
-  const geometry = new THREE.SphereGeometry(SKY_RADIUS, 72, 48);
+  const geometry = new THREE.SphereGeometry(SKY_RADIUS, 24, 16);
   const material = new THREE.ShaderMaterial({
     vertexShader,
     fragmentShader,

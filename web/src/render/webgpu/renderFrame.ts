@@ -223,7 +223,8 @@ function buildRaySetup(
   if (refine) ensureIsoCoarseTargets(marchW, marchH);
   if (midSize) ensureIsoMidTargets(midSize.mw, midSize.mh);
   ensureMarchTargets(composeW, composeH);
-  ensureVolumeTargets(volW, volH);
+  if (gpu.densLayerCount > 0) ensureVolumeTargets(volW, volH);
+  else ensureVolumeTargets(1, 1);
   syncClipGpuWorldGrid(h);
 
   const targets = acquireMarchTargets();

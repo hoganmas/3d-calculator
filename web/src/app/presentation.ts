@@ -231,6 +231,18 @@ export function bindHudText(getter: () => string) {
   getHudText = getter;
 }
 
+/** WebGL only draws the lava skybox on the GPU iso path; match compose scale on phones. */
+function webglBackgroundSize(vw: number, vh: number) {
+  if (state.deviceTier === "mobile" && useGpuClipPath()) {
+    const d = effectiveIsoMarchDownscale();
+    return {
+      rw: Math.max(1, Math.round(vw / d)),
+      rh: Math.max(1, Math.round(vh / d)),
+    };
+  }
+  return { rw: vw, rh: vh };
+}
+
 function applyDisplaySize(
   rw: number,
   rh: number,
@@ -264,7 +276,8 @@ export function resize() {
   if (vw === lastDisplayW && vh === lastDisplayH) return;
   lastDisplayW = vw;
   lastDisplayH = vh;
-  applyDisplaySize(vw, vh, vw, vh, { markClipDirty: true });
+  const { rw, rh } = webglBackgroundSize(vw, vh);
+  applyDisplaySize(rw, rh, vw, vh, { markClipDirty: true });
   // Present canvas at display resolution; raymarch targets stay at mw×mh.
   resizeClipGpuCanvas(vw, vh);
 }
@@ -286,6 +299,11 @@ export function syncClipPresentation() {
   boxHelper.visible = !gpu;
   labelRenderer.domElement.style.visibility = gpu ? "hidden" : "visible";
   setClipGpuCanvasVisible(isClipBakeGpuReady());
+  const { vw, vh } = viewportSize();
+  const { rw, rh } = webglBackgroundSize(vw, vh);
+  if (renderer.domElement.width !== rw || renderer.domElement.height !== rh) {
+    applyDisplaySize(rw, rh, vw, vh, { markClipDirty: false });
+  }
 }
 
 export function markMarchDirty() {

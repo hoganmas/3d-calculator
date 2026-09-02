@@ -45,8 +45,9 @@ export function bootQualityForTier(tier: DeviceTier): BootQualityPreset {
   }
 }
 
-export function webGpuPowerPreference(tier: DeviceTier): GPUPowerPreference {
-  return tier === "mobile" ? "low-power" : "high-performance";
+export function webGpuPowerPreference(_tier: DeviceTier): GPUPowerPreference {
+  // iOS low-power + WebGPU often caps ProMotion at ~40Hz even when the march is ~11ms.
+  return "high-performance";
 }
 
 /**

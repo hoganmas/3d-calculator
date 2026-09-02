@@ -7,9 +7,9 @@ import { els } from "./dom.js";
 import { state } from "./state.js";
 
 export const renderer = new THREE.WebGLRenderer({
-  antialias: true,
+  antialias: false,
   alpha: true,
-  powerPreference: "high-performance",
+  powerPreference: "low-power",
 });
 renderer.setPixelRatio(1);
 renderer.setClearColor(0x000000, 0);
@@ -18,7 +18,7 @@ els.viewport.appendChild(renderer.domElement);
 /** Axis labels for the WebGL fallback (always-on-top). WebGPU draws them
  *  in the march pass with iso depth-test instead. */
 export const labelRenderer = new THREE.WebGLRenderer({
-  antialias: true,
+  antialias: false,
   alpha: true,
   powerPreference: "low-power",
 });

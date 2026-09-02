@@ -70,10 +70,10 @@ export async function run() {
       },
     },
     {
-      name: "webGpuPowerPreference prefers low-power on mobile",
+      name: "webGpuPowerPreference is high-performance on every tier",
       fn: () => {
-        assert(webGpuPowerPreference("mobile") === "low-power", "mobile low-power");
-        assert(webGpuPowerPreference("desktop") === "high-performance", "desktop perf");
+        assert(webGpuPowerPreference("mobile") === "high-performance", "mobile");
+        assert(webGpuPowerPreference("desktop") === "high-performance", "desktop");
       },
     },
     {

@@ -245,9 +245,10 @@ export function uploadFit(
     const deg = opts.fitDeg ?? uiDeg;
     const densScale = Number(els.scale.value);
     const steps = Math.min(96, Math.max(8, Number(els.steps.value) || 32));
-    const isoSteps = Math.min(192, Math.max(16, Number(els.isoSteps?.value) || steps));
+    const isoStepsIn = Math.min(192, Math.max(16, Number(els.isoSteps?.value) || steps));
     els.steps.value = String(steps);
-    if (els.isoSteps) els.isoSteps.value = String(isoSteps);
+    if (els.isoSteps) els.isoSteps.value = String(isoStepsIn);
+    const isoSteps = clampIsoStepsForTier(isoStepsIn, state.deviceTier);
     if (!(boxSize > 0)) throw new Error("box size must be > 0");
     if (deg < 1 || deg > MAX_DEG) throw new Error(`poly deg must be 1…${MAX_DEG}`);
     const half = 0.5 * boxSize;
