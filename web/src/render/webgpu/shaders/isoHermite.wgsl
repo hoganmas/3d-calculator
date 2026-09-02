@@ -6,7 +6,7 @@ struct DrawParams {
   half: f32,
   scale: f32,
   isoLevel: f32,
-  _pad0: f32,
+  debugTint: f32,
   ro: vec3f,
   volBase: f32,
   m0: vec4f,
@@ -15,7 +15,7 @@ struct DrawParams {
   volBaseB: f32,
   blendT: f32,
   gradCount: f32,
-  _padG: f32,
+  layerIndex: f32,
   g0: vec4f,
   g1: vec4f,
   g2: vec4f,
@@ -361,6 +361,14 @@ fn shadeIso(p: vec3f, rd: vec3f, n: vec3f) -> vec4f {
   return vec4f(rgb, 1.0);
 }
 
+/** 1 if the hit is on/near a fit-box face (clamped field + grainy ∇f). */
+fn isoNearBoxFace(p: vec3f) -> f32 {
+  let half = max(draw.half, 1e-6);
+  let q = abs(p) / half;
+  let faceDist = 1.0 - max(q.x, max(q.y, q.z));
+  return select(0.0, 1.0, faceDist < 0.03);
+}
+
 fn isoNormal(p: vec3f, rd: vec3f) -> vec3f {
   // Evaluate ∇f slightly inside the fit domain — endpoint clamp makes
   // boundary gradients noisy (grain where isos meet the box faces).
@@ -462,7 +470,7 @@ fn marchIso(ro: vec3f, rd: vec3f, tEnter: f32, tExit: f32) -> FSOut {
         let d = clamp(hit / far, 0.0, 0.999);
         let n = isoNormal(p, rd);
         out.color = shadeIso(p, rd, n);
-        out.occl = vec4f(d, 0.0, 0.0, 1.0);
+        out.occl = vec4f(d, draw.layerIndex, isoNearBoxFace(p), 1.0);
         out.normal = vec4f(n * 0.5 + 0.5, 1.0);
         out.depth = d;
         return out;
@@ -478,8 +486,7 @@ fn marchIso(ro: vec3f, rd: vec3f, tEnter: f32, tExit: f32) -> FSOut {
   return out;
 }
 
-@fragment
-fn fsMain(in: VSOut) -> FSOut {
+fn marchPixel(fragPos: vec2f) -> FSOut {
   var out: FSOut;
   out.color = vec4f(0.0);
   out.occl = vec4f(1.0, 0.0, 0.0, 1.0);
@@ -487,8 +494,8 @@ fn fsMain(in: VSOut) -> FSOut {
   out.depth = 1.0;
 
   let fbW = f32(draw.fbW); let fbH = f32(draw.fbH);
-  let ndcX = -1.0 + 2.0 * in.pos.x / fbW;
-  let ndcY = 1.0 - 2.0 * in.pos.y / fbH;
+  let ndcX = -1.0 + 2.0 * fragPos.x / fbW;
+  let ndcY = 1.0 - 2.0 * fragPos.y / fbH;
   let xy1 = vec3f(ndcX, ndcY, 1.0);
   let rd = vec3f(dot(draw.m0.xyz, xy1), dot(draw.m1.xyz, xy1), dot(draw.m2.xyz, xy1));
   let ro = draw.ro; let half = draw.half;
@@ -517,4 +524,9 @@ fn fsMain(in: VSOut) -> FSOut {
     return out;
   }
   return hit;
+}
+
+@fragment
+fn fsMain(in: VSOut) -> FSOut {
+  return marchPixel(in.pos.xy);
 }

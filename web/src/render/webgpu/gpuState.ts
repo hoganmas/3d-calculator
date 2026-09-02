@@ -41,6 +41,8 @@ export interface GpuState {
   canvas: (HTMLCanvasElement & { _clipConfigured?: boolean }) | null;
   canvasFormat: GPUTextureFormat;
   isoPipeline: GPURenderPipeline | null;
+  isoRefinePipeline: GPURenderPipeline | null;
+  isoUpsamplePipeline: GPURenderPipeline | null;
   beerPipeline: GPURenderPipeline | null;
   blitPipeline: GPURenderPipeline | null;
   fxaaPipeline: GPURenderPipeline | null;
@@ -60,6 +62,7 @@ export interface GpuState {
   drawParamBufBeer: GPUBuffer | null;
   fxaaParamBuf: GPUBuffer | null;
   ssaoParamBuf: GPUBuffer | null;
+  isoUpsampleParamBuf: GPUBuffer | null;
   volumeBuf: GPUBuffer | null;
   volumeCapacity: number;
   colorBuf: GPUBuffer | null;
@@ -71,6 +74,13 @@ export interface GpuState {
   occlSurfTex: GPUTexture | null;
   occlSurfW: number;
   occlSurfH: number;
+  /** Coarse iso G-buffer (occupancy-guided refine source). */
+  isoCoarseColorTex: GPUTexture | null;
+  isoCoarseOcclTex: GPUTexture | null;
+  isoCoarseNormalTex: GPUTexture | null;
+  isoCoarseDepthTex: GPUTexture | null;
+  isoCoarseW: number;
+  isoCoarseH: number;
   depthTex: GPUTexture | null;
   depthW: number;
   depthH: number;
@@ -143,6 +153,8 @@ export const gpu: GpuState = {
   canvas: null,
   canvasFormat: "bgra8unorm",
   isoPipeline: null,
+  isoRefinePipeline: null,
+  isoUpsamplePipeline: null,
   beerPipeline: null,
   blitPipeline: null,
   fxaaPipeline: null,
@@ -162,6 +174,7 @@ export const gpu: GpuState = {
   drawParamBufBeer: null,
   fxaaParamBuf: null,
   ssaoParamBuf: null,
+  isoUpsampleParamBuf: null,
   volumeBuf: null,
   volumeCapacity: 0,
   colorBuf: null,
@@ -171,6 +184,12 @@ export const gpu: GpuState = {
   occlSurfTex: null,
   occlSurfW: 0,
   occlSurfH: 0,
+  isoCoarseColorTex: null,
+  isoCoarseOcclTex: null,
+  isoCoarseNormalTex: null,
+  isoCoarseDepthTex: null,
+  isoCoarseW: 0,
+  isoCoarseH: 0,
   depthTex: null,
   depthW: 0,
   depthH: 0,
@@ -230,11 +249,11 @@ export const gpu: GpuState = {
   flowParticlesPerLayer: 0,
 };
 
-export const PIPELINE_EPOCH = 79;
+export const PIPELINE_EPOCH = 87;
 export const labelVertScratch = new Float32Array(18 * 6);
 
 export function resetPipelinesOnDeviceLost(): void {
-  gpu.isoPipeline = gpu.beerPipeline = gpu.fxaaPipeline = gpu.ssaoPipeline = null;
+  gpu.isoPipeline = gpu.isoRefinePipeline = gpu.isoUpsamplePipeline = gpu.beerPipeline = gpu.fxaaPipeline = gpu.ssaoPipeline = null;
   gpu.blitPipeline = null;
   gpu.gridPipeline = gpu.labelPipeline = null;
   gpu.flowParticlesPipeline = null;

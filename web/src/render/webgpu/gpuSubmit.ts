@@ -3,23 +3,45 @@ import { noteGpuPresent, scheduleStampReadback } from "./marchProfile.js";
 
 /** Command buffers collected between `beginGpuFrame` / `endGpuFrame`. */
 let frameCmds: GPUCommandBuffer[] | null = null;
-/** Last uniform buffer written while cmds are pending (flush if rewritten). */
-let lastWrittenBuf: GPUBuffer | null = null;
+/**
+ * Every buffer `gpuWriteBuffer` touched since the last queue submit.
+ * Flushing only the *last* write misses: coarse iso → upsample uniforms →
+ * refine iso, which reused `drawParamBuf` with display-sized fbW/fbH while
+ * the coarse pass was still pending. That parks NDC (0,0) at the bottom-right
+ * of the smaller coarse target.
+ */
+const writtenSinceSubmit = new Set<GPUBuffer>();
 let stampBeginWritten = false;
 let stampEndWritten = false;
 let stampedThisFrame = false;
 
+function flushPendingCmds(device: GPUDevice): void {
+  if (!frameCmds || frameCmds.length === 0) return;
+  device.queue.submit(frameCmds);
+  frameCmds.length = 0;
+  writtenSinceSubmit.clear();
+}
+
+/** Rewrite of a buffer already used by pending cmds must submit those cmds first. */
+export function uniformWriteNeedsFlush<T>(
+  pendingCmdCount: number,
+  writtenSinceSubmit: ReadonlySet<T>,
+  buf: T,
+): boolean {
+  return pendingCmdCount > 0 && writtenSinceSubmit.has(buf);
+}
+
 export function beginGpuFrame(): void {
   frameCmds = [];
-  lastWrittenBuf = null;
+  writtenSinceSubmit.clear();
   stampBeginWritten = false;
   stampEndWritten = false;
   stampedThisFrame = false;
 }
 
 /**
- * Queue a buffer write. If that same buffer is already referenced by a pending
- * command buffer, submit first so the GPU sees the earlier contents.
+ * Queue a buffer write. If pending command buffers may still read this
+ * buffer, submit them first so they keep the earlier contents.
  */
 export function gpuWriteBuffer(
   device: GPUDevice,
@@ -27,12 +49,11 @@ export function gpuWriteBuffer(
   data: ArrayBufferView | ArrayBuffer,
   offset = 0,
 ): void {
-  if (frameCmds && frameCmds.length > 0 && lastWrittenBuf === buf) {
-    device.queue.submit(frameCmds);
-    frameCmds.length = 0;
+  if (frameCmds && frameCmds.length > 0 && uniformWriteNeedsFlush(frameCmds.length, writtenSinceSubmit, buf)) {
+    flushPendingCmds(device);
   }
   device.queue.writeBuffer(buf, offset, data);
-  lastWrittenBuf = buf;
+  writtenSinceSubmit.add(buf);
 }
 
 export function submitEnc(device: GPUDevice, enc: GPUCommandEncoder): void {
@@ -78,7 +99,7 @@ export function endGpuFrame(device: GPUDevice): void {
   resolveStampQueries(device);
   if (frameCmds && frameCmds.length > 0) device.queue.submit(frameCmds);
   frameCmds = null;
-  lastWrittenBuf = null;
+  writtenSinceSubmit.clear();
 }
 
 /** Record present cadence; GPU time comes from timestamp readback. */

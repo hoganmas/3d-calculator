@@ -2,6 +2,7 @@ import {
   inferQualityFromSettings,
   qualityToDeg,
   qualityToIsoMarchDownscale,
+  qualityToIsoRefineDownscale,
   qualityToIsoSteps,
   qualityToMarchDownscale,
   qualityToParticleCount,
@@ -20,6 +21,8 @@ export async function run() {
         assert(qualityToMarchDownscale(0) === 8, "low quality downscales heavily");
         assert(qualityToMarchDownscale(100) === 1, "max quality full resolution");
         assert(qualityToIsoMarchDownscale(50) === qualityToMarchDownscale(50), "iso uses same curve");
+        assert(qualityToIsoRefineDownscale(50) === 1, "refine compose is display-sized");
+        assert(qualityToIsoRefineDownscale(100) === 1, "max quality refine is full res");
       },
     },
     {
@@ -51,8 +54,8 @@ export async function run() {
       name: "vector quality maps to particles and trail steps",
       fn: () => {
         assert(qualityToParticleCount(0) < qualityToParticleCount(100), "more particles at high Q");
-        assert(qualityToTrailSteps(0) < qualityToTrailSteps(100), "longer trails at high Q");
         assert(qualityToParticleCount(50) === 1000, "default Q matches HTML particle count");
+        assert(qualityToTrailSteps(20) === 32, "mobile-boot Q keeps full trail length");
         assert(qualityToTrailSteps(50) === 32, "default Q matches HTML trail length");
         const inferred = inferQualityFromSettings({
           marchDownscale: 2,

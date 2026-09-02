@@ -20,6 +20,11 @@ export function qualityToIsoMarchDownscale(q: number): number {
   return qualityToMarchDownscale(q);
 }
 
+/** Compose/refine divisor: display-sized (1×). Coarse iso still uses the surface-quality downscale. */
+export function qualityToIsoRefineDownscale(_q: number): number {
+  return 1;
+}
+
 /** Beer / scalar-volume ray-march step count. */
 export function qualityToVolumeSteps(q: number): number {
   const raw = 12 + (clampQ(q) / 100) * 56;
@@ -51,10 +56,9 @@ export function qualityToParticleCount(q: number): number {
   return Math.min(32000, Math.max(100, Math.round(raw / 100) * 100));
 }
 
-/** Trail history length. Quality 50 matches HTML / `npm run dev` (32, the max). */
-export function qualityToTrailSteps(q: number): number {
-  const raw = 8 + (clampQ(q) / 50) * 24;
-  return Math.min(32, Math.max(2, Math.round(raw)));
+/** Trail history length. Fixed at the HTML / `npm run dev` max (32), including mobile boot. */
+export function qualityToTrailSteps(_q: number): number {
+  return 32;
 }
 
 function inferFromMap(
@@ -90,10 +94,8 @@ function inferPrecisionQuality(deg: number): number {
   return clampQ(((deg - 12) / 52) * 100);
 }
 
-function inferVectorQuality(particles: number, trailSteps: number): number {
-  const particleQ = inferFromMap(particles, qualityToParticleCount);
-  const trailQ = inferFromMap(trailSteps, qualityToTrailSteps);
-  return Math.round((particleQ + trailQ) / 2);
+function inferVectorQuality(particles: number, _trailSteps: number): number {
+  return inferFromMap(particles, qualityToParticleCount);
 }
 
 export function inferQualityFromSettings(input: {
