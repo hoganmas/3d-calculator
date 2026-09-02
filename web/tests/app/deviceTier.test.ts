@@ -32,7 +32,7 @@ export async function run() {
       fn: () => {
         const mobile = bootQualityForTier("mobile");
         assert(mobile.scalarQuality === 25, "mobile scalar");
-        assert(mobile.surfaceQuality === 75, "mobile surface keeps 2× compose / 3-tier refine");
+        assert(mobile.surfaceQuality === 100, "mobile surface is 1× compose / 3-tier refine");
         assert(mobile.vectorQuality === 20, "mobile vector");
         assert(qualityToTrailSteps(mobile.vectorQuality) === 32, "mobile boot keeps full trails");
         const tablet = bootQualityForTier("tablet");
@@ -70,19 +70,19 @@ export async function run() {
       },
     },
     {
-      name: "webGpuPowerPreference is high-performance on every tier",
+      name: "webGpuPowerPreference prefers low-power on mobile",
       fn: () => {
-        assert(webGpuPowerPreference("mobile") === "high-performance", "mobile");
-        assert(webGpuPowerPreference("desktop") === "high-performance", "desktop");
+        assert(webGpuPowerPreference("mobile") === "low-power", "mobile low-power");
+        assert(webGpuPowerPreference("desktop") === "high-performance", "desktop perf");
       },
     },
     {
-      name: "mobile compose floor is 2× so a 1× slider still has the mid ladder",
+      name: "compose floor is 1× so a 1× slider remarchs edges at display res",
       fn: () => {
-        assert(isoComposeDownscaleFloor("mobile") === 2, "mobile floor");
+        assert(isoComposeDownscaleFloor("mobile") === 1, "mobile no floor");
         assert(isoComposeDownscaleFloor("tablet") === 1, "tablet no floor");
         assert(isoComposeDownscaleFloor("desktop") === 1, "desktop no floor");
-        assert(effectiveIsoComposeDownscale(1, "mobile") === 2, "1× slider becomes 2×");
+        assert(effectiveIsoComposeDownscale(1, "mobile") === 1, "1× slider stays 1×");
         assert(effectiveIsoComposeDownscale(2, "mobile") === 2, "2× stays 2×");
         assert(effectiveIsoComposeDownscale(4, "mobile") === 4, "4× stays 4×");
         assert(effectiveIsoComposeDownscale(1, "desktop") === 1, "desktop 1× stays");

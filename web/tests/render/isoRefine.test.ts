@@ -50,6 +50,10 @@ export async function run() {
         const phone2x = isoMidFramebufferSize(25, 40, 393, 641, 2);
         assert(!!phone2x && phone2x.mw === 98 && phone2x.mh === 160, "phone 2× compose still has a 4× mid");
         assert(isoMidRefineEnabled(25, 40, 393, 641, 2), "16× → 4× → 2× on a phone viewport");
+        const phone1x = isoMidFramebufferSize(25, 40, 393, 641, 1);
+        assert(!!phone1x && phone1x.mw === 98 && phone1x.mh === 160, "phone 1× compose still has a 4× mid");
+        assert(isoMidRefineEnabled(25, 40, 393, 641, 1), "16× → 4× → 1× on a phone viewport");
+        assert(isoFineFramebufferSize(25, 40, 393, 641, 1).fw === 393, "phone 1× compose is display");
         assert(!isoMidRefineEnabled(25, 40, 393, 641, 4), "4× compose is two-tier only");
       },
     },

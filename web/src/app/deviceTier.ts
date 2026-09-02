@@ -36,8 +36,9 @@ export function detectDeviceTier(opts: { webGpuFailed?: boolean } = {}): DeviceT
 export function bootQualityForTier(tier: DeviceTier): BootQualityPreset {
   switch (tier) {
     case "mobile":
-      // Surface 75 → 2× compose so the 16× → 4× → 2× occupancy ladder actually runs.
-      return { precisionQuality: 25, scalarQuality: 25, surfaceQuality: 75, vectorQuality: 20 };
+      // Surface 100 → 1× Hermite compose. Occupancy stays 16× with a 4× mid;
+      // silhouettes / intersections remarch at display res. ~40Hz vsync is fine.
+      return { precisionQuality: 25, scalarQuality: 25, surfaceQuality: 100, vectorQuality: 20 };
     case "tablet":
       return { precisionQuality: 40, scalarQuality: 40, surfaceQuality: 40, vectorQuality: 35 };
     default:
@@ -45,17 +46,16 @@ export function bootQualityForTier(tier: DeviceTier): BootQualityPreset {
   }
 }
 
-export function webGpuPowerPreference(_tier: DeviceTier): GPUPowerPreference {
-  // iOS low-power + WebGPU often caps ProMotion at ~40Hz even when the march is ~11ms.
-  return "high-performance";
+export function webGpuPowerPreference(tier: DeviceTier): GPUPowerPreference {
+  return tier === "mobile" ? "low-power" : "high-performance";
 }
 
 /**
- * Finest iso compose divisor floor. 1× Hermite refine misses 60fps on phones;
- * 2× still has the 16× → 4× → 2× occupancy ladder.
+ * Finest iso compose divisor floor. No floor: phones stay vsync-locked around
+ * 40Hz either way, so 1× Hermite is free sharpness for edges / intersections.
  */
-export function isoComposeDownscaleFloor(tier: DeviceTier): number {
-  return tier === "mobile" ? 2 : 1;
+export function isoComposeDownscaleFloor(_tier: DeviceTier): number {
+  return 1;
 }
 
 export function effectiveIsoComposeDownscale(slider: number, tier: DeviceTier): number {

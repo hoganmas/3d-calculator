@@ -3,7 +3,7 @@ import { getFlowParticleMetrics } from "../render/webgpu/flowParticles.js";
 import { hasFlowGpuLayers } from "../render/webgpu/flowGpu.js";
 import { getParamValues } from "../model/params.js";
 import { getExprWarning } from "../model/expressions.js";
-import { els } from "./dom.js";
+import { els, viewportSize } from "./dom.js";
 import { state } from "./state.js";
 import { renderer } from "./scene.js";
 import { clipUniforms, useGpuClipPath } from "./webglFallback.js";
@@ -144,8 +144,7 @@ export function hudText() {
 }
 
 export function buildMetricsReport() {
-  const fbW = Math.max(1, renderer.domElement.width);
-  const fbH = Math.max(1, renderer.domElement.height);
+  const { vw: fbW, vh: fbH } = viewportSize();
   const p = getClipGpuProfile();
   const { mw, mh } = marchFramebufferSize();
   const sliderDown = isoMarchDownscale();
