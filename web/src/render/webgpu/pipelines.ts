@@ -33,7 +33,7 @@ export async function ensurePipelinesForDegree(_deg: number): Promise<PipelineBu
   if (
     gpu.isoPipeline && gpu.isoRefinePipeline && gpu.isoUpsamplePipeline &&
     gpu.beerPipeline && gpu.beerRefinePipeline && gpu.fxaaPipeline &&
-    gpu.gridPipeline && gpu.labelPipeline && gpu.blitPipeline &&
+    gpu.gridPipeline && gpu.labelPipeline && gpu.blitPipeline && gpu.blitMidPipeline &&
     gpu.builtEpoch === PIPELINE_EPOCH
   ) {
     return {};
@@ -258,6 +258,22 @@ export async function ensurePipelinesForDegree(_deg: number): Promise<PipelineBu
     if (err) throw new Error(`blit: ${err.message}`);
   }
 
+  device.pushErrorScope("validation");
+  const nextBlitMid = device.createRenderPipeline({
+    layout: "auto",
+    vertex: { module: blitMod, entryPoint: "vsMain" },
+    fragment: {
+      module: blitMod,
+      entryPoint: "fsMainSwap",
+      targets: [{ format: gpu.canvasFormat, blend: blendPremul }],
+    },
+    primitive: { topology: "triangle-list" },
+  });
+  {
+    const err = await device.popErrorScope();
+    if (err) throw new Error(`blitMid: ${err.message}`);
+  }
+
   if (!gpu.blitSampler) {
     gpu.blitSampler = device.createSampler({
       magFilter: "linear",
@@ -284,6 +300,7 @@ export async function ensurePipelinesForDegree(_deg: number): Promise<PipelineBu
   gpu.labelPipeline = nextLabel;
   gpu.fxaaPipeline = nextFxaa;
   gpu.blitPipeline = nextBlit;
+  gpu.blitMidPipeline = nextBlitMid;
   gpu.builtEpoch = PIPELINE_EPOCH;
   gpu.labelAtlasDirty = true;
   startupEnd("gpu.pipelines.create");

@@ -630,18 +630,22 @@ function compositeVolumeOntoScene(
   sceneView: GPUTextureView,
   srcTex: GPUTexture,
   occTex: GPUTexture,
-  sampler: GPUSampler = gpu.blitSampler!,
+  sampler: GPUSampler | null = gpu.blitSampler,
+  pipeline: GPURenderPipeline | null = gpu.blitPipeline,
 ): void {
-  if (!gpu.blitPipeline || !sampler) return;
+  if (!pipeline) return;
   const { device } = handles;
+  const entries: GPUBindGroupEntry[] = [
+    { binding: 0, resource: texView(srcTex) },
+    { binding: 2, resource: texView(targets.occlIsoTex) },
+    { binding: 3, resource: texView(occTex) },
+  ];
+  // fsMainSwap (TEMP DIAGNOSTIC pipeline) does a manual textureLoad-based
+  // bilinear and never touches srcSamp, so its auto layout has no binding 1.
+  if (sampler) entries.push({ binding: 1, resource: sampler });
   const bg = device.createBindGroup({
-    layout: gpu.blitPipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: texView(srcTex) },
-      { binding: 1, resource: sampler },
-      { binding: 2, resource: texView(targets.occlIsoTex) },
-      { binding: 3, resource: texView(occTex) },
-    ],
+    layout: pipeline.getBindGroupLayout(0),
+    entries,
   });
   const enc = device.createCommandEncoder();
   const pass = enc.beginRenderPass({
@@ -651,7 +655,7 @@ function compositeVolumeOntoScene(
       storeOp: "store",
     }],
   });
-  pass.setPipeline(gpu.blitPipeline);
+  pass.setPipeline(pipeline);
   pass.setBindGroup(0, bg);
   setPassViewport(pass, targets.sceneColorTex.width, targets.sceneColorTex.height);
   pass.draw(3);
@@ -959,12 +963,14 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
           midOcc, coarseOcc, "clear",
           Mgrid, volumeSteps, half, scale, ro, dirMatrix,
         );
-        // Nearest, not linear: midBeerTex is cleared to (0,0,0,0) outside the
-        // coarse-mixed tiles it actually shaded, and a linear sample straddling
-        // that boundary would blend real premultiplied color with hard zero —
-        // thinning alpha into a transparent ring along the refine-tile edge.
+        // TEMP DIAGNOSTIC: fsMainSwap does a manual bilinear with diagonally
+        // swapped corners (testing a reported corner-swap in this mid-tier
+        // upscale), falling back to nearest at the shaded/cleared boundary
+        // (same reason the nearest sampler was used before: midBeerTex is
+        // cleared to (0,0,0,0) outside the coarse-mixed tiles it shaded, and
+        // blending real color with hard zero there thins alpha into a ring).
         compositeVolumeOntoScene(
-          handles, targets, sceneView, midBeerTex, midOcc, gpu.blitSamplerNearest!,
+          handles, targets, sceneView, midBeerTex, midOcc, null, gpu.blitMidPipeline,
         );
       }
       if (gpu.sceneConstraints.length > 0) {

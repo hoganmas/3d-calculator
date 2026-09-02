@@ -46,6 +46,8 @@ export interface GpuState {
   beerPipeline: GPURenderPipeline | null;
   beerRefinePipeline: GPURenderPipeline | null;
   blitPipeline: GPURenderPipeline | null;
+  /** TEMP DIAGNOSTIC: blit.wgsl's fsMainSwap entry point (mid-cascade corner-swap test). */
+  blitMidPipeline: GPURenderPipeline | null;
   fxaaPipeline: GPURenderPipeline | null;
   gridPipeline: GPURenderPipeline | null;
   gridParamBuf: GPUBuffer | null;
@@ -172,6 +174,7 @@ export const gpu: GpuState = {
   beerPipeline: null,
   beerRefinePipeline: null,
   blitPipeline: null,
+  blitMidPipeline: null,
   fxaaPipeline: null,
   gridPipeline: null,
   gridParamBuf: null,
@@ -271,13 +274,14 @@ export const gpu: GpuState = {
   flowParticlesPerLayer: 0,
 };
 
-export const PIPELINE_EPOCH = 91;
+export const PIPELINE_EPOCH = 92;
 export const labelVertScratch = new Float32Array(18 * 6);
 
 export function resetPipelinesOnDeviceLost(): void {
   gpu.isoPipeline = gpu.isoRefinePipeline = gpu.isoUpsamplePipeline = gpu.beerPipeline = gpu.fxaaPipeline = null;
   gpu.beerRefinePipeline = null;
   gpu.blitPipeline = null;
+  gpu.blitMidPipeline = null;
   gpu.gridPipeline = gpu.labelPipeline = null;
   gpu.flowParticlesPipeline = null;
   gpu.flowParticlesParamBuf = null;

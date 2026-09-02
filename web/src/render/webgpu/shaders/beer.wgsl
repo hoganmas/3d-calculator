@@ -131,6 +131,8 @@ fn isoOcclusionForVolumePixel(pos: vec2f, fbW: f32, fbH: f32) -> f32 {
     if (d00 >= 0.999 || d10 >= 0.999 || d01 >= 0.999 || d11 >= 0.999) {
       return 1.0;
     }
+    // Unswapped: standard bilinear order (an extra U-axis inversion on top
+    // of the prior U-swap cancels back to this).
     return mix(mix(d00, d10, tx), mix(d01, d11, tx), ty);
   }
   // Clip tex finer than beer: clip only fully-covered interior tiles (min depth).
