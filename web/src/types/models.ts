@@ -80,6 +80,8 @@ export interface CloudLayer {
   fitRel?: number;
   keyframes?: KeyframeFrame[];
   blend?: KeyframeBlend;
+  latex?: string;
+  freeParams?: string[];
 }
 
 export interface IsosurfaceLayer {
@@ -96,6 +98,8 @@ export interface IsosurfaceLayer {
   fitRel?: number;
   keyframes?: KeyframeFrame[];
   blend?: KeyframeBlend;
+  latex?: string;
+  freeParams?: string[];
 }
 
 export interface FlowLayer {
@@ -110,6 +114,8 @@ export interface FlowLayer {
   fitRel?: number;
   keyframes?: KeyframeFrame[];
   blend?: KeyframeBlend;
+  latex?: string;
+  freeParams?: string[];
 }
 
 export interface SceneBake {
