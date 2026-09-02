@@ -14,16 +14,20 @@ import { runSuite } from "../helpers/runner.ts";
 export async function run() {
   return runSuite("render / iso-refine", [
     {
-      name: "fine size is the display framebuffer",
+      name: "fine size is display / fineDownscale, never coarser than occupancy",
       fn: () => {
-        const full = isoFineFramebufferSize(800, 600, 800, 600);
-        assert(full.fw === 800 && full.fh === 600, "1× coarse stays display");
-        assert(!isoRefineEnabled(800, 600, 800, 600), "no refine at 1×");
-        const half = isoFineFramebufferSize(400, 300, 800, 600);
-        assert(half.fw === 800 && half.fh === 600, "2× coarse composes at display");
-        assert(isoRefineEnabled(400, 300, 800, 600), "refine when display > coarse");
-        const quarter = isoFineFramebufferSize(200, 150, 800, 600);
-        assert(quarter.fw === 800 && quarter.fh === 600, "4× coarse still composes at display");
+        const full = isoFineFramebufferSize(800, 600, 800, 600, 1);
+        assert(full.fw === 800 && full.fh === 600, "1× fine stays display");
+        assert(!isoRefineEnabled(800, 600, 800, 600, 1), "no refine at 1×");
+        const half = isoFineFramebufferSize(400, 300, 800, 600, 1);
+        assert(half.fw === 800 && half.fh === 600, "2× coarse + 1× fine composes at display");
+        assert(isoRefineEnabled(400, 300, 800, 600, 1), "refine when fine > coarse");
+        const q50 = isoFineFramebufferSize(50, 38, 800, 600, 4);
+        assert(q50.fw === 200 && q50.fh === 150, "q=50 compose is 4×");
+        assert(isoRefineEnabled(50, 38, 800, 600, 4), "16× occupancy refines into 4× compose");
+        const q0 = isoFineFramebufferSize(50, 38, 800, 600, 16);
+        assert(q0.fw === 50 && q0.fh === 38, "q=0 compose matches 16× occupancy");
+        assert(!isoRefineEnabled(50, 38, 800, 600, 16), "no refine when fine equals coarse");
       },
     },
     {

@@ -29,7 +29,7 @@ export interface ClipGpuProfile {
 export interface RenderClipFrameGpuParams {
   camera: PerspectiveCamera;
   half: number;
-  /** Iso / SSAO / compose framebuffer size. */
+  /** Iso coarse occupancy framebuffer size. */
   fbW: number;
   fbH: number;
   /** Beer / volume framebuffer size (defaults to fbW/fbH). */
@@ -44,6 +44,8 @@ export interface RenderClipFrameGpuParams {
   ndcOffsetY?: number;
   displayW?: number;
   displayH?: number;
+  /** Finest iso compose divisor (1 = display). Coarse occupancy is always 16×. */
+  isoFineDownscale?: number;
 }
 
 export interface CanvasSize {

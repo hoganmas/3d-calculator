@@ -189,7 +189,7 @@ export function buildCapabilities() {
       isoSteps: { min: 16, max: 192, description: "Iso-surface ray-march step count." },
       boxSize: { description: "World cube half-extent multiplier; triggers refit." },
       marchDownscale: { enum: [1, 2, 4, 8, 16], description: "Beer / scalar volume march resolution divisor." },
-      isoMarchDownscale: { enum: [1, 2, 4, 8, 16], description: "Iso-surface march resolution divisor." },
+      isoMarchDownscale: { enum: [1, 2, 4, 8, 16], description: "Finest iso compose resolution divisor (coarse occupancy is always 16×)." },
       preset: { enum: PRESET_KEYS, description: "Last loaded preset key (informational)." },
     },
     presets,

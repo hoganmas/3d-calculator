@@ -10,6 +10,7 @@ import { clipUniforms, useGpuClipPath } from "./webglFallback.js";
 import { isProdUi } from "./quality.js";
 import { perfAdaptHudSuffix } from "./perfAdapt.js";
 import {
+  isoCoarseDownscale,
   isoMarchDownscale,
   marchDownscale,
   marchFramebufferSize,
@@ -146,7 +147,8 @@ export function buildMetricsReport() {
   const fbH = Math.max(1, renderer.domElement.height);
   const p = getClipGpuProfile();
   const { mw, mh } = marchFramebufferSize();
-  const refine = isoFineFramebufferSize(mw, mh, fbW, fbH);
+  const fineDown = isoMarchDownscale();
+  const refine = isoFineFramebufferSize(mw, mh, fbW, fbH, fineDown);
   const lines = [
     `poly-cloud metrics  ${new Date().toISOString()}`,
     `deg             ${state.fitDeg}`,
@@ -155,9 +157,10 @@ export function buildMetricsReport() {
     `iso_steps       ${clipUniforms.uIsoSteps.value}`,
     `box_size        ${2 * clipUniforms.uHalf.value}`,
     `vol_downscale   ${marchDownscale()}×`,
-    `iso_downscale   ${isoMarchDownscale()}×`,
+    `iso_coarse      ${isoCoarseDownscale()}×`,
+    `iso_downscale   ${fineDown}×`,
     `vol_resolution  ${(100 / marchDownscale()).toFixed(1)}%`,
-    `iso_resolution  ${(100 / isoMarchDownscale()).toFixed(1)}%`,
+    `iso_resolution  ${(100 / fineDown).toFixed(1)}%`,
     `viewport        ${fbW}×${fbH}`,
     `iso_fb_req      ${mw}×${mh}`,
     `iso_refine_fb   ${refine.fw}×${refine.fh}`,

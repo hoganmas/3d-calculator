@@ -80,9 +80,10 @@ function buildRaySetup(
   const volH = Math.max(1, (params.volFbH ?? 0) || marchH);
   const outW = Math.max(1, (displayW | 0) || marchW);
   const outH = Math.max(1, (displayH | 0) || marchH);
-  const refine = gpu.sceneConstraints.length > 0 && isoRefineEnabled(marchW, marchH, outW, outH);
+  const fineDown = Math.min(16, Math.max(1, (params.isoFineDownscale ?? 1) | 0));
+  const refine = gpu.sceneConstraints.length > 0 && isoRefineEnabled(marchW, marchH, outW, outH, fineDown);
   const { fw: composeW, fh: composeH } = refine
-    ? isoFineFramebufferSize(marchW, marchH, outW, outH)
+    ? isoFineFramebufferSize(marchW, marchH, outW, outH, fineDown)
     : { fw: marchW, fh: marchH };
 
   resizeClipGpuCanvas(outW, outH);

@@ -517,7 +517,7 @@ function tools(): ToolDef[] {
           isoSteps: { type: "number", description: "Iso-surface ray-march steps (16–192)." },
           boxSize: { type: "number" },
           marchDownscale: { type: "number", description: "Beer / scalar volume march resolution divisor." },
-          isoMarchDownscale: { type: "number", description: "Iso-surface march resolution divisor." },
+          isoMarchDownscale: { type: "number", description: "Finest iso compose resolution divisor (coarse occupancy is always 16×)." },
         },
       },
       execute: async (input) => setRenderSettings(input),

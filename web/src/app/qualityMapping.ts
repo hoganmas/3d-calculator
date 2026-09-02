@@ -15,14 +15,19 @@ export function qualityToMarchDownscale(q: number): number {
   return Math.min(16, Math.max(1, Math.round(raw)));
 }
 
-/** Iso-surface march resolution divisor from surface quality (same curve as volume). */
+/** Coarse iso occupancy pass — always the heaviest downscale. */
+export const ISO_COARSE_DOWNSCALE = 16;
+
+/** Finest iso compose divisor from surface quality (16× at 0, 1× at 100). */
 export function qualityToIsoMarchDownscale(q: number): number {
-  return qualityToMarchDownscale(q);
+  const t = clampQ(q) / 100;
+  const raw = ISO_COARSE_DOWNSCALE * Math.pow(1 / ISO_COARSE_DOWNSCALE, t);
+  return Math.min(ISO_COARSE_DOWNSCALE, Math.max(1, Math.round(raw)));
 }
 
-/** Compose/refine divisor: display-sized (1×). Coarse iso still uses the surface-quality downscale. */
-export function qualityToIsoRefineDownscale(_q: number): number {
-  return 1;
+/** Same as `qualityToIsoMarchDownscale` — the slider is the fine/lowest downscale. */
+export function qualityToIsoRefineDownscale(q: number): number {
+  return qualityToIsoMarchDownscale(q);
 }
 
 /** Beer / scalar-volume ray-march step count. */

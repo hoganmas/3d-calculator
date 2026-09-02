@@ -1,4 +1,4 @@
-/** Occupancy-guided iso refine: coarse march, display-sized compose, edge-only hi-res rays. */
+/** Occupancy-guided iso refine: 16× coarse occupancy, slider-sized compose, edge-only hi-res rays. */
 
 /** Coarse occl.r below this is a surface hit (misses clear to 1). */
 export const ISO_OCC_HIT = 0.999;
@@ -10,22 +10,24 @@ export const ISO_REFINE_EDGE = 1;
 export const ISO_REFINE_INTERSECT = 2;
 
 /**
- * Fine iso compose size: the display framebuffer.
- * Sharing pixels with the box overlay avoids an FXAA stretch that shifts NDC.
+ * Fine iso compose size: display / fineDownscale, never coarser than the occupancy pass.
+ * Coarse occupancy is 16×; `fineDownscale` is the slider (lowest downsampling).
  */
 export function isoFineFramebufferSize(
   coarseW: number,
   coarseH: number,
   outW: number,
   outH: number,
+  fineDownscale = 1,
 ): { fw: number; fh: number } {
   const cw = Math.max(1, coarseW | 0);
   const ch = Math.max(1, coarseH | 0);
   const ow = Math.max(1, outW | 0);
   const oh = Math.max(1, outH | 0);
+  const d = Math.min(16, Math.max(1, fineDownscale | 0));
   return {
-    fw: Math.max(cw, ow),
-    fh: Math.max(ch, oh),
+    fw: Math.max(cw, Math.round(ow / d)),
+    fh: Math.max(ch, Math.round(oh / d)),
   };
 }
 
@@ -34,8 +36,9 @@ export function isoRefineEnabled(
   coarseH: number,
   outW: number,
   outH: number,
+  fineDownscale = 1,
 ): boolean {
-  const { fw, fh } = isoFineFramebufferSize(coarseW, coarseH, outW, outH);
+  const { fw, fh } = isoFineFramebufferSize(coarseW, coarseH, outW, outH, fineDownscale);
   return fw > (coarseW | 0) || fh > (coarseH | 0);
 }
 

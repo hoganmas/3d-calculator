@@ -8,6 +8,7 @@ import {
 } from "../render/webgpu/march.js";
 import { els, viewportSize } from "./dom.js";
 import { state, MARCH_DOWNSCALE_MIN, MARCH_DOWNSCALE_MAX, MARCH_DOWNSCALE_LABELS, BOUNDS_SIZE_MIN, BOUNDS_SIZE_MAX } from "./state.js";
+import { ISO_COARSE_DOWNSCALE } from "./qualityMapping.js";
 import {
   isHorizontalPanelLayout,
   readPanelCoverHeight,
@@ -132,7 +133,12 @@ export function marchDownscale() {
   return readMarchDownscale();
 }
 
-/** Iso-surface march downscale. */
+/** Iso-surface occupancy (coarse) downscale — always 16×. */
+export function isoCoarseDownscale() {
+  return ISO_COARSE_DOWNSCALE;
+}
+
+/** Iso-surface compose (finest) downscale — surface quality / iso slider. */
 export function isoMarchDownscale() {
   return readIsoMarchDownscale();
 }
@@ -186,9 +192,9 @@ export function applyCameraComposition(vw: number, vh: number) {
   }
 }
 
-/** Iso / compose raymarch resolution (display canvas stays full viewport). */
+/** Coarse iso occupancy resolution. Display canvas stays full viewport. */
 export function marchResolutionScale() {
-  return 1 / isoMarchDownscale();
+  return 1 / isoCoarseDownscale();
 }
 
 export function volumeResolutionScale() {
