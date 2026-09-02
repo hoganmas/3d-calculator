@@ -3,8 +3,6 @@ import {
   bootQualityForTier,
   detectDeviceTier,
   webGpuPowerPreference,
-  isoComposeDownscaleFloor,
-  effectiveIsoComposeDownscale,
   coarseIsoSteps,
   clampIsoStepsForTier,
 } from "../../src/app/deviceTier.ts";
@@ -32,6 +30,7 @@ export async function run() {
       fn: () => {
         const mobile = bootQualityForTier("mobile");
         assert(mobile.scalarQuality === 25, "mobile scalar");
+        assert(mobile.surfaceQuality === 75, "mobile surface keeps 2× compose / 3-tier refine");
         assert(mobile.vectorQuality === 20, "mobile vector");
         assert(qualityToTrailSteps(mobile.vectorQuality) === 32, "mobile boot keeps full trails");
         const tablet = bootQualityForTier("tablet");
@@ -73,17 +72,6 @@ export async function run() {
       fn: () => {
         assert(webGpuPowerPreference("mobile") === "low-power", "mobile low-power");
         assert(webGpuPowerPreference("desktop") === "high-performance", "desktop perf");
-      },
-    },
-    {
-      name: "mobile compose floor is 4× and raises a 2× slider",
-      fn: () => {
-        assert(isoComposeDownscaleFloor("mobile") === 4, "mobile floor");
-        assert(isoComposeDownscaleFloor("tablet") === 2, "tablet floor");
-        assert(isoComposeDownscaleFloor("desktop") === 1, "desktop no floor");
-        assert(effectiveIsoComposeDownscale(2, "mobile") === 4, "2× slider becomes 4×");
-        assert(effectiveIsoComposeDownscale(8, "mobile") === 8, "8× stays 8×");
-        assert(effectiveIsoComposeDownscale(1, "desktop") === 1, "desktop 1× stays");
       },
     },
     {

@@ -36,7 +36,8 @@ export function detectDeviceTier(opts: { webGpuFailed?: boolean } = {}): DeviceT
 export function bootQualityForTier(tier: DeviceTier): BootQualityPreset {
   switch (tier) {
     case "mobile":
-      return { precisionQuality: 25, scalarQuality: 25, surfaceQuality: 25, vectorQuality: 20 };
+      // Surface 75 → 2× compose so the 16× → 4× → 2× occupancy ladder actually runs.
+      return { precisionQuality: 25, scalarQuality: 25, surfaceQuality: 75, vectorQuality: 20 };
     case "tablet":
       return { precisionQuality: 40, scalarQuality: 40, surfaceQuality: 40, vectorQuality: 35 };
     default:
@@ -46,23 +47,6 @@ export function bootQualityForTier(tier: DeviceTier): BootQualityPreset {
 
 export function webGpuPowerPreference(tier: DeviceTier): GPUPowerPreference {
   return tier === "mobile" ? "low-power" : "high-performance";
-}
-
-/** Finest iso compose divisor floor. Mobile Hermite refine at 2×/1× misses 30fps. */
-export function isoComposeDownscaleFloor(tier: DeviceTier): number {
-  switch (tier) {
-    case "mobile":
-      return 4;
-    case "tablet":
-      return 2;
-    default:
-      return 1;
-  }
-}
-
-export function effectiveIsoComposeDownscale(slider: number, tier: DeviceTier): number {
-  const n = Math.min(16, Math.max(1, Math.round(slider) || 1));
-  return Math.max(n, isoComposeDownscaleFloor(tier));
 }
 
 /** Occupancy pass can be coarser than the Hermite refine. Shader clamps to ≥16. */

@@ -28,6 +28,7 @@ export async function run() {
         assert(qualityToIsoMarchDownscale(0) === 16, "surface q=0 is 16× compose");
         assert(qualityToIsoMarchDownscale(25) === 8, "surface q=25 is 8× compose");
         assert(qualityToIsoMarchDownscale(50) === 4, "surface q=50 is 4× compose");
+        assert(qualityToIsoMarchDownscale(75) === 2, "surface q=75 is 2× compose");
         assert(qualityToIsoMarchDownscale(100) === 1, "surface q=100 is full res");
         assert(qualityToIsoRefineDownscale(50) === 4, "refine downscale matches compose");
         assert(qualityToIsoRefineDownscale(100) === 1, "max quality refine is full res");

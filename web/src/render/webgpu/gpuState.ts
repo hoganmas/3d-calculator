@@ -60,6 +60,8 @@ export interface GpuState {
   drawParamBuf: GPUBuffer | null;
   drawParamBufBeer: GPUBuffer | null;
   drawParamBufRefine: GPUBuffer | null;
+  /** One uniform buffer per iso layer so a pass can draw all constraints without flushing. */
+  isoDrawParamBufs: GPUBuffer[];
   fxaaParamBuf: GPUBuffer | null;
   isoUpsampleParamBuf: GPUBuffer | null;
   volumeBuf: GPUBuffer | null;
@@ -175,6 +177,7 @@ export const gpu: GpuState = {
   drawParamBuf: null,
   drawParamBufBeer: null,
   drawParamBufRefine: null,
+  isoDrawParamBufs: [],
   fxaaParamBuf: null,
   isoUpsampleParamBuf: null,
   volumeBuf: null,
@@ -271,4 +274,5 @@ export function resetPipelinesOnDeviceLost(): void {
   gpu.labelAtlasDirty = true;
   gpu.volumeUploadEpoch = -1;
   gpu.presentWorkSamplePending = false;
+  gpu.isoDrawParamBufs = [];
 }

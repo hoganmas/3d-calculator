@@ -30,6 +30,11 @@ export async function run() {
           !uniformWriteNeedsFlush(2, written, "drawParamBufRefine"),
           "refine uniforms on a separate buffer do not flush coarse",
         );
+        written.add("isoDrawParam1");
+        assert(
+          !uniformWriteNeedsFlush(3, written, "isoDrawParam0"),
+          "a second iso layer on its own uniform buffer does not flush",
+        );
         written.add("drawParamBufRefine");
         assert(
           uniformWriteNeedsFlush(3, written, "drawParamBufRefine"),

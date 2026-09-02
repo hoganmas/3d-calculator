@@ -12,7 +12,6 @@ import { perfAdaptHudSuffix } from "./perfAdapt.js";
 import {
   isoCoarseDownscale,
   isoMarchDownscale,
-  effectiveIsoMarchDownscale,
   marchDownscale,
   marchFramebufferSize,
   volumeFramebufferSize,
@@ -148,11 +147,9 @@ export function buildMetricsReport() {
   const fbH = Math.max(1, renderer.domElement.height);
   const p = getClipGpuProfile();
   const { mw, mh } = marchFramebufferSize();
-  const sliderDown = isoMarchDownscale();
-  const fineDown = effectiveIsoMarchDownscale();
+  const fineDown = isoMarchDownscale();
   const refine = isoFineFramebufferSize(mw, mh, fbW, fbH, fineDown);
   const mid = isoMidFramebufferSize(mw, mh, fbW, fbH, fineDown);
-  const isoDownNote = sliderDown !== fineDown ? ` (slider ${sliderDown}×)` : "";
   const lines = [
     `poly-cloud metrics  ${new Date().toISOString()}`,
     `deg             ${state.fitDeg}`,
@@ -162,7 +159,7 @@ export function buildMetricsReport() {
     `box_size        ${2 * clipUniforms.uHalf.value}`,
     `vol_downscale   ${marchDownscale()}×`,
     `iso_coarse      ${isoCoarseDownscale()}×`,
-    `iso_downscale   ${fineDown}×${isoDownNote}`,
+    `iso_downscale   ${fineDown}×`,
     `vol_resolution  ${(100 / marchDownscale()).toFixed(1)}%`,
     `iso_resolution  ${(100 / fineDown).toFixed(1)}%`,
     `viewport        ${fbW}×${fbH}`,

@@ -29,8 +29,6 @@ export async function run() {
         assert(isoRefineEnabled(50, 38, 800, 600, 4), "16× occupancy refines into 4× compose");
         const mobileDump = isoFineFramebufferSize(197, 321, 393, 641, 2);
         assert(mobileDump.fw === 197 && mobileDump.fh === 321, "2× slider composes at half, not display");
-        const mobileFloor = isoFineFramebufferSize(25, 40, 393, 641, 4);
-        assert(mobileFloor.fw === 98 && mobileFloor.fh === 160, "mobile 4× floor is viewport/4");
         const q0 = isoFineFramebufferSize(50, 38, 800, 600, 16);
         assert(q0.fw === 50 && q0.fh === 38, "q=0 compose matches 16× occupancy");
         assert(!isoRefineEnabled(50, 38, 800, 600, 16), "no refine when fine equals coarse");
@@ -49,7 +47,10 @@ export async function run() {
         assert(!isoMidRefineEnabled(50, 38, 800, 600, 8), "no mid coarser than compose");
         assert(!isoMidRefineEnabled(50, 38, 800, 600, 16), "no mid when compose equals coarse");
         assert(!isoMidRefineEnabled(200, 150, 800, 600, 1), "no mid when occupancy is already 4×");
-        assert(!isoMidRefineEnabled(25, 40, 393, 641, 4), "mobile 4× floor skips the mid pass");
+        const phone2x = isoMidFramebufferSize(25, 40, 393, 641, 2);
+        assert(!!phone2x && phone2x.mw === 98 && phone2x.mh === 160, "phone 2× compose still has a 4× mid");
+        assert(isoMidRefineEnabled(25, 40, 393, 641, 2), "16× → 4× → 2× on a phone viewport");
+        assert(!isoMidRefineEnabled(25, 40, 393, 641, 4), "4× compose is two-tier only");
       },
     },
     {

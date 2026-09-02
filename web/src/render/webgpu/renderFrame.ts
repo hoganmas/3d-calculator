@@ -45,6 +45,136 @@ function setPassViewport(pass: GPURenderPassEncoder, w: number, h: number): void
   pass.setViewport(0, 0, Math.max(1, w), Math.max(1, h), 0, 1);
 }
 
+const texViewCache = new WeakMap<GPUTexture, GPUTextureView>();
+function texView(tex: GPUTexture): GPUTextureView {
+  let view = texViewCache.get(tex);
+  if (!view) {
+    view = tex.createView();
+    texViewCache.set(tex, view);
+  }
+  return view;
+}
+
+function isoParamBuf(device: GPUDevice, ci: number): GPUBuffer {
+  const bufs = gpu.isoDrawParamBufs;
+  if (bufs.length === 0) {
+    if (gpu.drawParamBuf) bufs.push(gpu.drawParamBuf);
+    if (gpu.drawParamBufRefine && gpu.drawParamBufRefine !== gpu.drawParamBuf) {
+      bufs.push(gpu.drawParamBufRefine);
+    }
+  }
+  while (bufs.length <= ci) {
+    bufs.push(device.createBuffer({
+      size: 256,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    }));
+  }
+  return bufs[ci]!;
+}
+
+let isoBgPipeline: GPURenderPipeline | null = null;
+let isoBgVolume: GPUBuffer | null = null;
+const isoBgs: GPUBindGroup[] = [];
+
+let refineBgPipeline: GPURenderPipeline | null = null;
+let refineBgVolume: GPUBuffer | null = null;
+const refineBgByOccl: { occl: GPUTexture; bgs: GPUBindGroup[] }[] = [];
+
+function isoBindGroup(
+  device: GPUDevice,
+  pipeline: GPURenderPipeline,
+  volumeBuf: GPUBuffer,
+  paramBuf: GPUBuffer,
+  ci: number,
+): GPUBindGroup {
+  if (isoBgPipeline !== pipeline || isoBgVolume !== volumeBuf) {
+    isoBgs.length = 0;
+    isoBgPipeline = pipeline;
+    isoBgVolume = volumeBuf;
+  }
+  let bg = isoBgs[ci];
+  if (!bg) {
+    bg = device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: paramBuf } },
+        { binding: 1, resource: { buffer: volumeBuf } },
+      ],
+    });
+    isoBgs[ci] = bg;
+  }
+  return bg;
+}
+
+function isoRefineBindGroup(
+  device: GPUDevice,
+  pipeline: GPURenderPipeline,
+  volumeBuf: GPUBuffer,
+  paramBuf: GPUBuffer,
+  srcOccl: GPUTexture,
+  ci: number,
+): GPUBindGroup {
+  if (refineBgPipeline !== pipeline || refineBgVolume !== volumeBuf) {
+    refineBgByOccl.length = 0;
+    refineBgPipeline = pipeline;
+    refineBgVolume = volumeBuf;
+  }
+  let slot = refineBgByOccl.find((s) => s.occl === srcOccl);
+  if (!slot) {
+    slot = { occl: srcOccl, bgs: [] };
+    refineBgByOccl.push(slot);
+    if (refineBgByOccl.length > 2) refineBgByOccl.shift();
+  }
+  let bg = slot.bgs[ci];
+  if (!bg) {
+    bg = device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: paramBuf } },
+        { binding: 1, resource: { buffer: volumeBuf } },
+        { binding: 2, resource: texView(srcOccl) },
+      ],
+    });
+    slot.bgs[ci] = bg;
+  }
+  return bg;
+}
+
+function writeIsoConstraintParams(
+  device: GPUDevice,
+  buf: GPUBuffer,
+  destW: number,
+  destH: number,
+  Mgrid: number,
+  steps: number,
+  half: number,
+  scale: number,
+  ro: [number, number, number],
+  dirMatrix: ReturnType<typeof offsetDirMatrix>,
+  debugTint: boolean,
+  ci: number,
+): void {
+  const c = gpu.sceneConstraints[ci];
+  const stride = c.frameStride || 0;
+  const base0 = c.base + (c.i0 | 0) * stride;
+  const base1 = c.base + (c.i1 | 0) * stride;
+  const blendT = Number.isFinite(c.t) ? c.t : 0;
+  const c0 = c.color || DEFAULT_ISO_RGB;
+  const c1 = c.color2 || DEFAULT_ISO_RGB2;
+  const stops = c.colors || [c0, c1];
+  gpuWriteBuffer(
+    device,
+    buf,
+    packDrawParamsIso(
+      destW, destH, Mgrid, steps, half, scale, c.isoLevel, base0, ro, dirMatrix,
+      c0, c1,
+      base1, blendT, stops,
+      debugTint,
+      ci + 1,
+    ),
+  );
+}
+
 function buildRaySetup(
   params: RenderClipFrameGpuParams,
 ): {
@@ -171,78 +301,60 @@ function drawIsoConstraints(
   dirMatrix: ReturnType<typeof offsetDirMatrix>,
   stampBegin = false,
 ): void {
-  const { device, isoPipeline, drawParamBuf, volumeBuf } = handles;
-  const sceneView = sceneTex.createView();
-  const occlIsoView = occlTex.createView();
-  const depthView = depthTex.createView();
-  const normalView = normalTex.createView();
+  const n = gpu.sceneConstraints.length;
+  if (n < 1) return;
+  const { device, isoPipeline, volumeBuf } = handles;
+  const sceneView = texView(sceneTex);
+  const occlIsoView = texView(occlTex);
+  const depthView = texView(depthTex);
+  const normalView = texView(normalTex);
 
-  for (let ci = 0; ci < gpu.sceneConstraints.length; ci++) {
-    const c = gpu.sceneConstraints[ci];
-    const stride = c.frameStride || 0;
-    const base0 = c.base + (c.i0 | 0) * stride;
-    const base1 = c.base + (c.i1 | 0) * stride;
-    const blendT = Number.isFinite(c.t) ? c.t : 0;
-    const c0 = c.color || DEFAULT_ISO_RGB;
-    const c1 = c.color2 || DEFAULT_ISO_RGB2;
-    const stops = c.colors || [c0, c1];
-    gpuWriteBuffer(
-      device,
-      drawParamBuf,
-      packDrawParamsIso(
-        sceneTex.width, sceneTex.height, Mgrid, steps, half, scale, c.isoLevel, base0, ro, dirMatrix,
-        c0, c1,
-        base1, blendT, stops,
-        false,
-        ci + 1,
-      ),
+  for (let ci = 0; ci < n; ci++) {
+    writeIsoConstraintParams(
+      device, isoParamBuf(device, ci),
+      sceneTex.width, sceneTex.height,
+      Mgrid, steps, half, scale, ro, dirMatrix, false, ci,
     );
-    const bg = device.createBindGroup({
-      layout: isoPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: drawParamBuf } },
-        { binding: 1, resource: { buffer: volumeBuf } },
-      ],
-    });
-    const first = ci === 0;
-    const load: GPULoadOp = first ? "clear" : "load";
-    const desc: GPURenderPassDescriptor = {
-      colorAttachments: [
-        {
-          view: sceneView,
-          loadOp: load,
-          clearValue: { r: 0, g: 0, b: 0, a: 0 },
-          storeOp: "store",
-        },
-        {
-          view: occlIsoView,
-          loadOp: load,
-          clearValue: { r: 1, g: 0, b: 0, a: 1 },
-          storeOp: "store",
-        },
-        {
-          view: normalView,
-          loadOp: load,
-          clearValue: { r: 0, g: 0, b: 0, a: 0 },
-          storeOp: "store",
-        },
-      ],
-      depthStencilAttachment: {
-        view: depthView,
-        depthClearValue: 1,
-        depthLoadOp: first ? "clear" : "load",
-        depthStoreOp: "store",
-      },
-    };
-    const enc = device.createCommandEncoder();
-    const pass = enc.beginRenderPass(stampBegin && first ? withStampWrites(desc, "begin") : desc);
-    pass.setPipeline(isoPipeline);
-    pass.setBindGroup(0, bg);
-    setPassViewport(pass, sceneTex.width, sceneTex.height);
-    pass.draw(3);
-    pass.end();
-    submitEnc(device, enc);
   }
+
+  const desc: GPURenderPassDescriptor = {
+    colorAttachments: [
+      {
+        view: sceneView,
+        loadOp: "clear",
+        clearValue: { r: 0, g: 0, b: 0, a: 0 },
+        storeOp: "store",
+      },
+      {
+        view: occlIsoView,
+        loadOp: "clear",
+        clearValue: { r: 1, g: 0, b: 0, a: 1 },
+        storeOp: "store",
+      },
+      {
+        view: normalView,
+        loadOp: "clear",
+        clearValue: { r: 0, g: 0, b: 0, a: 0 },
+        storeOp: "store",
+      },
+    ],
+    depthStencilAttachment: {
+      view: depthView,
+      depthClearValue: 1,
+      depthLoadOp: "clear",
+      depthStoreOp: "store",
+    },
+  };
+  const enc = device.createCommandEncoder();
+  const pass = enc.beginRenderPass(stampBegin ? withStampWrites(desc, "begin") : desc);
+  pass.setPipeline(isoPipeline);
+  setPassViewport(pass, sceneTex.width, sceneTex.height);
+  for (let ci = 0; ci < n; ci++) {
+    pass.setBindGroup(0, isoBindGroup(device, isoPipeline, volumeBuf, isoParamBuf(device, ci), ci));
+    pass.draw(3);
+  }
+  pass.end();
+  submitEnc(device, enc);
 }
 
 interface IsoGBuffer {
@@ -261,6 +373,44 @@ function acquireIsoMidGBuffer(): IsoGBuffer | null {
   return { color, occl, normal, depth };
 }
 
+let upBgPipeline: GPURenderPipeline | null = null;
+let upBgSrcColor: GPUTexture | null = null;
+let upBgSrcOccl: GPUTexture | null = null;
+let upBgSrcNormal: GPUTexture | null = null;
+let upBg: GPUBindGroup | null = null;
+const upsampleParamScratch = new Uint32Array(4);
+
+function upsampleBindGroup(
+  device: GPUDevice,
+  pipeline: GPURenderPipeline,
+  paramBuf: GPUBuffer,
+  src: { color: GPUTexture; occl: GPUTexture; normal: GPUTexture },
+): GPUBindGroup {
+  if (
+    upBg &&
+    upBgPipeline === pipeline &&
+    upBgSrcColor === src.color &&
+    upBgSrcOccl === src.occl &&
+    upBgSrcNormal === src.normal
+  ) {
+    return upBg;
+  }
+  upBgPipeline = pipeline;
+  upBgSrcColor = src.color;
+  upBgSrcOccl = src.occl;
+  upBgSrcNormal = src.normal;
+  upBg = device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: paramBuf } },
+      { binding: 1, resource: texView(src.color) },
+      { binding: 2, resource: texView(src.occl) },
+      { binding: 3, resource: texView(src.normal) },
+    ],
+  });
+  return upBg;
+}
+
 function upsampleIso(
   handles: MarchGpuHandles,
   src: { color: GPUTexture; occl: GPUTexture; normal: GPUTexture },
@@ -270,26 +420,21 @@ function upsampleIso(
   const fw = dest.color.width;
   const fh = dest.color.height;
   const debug = isIsoRefineDebugEnabled() ? 1 : 0;
-  const params = new Uint32Array([fw | 0, fh | 0, debug, 0]);
-  gpuWriteBuffer(device, isoUpsampleParamBuf, params);
-  const bg = device.createBindGroup({
-    layout: isoUpsamplePipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: isoUpsampleParamBuf } },
-      { binding: 1, resource: src.color.createView() },
-      { binding: 2, resource: src.occl.createView() },
-      { binding: 3, resource: src.normal.createView() },
-    ],
-  });
+  upsampleParamScratch[0] = fw | 0;
+  upsampleParamScratch[1] = fh | 0;
+  upsampleParamScratch[2] = debug;
+  upsampleParamScratch[3] = 0;
+  gpuWriteBuffer(device, isoUpsampleParamBuf, upsampleParamScratch);
+  const bg = upsampleBindGroup(device, isoUpsamplePipeline, isoUpsampleParamBuf, src);
   const enc = device.createCommandEncoder();
   const pass = enc.beginRenderPass({
     colorAttachments: [
-      { view: dest.color.createView(), loadOp: "clear", clearValue: { r: 0, g: 0, b: 0, a: 0 }, storeOp: "store" },
-      { view: dest.occl.createView(), loadOp: "clear", clearValue: { r: 1, g: 0, b: 0, a: 1 }, storeOp: "store" },
-      { view: dest.normal.createView(), loadOp: "clear", clearValue: { r: 0, g: 0, b: 0, a: 0 }, storeOp: "store" },
+      { view: texView(dest.color), loadOp: "clear", clearValue: { r: 0, g: 0, b: 0, a: 0 }, storeOp: "store" },
+      { view: texView(dest.occl), loadOp: "clear", clearValue: { r: 1, g: 0, b: 0, a: 1 }, storeOp: "store" },
+      { view: texView(dest.normal), loadOp: "clear", clearValue: { r: 0, g: 0, b: 0, a: 0 }, storeOp: "store" },
     ],
     depthStencilAttachment: {
-      view: dest.depth.createView(),
+      view: texView(dest.depth),
       depthClearValue: 1,
       depthLoadOp: "clear",
       depthStoreOp: "store",
@@ -315,62 +460,48 @@ function drawIsoRefine(
   ro: [number, number, number],
   dirMatrix: ReturnType<typeof offsetDirMatrix>,
 ): void {
-  const { device, isoRefinePipeline, drawParamBufRefine, volumeBuf } = handles;
-  const sceneView = dest.color.createView();
-  const occlIsoView = dest.occl.createView();
-  const depthView = dest.depth.createView();
-  const normalView = dest.normal.createView();
-  const srcOcclView = srcOccl.createView();
+  const n = gpu.sceneConstraints.length;
+  if (n < 1) return;
+  const { device, isoRefinePipeline, volumeBuf } = handles;
+  const sceneView = texView(dest.color);
+  const occlIsoView = texView(dest.occl);
+  const depthView = texView(dest.depth);
+  const normalView = texView(dest.normal);
 
-  for (let ci = 0; ci < gpu.sceneConstraints.length; ci++) {
-    const c = gpu.sceneConstraints[ci];
-    const stride = c.frameStride || 0;
-    const base0 = c.base + (c.i0 | 0) * stride;
-    const base1 = c.base + (c.i1 | 0) * stride;
-    const blendT = Number.isFinite(c.t) ? c.t : 0;
-    const c0 = c.color || DEFAULT_ISO_RGB;
-    const c1 = c.color2 || DEFAULT_ISO_RGB2;
-    const stops = c.colors || [c0, c1];
-    gpuWriteBuffer(
-      device,
-      drawParamBufRefine,
-      packDrawParamsIso(
-        dest.color.width, dest.color.height,
-        Mgrid, steps, half, scale, c.isoLevel, base0, ro, dirMatrix,
-        c0, c1,
-        base1, blendT, stops,
-        isIsoRefineDebugEnabled(),
-        ci + 1,
+  for (let ci = 0; ci < n; ci++) {
+    writeIsoConstraintParams(
+      device, isoParamBuf(device, ci),
+      dest.color.width, dest.color.height,
+      Mgrid, steps, half, scale, ro, dirMatrix, isIsoRefineDebugEnabled(), ci,
+    );
+  }
+
+  const enc = device.createCommandEncoder();
+  const pass = enc.beginRenderPass({
+    colorAttachments: [
+      { view: sceneView, loadOp: "load", storeOp: "store" },
+      { view: occlIsoView, loadOp: "load", storeOp: "store" },
+      { view: normalView, loadOp: "load", storeOp: "store" },
+    ],
+    depthStencilAttachment: {
+      view: depthView,
+      depthLoadOp: "load",
+      depthStoreOp: "store",
+    },
+  });
+  pass.setPipeline(isoRefinePipeline);
+  setPassViewport(pass, dest.color.width, dest.color.height);
+  for (let ci = 0; ci < n; ci++) {
+    pass.setBindGroup(
+      0,
+      isoRefineBindGroup(
+        device, isoRefinePipeline, volumeBuf, isoParamBuf(device, ci), srcOccl, ci,
       ),
     );
-    const bg = device.createBindGroup({
-      layout: isoRefinePipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: drawParamBufRefine } },
-        { binding: 1, resource: { buffer: volumeBuf } },
-        { binding: 2, resource: srcOcclView },
-      ],
-    });
-    const enc = device.createCommandEncoder();
-    const pass = enc.beginRenderPass({
-      colorAttachments: [
-        { view: sceneView, loadOp: "load", storeOp: "store" },
-        { view: occlIsoView, loadOp: "load", storeOp: "store" },
-        { view: normalView, loadOp: "load", storeOp: "store" },
-      ],
-      depthStencilAttachment: {
-        view: depthView,
-        depthLoadOp: "load",
-        depthStoreOp: "store",
-      },
-    });
-    pass.setPipeline(isoRefinePipeline);
-    pass.setBindGroup(0, bg);
-    setPassViewport(pass, dest.color.width, dest.color.height);
     pass.draw(3);
-    pass.end();
-    submitEnc(device, enc);
   }
+  pass.end();
+  submitEnc(device, enc);
 }
 
 /** Coarse occupancy, optional 4× mid remarch, then slider-sized compose. */
