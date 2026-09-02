@@ -189,6 +189,19 @@ export async function run() {
       },
     },
     {
+      name: "collectParamReferences includes hidden field deps",
+      fn: () => {
+        resetScene();
+        setExpressions([
+          { id: "e1", latex: "a=2b", enabled: true },
+          { id: "e2", latex: "a x", enabled: false },
+        ]);
+        const refs = collectParamReferences();
+        assert(refs.has("a"), "hidden field still refs a");
+        assert(refs.has("b"), "param refs b");
+      },
+    },
+    {
       name: "fmtParamNum formats edge cases",
       fn: () => {
         assert(fmtParamNum(1.2345) === "1.235", "rounds");

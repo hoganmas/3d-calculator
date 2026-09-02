@@ -18,6 +18,7 @@ import {
   tickParamAnimation,
   toggleParamAnimate,
   updateParam,
+  collectValueDirtyParams,
 } from "../../src/model/params.ts";
 import { state } from "../../src/app/state.ts";
 import { assert, assertNear } from "../helpers/assert.ts";
@@ -95,7 +96,8 @@ export async function run() {
           { id: "e2", latex: "a=2b", enabled: true },
         ]);
         compileAllExprs({ rebuildUi: false });
-        setParamValue("b", 3, { stopAnim: true, rewriteLatex: false });
+        updateParam("b", { value: 3 });
+        assertNear(getParamValues().a ?? NaN, 2, 1e-9, "a unchanged until eval");
         const changed = evalParamEquations();
         assert(changed, "eval changed values");
         assertNear(getParamValues().a ?? NaN, 6, 1e-9, "a=2b");
@@ -277,6 +279,29 @@ export async function run() {
         setParamValue("b", 4, { stopAnim: true, rewriteLatex: false });
         evalParamEquations();
         assertNear(getParamValues().a ?? NaN, 8, 1e-9, "driven updated");
+      },
+    },
+    {
+      name: "setParamValue immediately evals driven dependents",
+      fn: () => {
+        resetParams();
+        setExpressions([
+          { id: "e1", latex: "b=1", enabled: true },
+          { id: "e2", latex: "a=2b", enabled: true },
+        ]);
+        compileAllExprs({ rebuildUi: false });
+        setParamValue("b", 5, { stopAnim: true, rewriteLatex: true });
+        assertNear(getParamValues().a ?? NaN, 10, 1e-9, "a follows b without extra eval");
+      },
+    },
+    {
+      name: "collectValueDirtyParams detects static slider edits",
+      fn: () => {
+        const dirty = collectValueDirtyParams({ a: 1, b: 2 }, { a: 1.5, b: 2 });
+        assert(dirty.has("a"), "changed a");
+        assert(!dirty.has("b"), "unchanged b");
+        assert(collectValueDirtyParams({ a: 1 }, { a: 1 }).size === 0, "equal");
+        assert(collectValueDirtyParams({}, { a: 1 }).has("a"), "new param");
       },
     },
   ]);
