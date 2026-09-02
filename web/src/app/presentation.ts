@@ -9,6 +9,7 @@ import {
 import { els, viewportSize } from "./dom.js";
 import { state, MARCH_DOWNSCALE_MIN, MARCH_DOWNSCALE_MAX, MARCH_DOWNSCALE_LABELS, BOUNDS_SIZE_MIN, BOUNDS_SIZE_MAX } from "./state.js";
 import { ISO_COARSE_DOWNSCALE } from "./qualityMapping.js";
+import { effectiveIsoComposeDownscale } from "./deviceTier.js";
 import {
   isHorizontalPanelLayout,
   readPanelCoverHeight,
@@ -141,6 +142,11 @@ export function isoCoarseDownscale() {
 /** Iso-surface compose (finest) downscale — surface quality / iso slider. */
 export function isoMarchDownscale() {
   return readIsoMarchDownscale();
+}
+
+/** Slider value raised to the device-tier compose floor (GPU + HUD). */
+export function effectiveIsoMarchDownscale() {
+  return effectiveIsoComposeDownscale(readIsoMarchDownscale(), state.deviceTier);
 }
 
 /** CSS px covered by the floating sidebar along the dock axis (0 on narrow full-width layouts). */

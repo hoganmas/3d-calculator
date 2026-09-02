@@ -49,6 +49,19 @@ export function webGpuPowerPreference(tier: DeviceTier): GPUPowerPreference {
   return tier === "mobile" ? "low-power" : "high-performance";
 }
 
+/**
+ * Finest iso compose divisor floor. 1× Hermite refine misses 60fps on phones;
+ * 2× still has the 16× → 4× → 2× occupancy ladder.
+ */
+export function isoComposeDownscaleFloor(tier: DeviceTier): number {
+  return tier === "mobile" ? 2 : 1;
+}
+
+export function effectiveIsoComposeDownscale(slider: number, tier: DeviceTier): number {
+  const n = Math.min(16, Math.max(1, Math.round(slider) || 1));
+  return Math.max(n, isoComposeDownscaleFloor(tier));
+}
+
 /** Occupancy pass can be coarser than the Hermite refine. Shader clamps to ≥16. */
 export function coarseIsoSteps(isoSteps: number, tier: DeviceTier): number {
   const steps = Math.min(192, Math.max(16, isoSteps | 0));

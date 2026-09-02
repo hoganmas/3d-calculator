@@ -27,8 +27,8 @@ export async function run() {
         const q50 = isoFineFramebufferSize(50, 38, 800, 600, 4);
         assert(q50.fw === 200 && q50.fh === 150, "q=50 compose is 4×");
         assert(isoRefineEnabled(50, 38, 800, 600, 4), "16× occupancy refines into 4× compose");
-        const mobileDump = isoFineFramebufferSize(197, 321, 393, 641, 2);
-        assert(mobileDump.fw === 197 && mobileDump.fh === 321, "2× slider composes at half, not display");
+        const phone2x = isoFineFramebufferSize(25, 40, 393, 641, 2);
+        assert(phone2x.fw === 197 && phone2x.fh === 321, "phone 2× compose is half viewport");
         const q0 = isoFineFramebufferSize(50, 38, 800, 600, 16);
         assert(q0.fw === 50 && q0.fh === 38, "q=0 compose matches 16× occupancy");
         assert(!isoRefineEnabled(50, 38, 800, 600, 16), "no refine when fine equals coarse");

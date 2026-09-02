@@ -3,6 +3,8 @@ import {
   bootQualityForTier,
   detectDeviceTier,
   webGpuPowerPreference,
+  isoComposeDownscaleFloor,
+  effectiveIsoComposeDownscale,
   coarseIsoSteps,
   clampIsoStepsForTier,
 } from "../../src/app/deviceTier.ts";
@@ -72,6 +74,18 @@ export async function run() {
       fn: () => {
         assert(webGpuPowerPreference("mobile") === "low-power", "mobile low-power");
         assert(webGpuPowerPreference("desktop") === "high-performance", "desktop perf");
+      },
+    },
+    {
+      name: "mobile compose floor is 2× so a 1× slider still has the mid ladder",
+      fn: () => {
+        assert(isoComposeDownscaleFloor("mobile") === 2, "mobile floor");
+        assert(isoComposeDownscaleFloor("tablet") === 1, "tablet no floor");
+        assert(isoComposeDownscaleFloor("desktop") === 1, "desktop no floor");
+        assert(effectiveIsoComposeDownscale(1, "mobile") === 2, "1× slider becomes 2×");
+        assert(effectiveIsoComposeDownscale(2, "mobile") === 2, "2× stays 2×");
+        assert(effectiveIsoComposeDownscale(4, "mobile") === 4, "4× stays 4×");
+        assert(effectiveIsoComposeDownscale(1, "desktop") === 1, "desktop 1× stays");
       },
     },
     {
