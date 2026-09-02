@@ -119,6 +119,26 @@ export function anyParamAnimating() {
 }
 
 /**
+ * Params whose numeric values changed between two snapshots.
+ * Used so static slider edits refit dependent layers.
+ */
+export function collectValueDirtyParams(
+  prev: Record<string, number>,
+  next: Record<string, number>,
+  eps = 1e-12,
+): Set<string> {
+  const dirty = new Set<string>();
+  for (const name of new Set([...Object.keys(prev), ...Object.keys(next)])) {
+    const a = prev[name];
+    const b = next[name];
+    if (a === b) continue;
+    if (Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= eps) continue;
+    dirty.add(name);
+  }
+  return dirty;
+}
+
+/**
  * Params that may have changed this animation tick, plus anything that
  * transitively depends on them via `a = f(b,…)`.
  * @returns {Set<string>}
@@ -281,6 +301,7 @@ export function setParamValue(
     error: rewriteLatex ? null : cur.error,
   };
   params.set(name, next);
+  evalParamEquations();
   return next;
 }
 

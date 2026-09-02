@@ -5,10 +5,11 @@ import { runSuite } from "../helpers/runner.ts";
 export async function run() {
   return runSuite("app / layer-needs-refit", [
     {
-      name: "static refit only when content dirty",
+      name: "static refit when content dirty or params depend",
       fn: () => {
         assert(!layerNeedsRefit(false, false, false), "clean static layer skips");
         assert(layerNeedsRefit(false, true, false), "edited static layer refits");
+        assert(layerNeedsRefit(false, false, true), "static param-dependent layer refits");
       },
     },
     {
