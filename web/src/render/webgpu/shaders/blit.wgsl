@@ -25,8 +25,8 @@ fn fsMain(in: VSOut) -> @location(0) vec4f {
   let isoDims = textureDimensions(occlIsoTex);
   let destW = f32(isoDims.x);
   let destH = f32(isoDims.y);
-  // Occupancy-refine tiles remarch beer at compose res. Interior iso keeps
-  // the volume-res beer (already tExit-clipped to iso in beer.wgsl).
+  // Leave occupancy-refine tiles empty: the matching beer cascade remarchs
+  // them (16× mixed → 4× beer, 4× mixed → 1× beer).
   if (isoNeedRefine(occTex, destW, destH, in.pos.xy)) {
     return vec4f(0.0);
   }

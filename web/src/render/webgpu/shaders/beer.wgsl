@@ -101,11 +101,12 @@ fn isoOcclusionForVolumePixel(pos: vec2f, fbW: f32, fbH: f32) -> f32 {
   let ux = clamp(pos.x / fbW, 0.0, 1.0);
   let uy = clamp(pos.y / fbH, 0.0, 1.0);
   if (isoW <= fbW + 0.5 && isoH <= fbH + 0.5) {
+    // Same-res compose, or coarser occupancy (16× interiors / 4× mid beer).
     let ix = u32(min(floor(ux * isoW), isoW - 1.0));
     let iy = u32(min(floor(uy * isoH), isoH - 1.0));
     return textureLoad(occlIsoTex, vec2u(ix, iy), 0).r;
   }
-  // Iso finer than beer: clip only fully-covered interior tiles (min depth).
+  // Clip tex finer than beer: clip only fully-covered interior tiles (min depth).
   // Mixed footprints stay unclipped and remarch at compose res.
   let x0 = i32(clamp(floor(pos.x / fbW * isoW), 0.0, isoW - 1.0));
   let y0 = i32(clamp(floor(pos.y / fbH * isoH), 0.0, isoH - 1.0));

@@ -266,6 +266,14 @@ export async function ensurePipelinesForDegree(_deg: number): Promise<PipelineBu
       addressModeV: "clamp-to-edge",
     });
   }
+  if (!gpu.blitSamplerNearest) {
+    gpu.blitSamplerNearest = device.createSampler({
+      magFilter: "nearest",
+      minFilter: "nearest",
+      addressModeU: "clamp-to-edge",
+      addressModeV: "clamp-to-edge",
+    });
+  }
 
   gpu.isoPipeline = nextIso;
   gpu.isoRefinePipeline = nextIsoRefine;

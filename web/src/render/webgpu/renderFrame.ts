@@ -12,12 +12,13 @@ import {
 import { packGridParams, syncClipGpuWorldGrid, uploadAxisLabelBillboards } from "./gridOverlay.js";
 import { state } from "../../app/state.js";
 import { clampIsoStepsForTier, coarseIsoSteps } from "../../app/deviceTier.js";
-import { ensureMarchTargets, ensureIsoCoarseTargets, ensureIsoMidTargets, ensureVolumeTargets, resizeClipGpuCanvas } from "./marchCanvas.js";
+import { ensureMarchTargets, ensureIsoCoarseTargets, ensureIsoMidTargets, ensureVolumeTargets, ensureVolMidColorTex, resizeClipGpuCanvas } from "./marchCanvas.js";
 import {
   isoFineFramebufferSize,
   isoMidFramebufferSize,
   isoRefineEnabled,
 } from "./isoRefine.js";
+import { beerClipCascade, beerHasMidPass } from "./volComposite.js";
 import { isIsoRefineDebugEnabled } from "../../app/isoRefineDebug.js";
 import {
   beginGpuFrame,
@@ -221,7 +222,10 @@ function buildRaySetup(
 
   resizeClipGpuCanvas(outW, outH);
   if (refine) ensureIsoCoarseTargets(marchW, marchH);
-  if (midSize) ensureIsoMidTargets(midSize.mw, midSize.mh);
+  if (midSize) {
+    ensureIsoMidTargets(midSize.mw, midSize.mh);
+    if (gpu.densLayerCount > 0) ensureVolMidColorTex(midSize.mw, midSize.mh);
+  }
   ensureMarchTargets(composeW, composeH);
   if (gpu.densLayerCount > 0) ensureVolumeTargets(volW, volH);
   else ensureVolumeTargets(1, 1);
@@ -568,9 +572,10 @@ function drawBeerPass(
   scale: number,
   ro: [number, number, number],
   dirMatrix: ReturnType<typeof offsetDirMatrix>,
+  clipOccl: GPUTexture,
 ): void {
   const { device, beerPipeline, drawParamBufBeer, volumeBuf, colorBuf } = handles;
-  const occlIsoView = targets.occlIsoTex.createView();
+  const occlIsoView = texView(clipOccl);
   const occlSurfView = targets.occlSurfTex.createView();
 
   gpuWriteBuffer(
@@ -623,15 +628,17 @@ function compositeVolumeOntoScene(
   handles: MarchGpuHandles,
   targets: MarchTargets,
   sceneView: GPUTextureView,
+  srcTex: GPUTexture,
   occTex: GPUTexture,
+  sampler: GPUSampler = gpu.blitSampler!,
 ): void {
-  if (!gpu.blitPipeline || !gpu.blitSampler) return;
+  if (!gpu.blitPipeline || !sampler) return;
   const { device } = handles;
   const bg = device.createBindGroup({
     layout: gpu.blitPipeline.getBindGroupLayout(0),
     entries: [
-      { binding: 0, resource: targets.volColorTex.createView() },
-      { binding: 1, resource: gpu.blitSampler },
+      { binding: 0, resource: texView(srcTex) },
+      { binding: 1, resource: sampler },
       { binding: 2, resource: texView(targets.occlIsoTex) },
       { binding: 3, resource: texView(occTex) },
     ],
@@ -652,14 +659,15 @@ function compositeVolumeOntoScene(
   submitEnc(device, enc);
 }
 
-/** Iso-res beer with tExit clip, only on occupancy-refine tiles. */
+/** Occupancy-masked beer at dest res with tExit clip against clipOccl. */
 function drawBeerRefine(
   handles: MarchGpuHandles,
-  targets: MarchTargets,
-  sceneView: GPUTextureView,
-  occTex: GPUTexture,
+  destView: GPUTextureView,
   destW: number,
   destH: number,
+  clipOccl: GPUTexture,
+  occTex: GPUTexture,
+  loadOp: GPULoadOp,
   Mgrid: number,
   steps: number,
   half: number,
@@ -681,7 +689,7 @@ function drawBeerRefine(
     entries: [
       { binding: 0, resource: { buffer: drawParamBufBeer } },
       { binding: 1, resource: { buffer: volumeBuf } },
-      { binding: 2, resource: texView(targets.occlIsoTex) },
+      { binding: 2, resource: texView(clipOccl) },
       { binding: 3, resource: { buffer: colorBuf } },
       { binding: 4, resource: texView(occTex) },
     ],
@@ -689,9 +697,10 @@ function drawBeerRefine(
   const enc = device.createCommandEncoder();
   const pass = enc.beginRenderPass({
     colorAttachments: [{
-      view: sceneView,
-      loadOp: "load",
+      view: destView,
+      loadOp,
       storeOp: "store",
+      ...(loadOp === "clear" ? { clearValue: { r: 0, g: 0, b: 0, a: 0 } } : {}),
     }],
   });
   pass.setPipeline(beerRefinePipeline);
@@ -930,16 +939,40 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
       pass.end();
       submitEnc(device, enc);
     } else {
-      const occTex = (midRefine && gpu.isoMidOcclTex) || gpu.isoCoarseOcclTex || targets.occlIsoTex;
+      const coarseOcc = gpu.isoCoarseOcclTex;
+      const midOcc = (midRefine && gpu.isoMidOcclTex) || null;
+      const midBeerTex = (midRefine && gpu.volMidColorTex) || null;
+      const midBeer = beerHasMidPass(midRefine) && !!coarseOcc && !!midOcc && !!midBeerTex;
+      const cheapClip = beerClipCascade(midBeer) === "coarse" && coarseOcc
+        ? coarseOcc
+        : targets.occlIsoTex;
       drawBeerPass(
         handles, targets, targets.volColorTex.createView(),
         volW, volH, Mgrid, volumeSteps, half, scale, ro, dirMatrix,
+        cheapClip,
       );
-      compositeVolumeOntoScene(handles, targets, sceneView, occTex);
-      if (gpu.sceneConstraints.length > 0) {
+      const punchOcc = (midBeer ? coarseOcc : (midOcc || coarseOcc)) || targets.occlIsoTex;
+      compositeVolumeOntoScene(handles, targets, sceneView, targets.volColorTex, punchOcc);
+      if (midBeer && midBeerTex && midOcc && coarseOcc) {
         drawBeerRefine(
-          handles, targets, sceneView, occTex,
-          presentW, presentH, Mgrid, volumeSteps, half, scale, ro, dirMatrix,
+          handles, texView(midBeerTex), gpu.volMidW, gpu.volMidH,
+          midOcc, coarseOcc, "clear",
+          Mgrid, volumeSteps, half, scale, ro, dirMatrix,
+        );
+        // Nearest, not linear: midBeerTex is cleared to (0,0,0,0) outside the
+        // coarse-mixed tiles it actually shaded, and a linear sample straddling
+        // that boundary would blend real premultiplied color with hard zero —
+        // thinning alpha into a transparent ring along the refine-tile edge.
+        compositeVolumeOntoScene(
+          handles, targets, sceneView, midBeerTex, midOcc, gpu.blitSamplerNearest!,
+        );
+      }
+      if (gpu.sceneConstraints.length > 0) {
+        const fineOcc = midOcc || coarseOcc || targets.occlIsoTex;
+        drawBeerRefine(
+          handles, sceneView, presentW, presentH,
+          targets.occlIsoTex, fineOcc, "load",
+          Mgrid, volumeSteps, half, scale, ro, dirMatrix,
         );
       }
     }
@@ -983,7 +1016,11 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
   const method: string[] = [
     refinePath === "mid" ? "gpu-iso-refine-mid" : refine ? "gpu-iso-refine" : "gpu-iso",
   ];
-  if (ranBeer) method.push(sameRes ? "beer" : "beer(volFB)+occl+iso-tiles");
+  if (ranBeer) {
+    if (sameRes) method.push("beer");
+    else if (beerHasMidPass(midRefine) && gpu.volMidColorTex) method.push("beer(volFB)+mid-tiles+iso-tiles");
+    else method.push("beer(volFB)+occl+iso-tiles");
+  }
   if (ranFlow) method.push("flow");
   method.push("fxaa");
   if (ranGrid) method.push("grid");

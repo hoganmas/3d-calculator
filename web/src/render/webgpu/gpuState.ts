@@ -103,8 +103,16 @@ export interface GpuState {
   volColorTex: GPUTexture | null;
   volColorW: number;
   volColorH: number;
+  /** Beer remarch at 4× mid iso size (coarse-mixed tiles). */
+  volMidColorTex: GPUTexture | null;
+  volMidW: number;
+  volMidH: number;
   fxaaSampler: GPUSampler | null;
   blitSampler: GPUSampler | null;
+  /** Nearest-filter blit sampler — for compositing textures with a hard-cleared
+   *  (transparent) exterior, where a linear filter would bleed real color into
+   *  the clear value right at the shaded/unshaded boundary. */
+  blitSamplerNearest: GPUSampler | null;
   sceneConstraints: GpuSceneConstraint[];
   densPacked: boolean;
   densGradStops: RgbTriplet[][];
@@ -215,8 +223,12 @@ export const gpu: GpuState = {
   volColorTex: null,
   volColorW: 0,
   volColorH: 0,
+  volMidColorTex: null,
+  volMidW: 0,
+  volMidH: 0,
   fxaaSampler: null,
   blitSampler: null,
+  blitSamplerNearest: null,
   sceneConstraints: [],
   densPacked: false,
   densGradStops: [],

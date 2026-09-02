@@ -103,7 +103,7 @@ export function acquireMarchGpuHandles(): MarchGpuHandles | null {
     !gpu.fxaaParamBuf || !gpu.fxaaSampler || !gpu.gridParamBuf ||
     !gpu.device || !gpu.isoPipeline || !gpu.isoRefinePipeline || !gpu.isoUpsamplePipeline ||
     !gpu.beerPipeline || !gpu.beerRefinePipeline ||
-    !gpu.fxaaPipeline || !gpu.blitPipeline || !gpu.blitSampler || !gpu.gridPipeline ||
+    !gpu.fxaaPipeline || !gpu.blitPipeline || !gpu.blitSampler || !gpu.blitSamplerNearest || !gpu.gridPipeline ||
     !gpu.drawParamBuf || !gpu.drawParamBufBeer || !gpu.drawParamBufRefine || !gpu.isoUpsampleParamBuf
   ) {
     return null;

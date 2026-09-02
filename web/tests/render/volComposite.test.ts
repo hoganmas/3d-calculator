@@ -1,5 +1,7 @@
 import {
+  beerClipCascade,
   beerDeferredIsoDepth,
+  beerHasMidPass,
   beerIsoClipDepth,
   isoFinerThanVolume,
   volumePixelIsoFootprint,
@@ -50,6 +52,18 @@ export async function run() {
         assert(beerIsoClipDepth(0.2, 0.25) === 0.2, "interior all-hit clips to nearest iso");
         assert(beerIsoClipDepth(0.2, 1) === 1, "mixed footprint defers clip");
         assert(beerIsoClipDepth(1, 1) === 1, "empty footprint does not clip");
+      },
+    },
+    {
+      name: "16-4-1 beer ladder remarchs coarse-mixed tiles at 4×",
+      fn: () => {
+        assert(beerClipCascade(true) === "coarse", "3-tier cheap beer clips 16× interiors");
+        assert(beerHasMidPass(true), "3-tier remarchs coarse-mixed tiles at 4×");
+        assert(beerClipCascade(false) === "compose", "2-tier still clips cheap beer to compose");
+        assert(!beerHasMidPass(false), "2-tier has no 4× beer pass");
+        assert(!isoFinerThanVolume(197, 321, 25, 40), "phone coarse is coarser than 2× beer → nearest");
+        assert(!isoFinerThanVolume(98, 160, 98, 160), "4× beer is 1:1 with mid iso");
+        assert(isoFinerThanVolume(197, 321, 393, 641), "compose 1× vs 2× beer mixes cascades if used as clip");
       },
     },
   ]);

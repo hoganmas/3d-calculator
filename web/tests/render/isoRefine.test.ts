@@ -25,10 +25,12 @@ export async function run() {
         assert(half.fw === 800 && half.fh === 600, "2× coarse + 1× fine composes at display");
         assert(isoRefineEnabled(400, 300, 800, 600, 1), "refine when fine > coarse");
         const q50 = isoFineFramebufferSize(50, 38, 800, 600, 4);
-        assert(q50.fw === 200 && q50.fh === 150, "q=50 compose is 4×");
+        // fh snaps to a multiple of coarseH=38 (round(600/4)=150 isn't one; 38×4=152)
+        // so mid- and compose-resolution isoNeedRefine queries stay phase-aligned.
+        assert(q50.fw === 200 && q50.fh === 152, "q=50 compose is 4× of the coarse grid");
         assert(isoRefineEnabled(50, 38, 800, 600, 4), "16× occupancy refines into 4× compose");
         const phone2x = isoFineFramebufferSize(25, 40, 393, 641, 2);
-        assert(phone2x.fw === 197 && phone2x.fh === 321, "phone 2× compose is half viewport");
+        assert(phone2x.fw === 200 && phone2x.fh === 320, "phone 2× compose snaps to the coarse grid");
         const q0 = isoFineFramebufferSize(50, 38, 800, 600, 16);
         assert(q0.fw === 50 && q0.fh === 38, "q=0 compose matches 16× occupancy");
         assert(!isoRefineEnabled(50, 38, 800, 600, 16), "no refine when fine equals coarse");
@@ -38,22 +40,23 @@ export async function run() {
       name: "4× mid ladder only when compose is finer than 4×",
       fn: () => {
         const q100 = isoMidFramebufferSize(50, 38, 800, 600, 1);
-        assert(!!q100 && q100.mw === 200 && q100.mh === 150, "q=100 mid is 4×");
+        assert(!!q100 && q100.mw === 200 && q100.mh === 152, "q=100 mid is 4× of the coarse grid");
         assert(isoMidRefineEnabled(50, 38, 800, 600, 1), "16× → 4× → 1×");
         const q75 = isoMidFramebufferSize(50, 38, 800, 600, 2);
-        assert(!!q75 && q75.mw === 200 && q75.mh === 150, "q≈75 mid is 4× between 16× and 2×");
+        assert(!!q75 && q75.mw === 200 && q75.mh === 152, "q≈75 mid is 4× between 16× and 2×");
         assert(isoMidRefineEnabled(50, 38, 800, 600, 2), "16× → 4× → 2×");
         assert(!isoMidRefineEnabled(50, 38, 800, 600, 4), "q=50 compose is already 4×");
         assert(!isoMidRefineEnabled(50, 38, 800, 600, 8), "no mid coarser than compose");
         assert(!isoMidRefineEnabled(50, 38, 800, 600, 16), "no mid when compose equals coarse");
         assert(!isoMidRefineEnabled(200, 150, 800, 600, 1), "no mid when occupancy is already 4×");
         const phone2x = isoMidFramebufferSize(25, 40, 393, 641, 2);
-        assert(!!phone2x && phone2x.mw === 98 && phone2x.mh === 160, "phone 2× compose still has a 4× mid");
+        assert(!!phone2x && phone2x.mw === 100 && phone2x.mh === 160, "phone 2× compose still has a 4× mid");
         assert(isoMidRefineEnabled(25, 40, 393, 641, 2), "16× → 4× → 2× on a phone viewport");
         const phone1x = isoMidFramebufferSize(25, 40, 393, 641, 1);
-        assert(!!phone1x && phone1x.mw === 98 && phone1x.mh === 160, "phone 1× compose still has a 4× mid");
+        assert(!!phone1x && phone1x.mw === 100 && phone1x.mh === 160, "phone 1× compose still has a 4× mid");
         assert(isoMidRefineEnabled(25, 40, 393, 641, 1), "16× → 4× → 1× on a phone viewport");
-        assert(isoFineFramebufferSize(25, 40, 393, 641, 1).fw === 393, "phone 1× compose is display");
+        // Compose snaps to a multiple of coarseW=25 (round(393/1)=393 isn't one; 25×16=400).
+        assert(isoFineFramebufferSize(25, 40, 393, 641, 1).fw === 400, "phone 1× compose snaps to the coarse grid");
         assert(!isoMidRefineEnabled(25, 40, 393, 641, 4), "4× compose is two-tier only");
       },
     },

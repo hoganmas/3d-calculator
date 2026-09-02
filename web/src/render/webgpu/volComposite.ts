@@ -30,6 +30,20 @@ export function isoFinerThanVolume(volW: number, volH: number, isoW: number, iso
 }
 
 /**
+ * Cheap volume beer clips 16× interiors against coarse iso. Coarse-mixed
+ * tiles remarch beer at 4× (same pixels as mid iso) so tExit is 1:1 with
+ * that cascade instead of nearest-sampling 4× depth into 2× beer.
+ */
+export function beerClipCascade(midRefine: boolean): "coarse" | "compose" {
+  return midRefine ? "coarse" : "compose";
+}
+
+/** True when coarse-mixed tiles get a 4× beer pass before the 1× edge remarch. */
+export function beerHasMidPass(midRefine: boolean): boolean {
+  return midRefine;
+}
+
+/**
  * Iso depth used to shorten beer tExit for a volume pixel's iso footprint.
  * All-miss or mixed → 1 (no clip; mixed tiles remarch at compose).
  * All hits → nearest iso (interior cloud stays in front, behind is cut).
