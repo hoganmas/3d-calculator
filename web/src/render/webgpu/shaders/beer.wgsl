@@ -101,10 +101,37 @@ fn isoOcclusionForVolumePixel(pos: vec2f, fbW: f32, fbH: f32) -> f32 {
   let ux = clamp(pos.x / fbW, 0.0, 1.0);
   let uy = clamp(pos.y / fbH, 0.0, 1.0);
   if (isoW <= fbW + 0.5 && isoH <= fbH + 0.5) {
-    // Same-res compose, or coarser occupancy (16× interiors / 4× mid beer).
-    let ix = u32(min(floor(ux * isoW), isoW - 1.0));
-    let iy = u32(min(floor(uy * isoH), isoH - 1.0));
-    return textureLoad(occlIsoTex, vec2u(ix, iy), 0).r;
+    if (isoW > fbW - 0.5 && isoH > fbH - 0.5) {
+      // Same-res compose: exact 1:1 texel match, nearest is correct as-is.
+      let ix = u32(min(floor(ux * isoW), isoW - 1.0));
+      let iy = u32(min(floor(uy * isoH), isoH - 1.0));
+      return textureLoad(occlIsoTex, vec2u(ix, iy), 0).r;
+    }
+    // Coarser occupancy stretched over many beer pixels (16× interiors / 4×
+    // mid beer): a nearest lookup here held one clip depth flat across an
+    // entire coarse texel, so smoothly-varying interior depth stepped in
+    // hard per-tile blocks that only became visible once bilinear-upscaled
+    // to compose res (dense/thin banding "repeating" with the tile grid).
+    // Bilinear across the 2×2 neighborhood fixes that — except right at a
+    // silhouette, where blending a hit depth with a miss (1.0) would forge a
+    // bogus mid-value clip; bail to unclipped there since mixed footprints
+    // remarch at a finer tier anyway.
+    let sx = clamp(ux * isoW - 0.5, 0.0, isoW - 1.0);
+    let sy = clamp(uy * isoH - 0.5, 0.0, isoH - 1.0);
+    let x0 = u32(floor(sx));
+    let y0 = u32(floor(sy));
+    let x1 = min(x0 + 1u, u32(isoW) - 1u);
+    let y1 = min(y0 + 1u, u32(isoH) - 1u);
+    let tx = sx - f32(x0);
+    let ty = sy - f32(y0);
+    let d00 = textureLoad(occlIsoTex, vec2u(x0, y0), 0).r;
+    let d10 = textureLoad(occlIsoTex, vec2u(x1, y0), 0).r;
+    let d01 = textureLoad(occlIsoTex, vec2u(x0, y1), 0).r;
+    let d11 = textureLoad(occlIsoTex, vec2u(x1, y1), 0).r;
+    if (d00 >= 0.999 || d10 >= 0.999 || d01 >= 0.999 || d11 >= 0.999) {
+      return 1.0;
+    }
+    return mix(mix(d00, d10, tx), mix(d01, d11, tx), ty);
   }
   // Clip tex finer than beer: clip only fully-covered interior tiles (min depth).
   // Mixed footprints stay unclipped and remarch at compose res.
