@@ -31,10 +31,11 @@ export function getDeviceTier(): DeviceTier {
 
 /** Apply boot-time quality defaults for touch / low-end devices (fresh sessions only). */
 export function applyBootPerfTier(restoredDocument: boolean) {
-  if (!isProdUi() || restoredDocument) return;
-
   const tier = detectDeviceTier({ webGpuFailed: state.webGpuFailed });
   state.deviceTier = tier;
+  if (tier === "mobile") maybeAutoCollapsePanel();
+  if (restoredDocument) return;
+  if (!isProdUi()) return;
 
   const preset = bootQualityForTier(tier);
   state.precisionQuality = preset.precisionQuality;
@@ -42,8 +43,6 @@ export function applyBootPerfTier(restoredDocument: boolean) {
   state.surfaceQuality = preset.surfaceQuality;
   state.vectorQuality = preset.vectorQuality;
   applyQualityFromState({ refit: false });
-
-  if (tier === "mobile") maybeAutoCollapsePanel();
 }
 
 function maybeAutoCollapsePanel() {

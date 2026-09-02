@@ -32,7 +32,7 @@ import {
   presentSceneAfterGpuReady,
 } from "./webglFallback.js";
 import { scheduleMarchPipelines } from "../render/webgpu/march.js";
-import { uploadFit, tickGpuKeyframeBlends } from "./pipeline.js";
+import { uploadFit, tickGpuKeyframeBlends, shouldRunAnimUploadFit } from "./pipeline.js";
 import { tickKeyframePump } from "../model/keyframes.js";
 import { hudText, refreshMetricsDump } from "./hud.js";
 import { isSplashContentReady, markSplashFrameReady } from "./splash.js";
@@ -91,12 +91,14 @@ function frame(rafNow: number) {
           !!state.fitTimer && state.pendingFitOpts?.fromAnim !== true;
         if (state.uploadFitBusy || pendingStructural) {
           // Keep the timer; GPU keyframe blends above still run this frame.
-        } else {
+        } else if (shouldRunAnimUploadFit()) {
           if (state.fitTimer) {
             clearTimeout(state.fitTimer);
             state.fitTimer = 0;
           }
           uploadFit({ fromAnim: true });
+        } else {
+          state.lastAnimFitAt = t0;
         }
       }
     }

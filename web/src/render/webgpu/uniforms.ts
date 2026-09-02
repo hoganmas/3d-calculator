@@ -23,6 +23,15 @@ export function normalizeRgbStops(
   return stops;
 }
 
+const ISO_DRAW_PARAM_BYTES = 256;
+const isoDrawParamScratch = new ArrayBuffer(ISO_DRAW_PARAM_BYTES);
+const isoDrawParamU32 = new Uint32Array(isoDrawParamScratch);
+const isoDrawParamF32 = new Float32Array(isoDrawParamScratch);
+
+const beerDrawParamScratch = new ArrayBuffer(512);
+const beerDrawParamU32 = new Uint32Array(beerDrawParamScratch);
+const beerDrawParamF32 = new Float32Array(beerDrawParamScratch);
+
 export function packDrawParamsIso(
   fbW: number,
   fbH: number,
@@ -42,9 +51,8 @@ export function packDrawParamsIso(
   debugTint: boolean = false,
   layerIndex: number = 0,
 ): ArrayBuffer {
-  const buf = new ArrayBuffer(256);
-  const u32 = new Uint32Array(buf);
-  const f32 = new Float32Array(buf);
+  const u32 = isoDrawParamU32;
+  const f32 = isoDrawParamF32;
   u32[0] = fbW | 0; u32[1] = fbH | 0; u32[2] = gridM | 0; u32[3] = steps | 0;
   f32[4] = half; f32[5] = scale; f32[6] = isoLevel; f32[7] = debugTint ? 1 : 0;
   f32[8] = ro[0]; f32[9] = ro[1]; f32[10] = ro[2];
@@ -62,7 +70,7 @@ export function packDrawParamsIso(
     const o = 28 + i * 4;
     f32[o] = c[0]; f32[o + 1] = c[1]; f32[o + 2] = c[2]; f32[o + 3] = 1;
   }
-  return buf;
+  return isoDrawParamScratch;
 }
 
 export function packDrawParamsBeer(
@@ -78,9 +86,9 @@ export function packDrawParamsBeer(
   M: Float64Array | Float32Array | number[],
   flowLayerStart: number = -1,
 ): ArrayBuffer {
-  const buf = new ArrayBuffer(512);
-  const u32 = new Uint32Array(buf);
-  const f32 = new Float32Array(buf);
+  const u32 = beerDrawParamU32;
+  const f32 = beerDrawParamF32;
+  f32.fill(0);
   u32[0] = fbW | 0; u32[1] = fbH | 0; u32[2] = gridM | 0; u32[3] = steps | 0;
   f32[4] = half; f32[5] = scale; f32[6] = densBaseOff; u32[7] = layerCount | 0;
   f32[8] = ro[0]; f32[9] = ro[1]; f32[10] = ro[2];
@@ -106,29 +114,7 @@ export function packDrawParamsBeer(
       f32[60 + L] = 0;
     }
   }
-  return buf;
-}
-
-export function packSsaoParams(
-  fbW: number,
-  fbH: number,
-  half: number,
-  radius: number,
-  strength: number,
-  bias: number,
-  ro: number[],
-  M: Float64Array | Float32Array | number[],
-): ArrayBuffer {
-  const buf = new ArrayBuffer(128);
-  const u32 = new Uint32Array(buf);
-  const f32 = new Float32Array(buf);
-  u32[0] = fbW | 0; u32[1] = fbH | 0;
-  f32[4] = half; f32[5] = radius; f32[6] = strength; f32[7] = bias;
-  f32[8] = ro[0]; f32[9] = ro[1]; f32[10] = ro[2];
-  f32[12] = M[0]; f32[13] = M[1]; f32[14] = M[2];
-  f32[16] = M[3]; f32[17] = M[4]; f32[18] = M[5];
-  f32[20] = M[6]; f32[21] = M[7]; f32[22] = M[8];
-  return buf;
+  return beerDrawParamScratch;
 }
 
 export function writeLayerColors(

@@ -71,19 +71,6 @@ function ensureSceneColorTex(w: number, h: number): void {
   gpu.sceneColorH = h;
 }
 
-function ensureSceneColorAoTex(w: number, h: number): void {
-  if (gpu.sceneColorAoTex && gpu.sceneColorAoW === w && gpu.sceneColorAoH === h) return;
-  destroyTexture(gpu.sceneColorAoTex);
-  if (!gpu.device) return;
-  gpu.sceneColorAoTex = gpu.device.createTexture({
-    size: [w, h],
-    format: gpu.canvasFormat,
-    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-  });
-  gpu.sceneColorAoW = w;
-  gpu.sceneColorAoH = h;
-}
-
 function ensureVolColorTex(w: number, h: number): void {
   if (gpu.volColorTex && gpu.volColorW === w && gpu.volColorH === h) return;
   destroyTexture(gpu.volColorTex);
@@ -99,50 +86,103 @@ function ensureVolColorTex(w: number, h: number): void {
 
 const COARSE_USAGE = GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING;
 
+function destroyIsoGBuffer(fields: {
+  color: GPUTexture | null;
+  occl: GPUTexture | null;
+  normal: GPUTexture | null;
+  depth: GPUTexture | null;
+}): void {
+  destroyTexture(fields.color);
+  destroyTexture(fields.occl);
+  destroyTexture(fields.normal);
+  destroyTexture(fields.depth);
+}
+
+function allocIsoGBuffer(w: number, h: number): {
+  color: GPUTexture;
+  occl: GPUTexture;
+  normal: GPUTexture;
+  depth: GPUTexture;
+} | null {
+  if (!gpu.device) return null;
+  return {
+    color: gpu.device.createTexture({
+      size: [w, h],
+      format: gpu.canvasFormat,
+      usage: COARSE_USAGE,
+    }),
+    occl: gpu.device.createTexture({
+      size: [w, h],
+      format: "rgba16float",
+      usage: COARSE_USAGE,
+    }),
+    normal: gpu.device.createTexture({
+      size: [w, h],
+      format: "rgba8unorm",
+      usage: COARSE_USAGE,
+    }),
+    depth: gpu.device.createTexture({
+      size: [w, h],
+      format: "depth32float",
+      usage: GPUTextureUsage.RENDER_ATTACHMENT,
+    }),
+  };
+}
+
 function ensureIsoCoarseColorTex(w: number, h: number): void {
   if (gpu.isoCoarseColorTex && gpu.isoCoarseW === w && gpu.isoCoarseH === h) return;
-  destroyTexture(gpu.isoCoarseColorTex);
-  destroyTexture(gpu.isoCoarseOcclTex);
-  destroyTexture(gpu.isoCoarseNormalTex);
-  destroyTexture(gpu.isoCoarseDepthTex);
+  destroyIsoGBuffer({
+    color: gpu.isoCoarseColorTex,
+    occl: gpu.isoCoarseOcclTex,
+    normal: gpu.isoCoarseNormalTex,
+    depth: gpu.isoCoarseDepthTex,
+  });
   gpu.isoCoarseColorTex = gpu.isoCoarseOcclTex = gpu.isoCoarseNormalTex = gpu.isoCoarseDepthTex = null;
-  if (!gpu.device) return;
-  gpu.isoCoarseColorTex = gpu.device.createTexture({
-    size: [w, h],
-    format: gpu.canvasFormat,
-    usage: COARSE_USAGE,
-  });
-  gpu.isoCoarseOcclTex = gpu.device.createTexture({
-    size: [w, h],
-    format: "rgba16float",
-    usage: COARSE_USAGE,
-  });
-  gpu.isoCoarseNormalTex = gpu.device.createTexture({
-    size: [w, h],
-    format: "rgba8unorm",
-    usage: COARSE_USAGE,
-  });
-  gpu.isoCoarseDepthTex = gpu.device.createTexture({
-    size: [w, h],
-    format: "depth32float",
-    usage: GPUTextureUsage.RENDER_ATTACHMENT,
-  });
+  const g = allocIsoGBuffer(w, h);
+  if (!g) return;
+  gpu.isoCoarseColorTex = g.color;
+  gpu.isoCoarseOcclTex = g.occl;
+  gpu.isoCoarseNormalTex = g.normal;
+  gpu.isoCoarseDepthTex = g.depth;
   gpu.isoCoarseW = w;
   gpu.isoCoarseH = h;
 }
 
-/** Iso / SSAO / compose targets at surface-quality resolution (fine, after refine). */
+function ensureIsoMidColorTex(w: number, h: number): void {
+  if (gpu.isoMidColorTex && gpu.isoMidW === w && gpu.isoMidH === h) return;
+  destroyIsoGBuffer({
+    color: gpu.isoMidColorTex,
+    occl: gpu.isoMidOcclTex,
+    normal: gpu.isoMidNormalTex,
+    depth: gpu.isoMidDepthTex,
+  });
+  gpu.isoMidColorTex = gpu.isoMidOcclTex = gpu.isoMidNormalTex = gpu.isoMidDepthTex = null;
+  const g = allocIsoGBuffer(w, h);
+  if (!g) return;
+  gpu.isoMidColorTex = g.color;
+  gpu.isoMidOcclTex = g.occl;
+  gpu.isoMidNormalTex = g.normal;
+  gpu.isoMidDepthTex = g.depth;
+  gpu.isoMidW = w;
+  gpu.isoMidH = h;
+}
+
+/** Iso compose targets at surface-quality resolution (fine, after refine). */
 export function ensureMarchTargets(w: number, h: number): void {
   ensureOcclIsoTex(w, h);
   ensureDepthTex(w, h);
   ensureNormalTex(w, h);
   ensureSceneColorTex(w, h);
-  ensureSceneColorAoTex(w, h);
 }
 
 /** Coarse iso G-buffer used as the occupancy source for edge refine. */
 export function ensureIsoCoarseTargets(w: number, h: number): void {
   ensureIsoCoarseColorTex(w, h);
+}
+
+/** 4× iso G-buffer between coarse occupancy and slider-sized compose. */
+export function ensureIsoMidTargets(w: number, h: number): void {
+  ensureIsoMidColorTex(w, h);
 }
 
 /** Beer / volume targets at scalar-quality resolution (may differ from iso). */

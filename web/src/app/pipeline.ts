@@ -54,7 +54,8 @@ import { fitVectorField } from "../math/fitVector.js";
 import { listExpressions, inferLayerRole } from "../model/expressions.js";
 import { els, viewportSize } from "./dom.js";
 import { state, FIT_DEBOUNCE_MS } from "./state.js";
-import { layerNeedsRefit } from "./layerFitPolicy.js";
+import { clampIsoStepsForTier } from "./deviceTier.js";
+import { layerNeedsRefit, animTickNeedsCpuFit, bakeLatexDrift } from "./layerFitPolicy.js";
 import type {
   ChebFitTiming,
   CloudLayer,
@@ -197,6 +198,33 @@ export function tickGpuKeyframeBlends() {
   return true;
 }
 
+function gpuLayerBlendReady(id: string): boolean {
+  if (!peekKeyframeBlend(id)) return false;
+  const iso = gpu.sceneConstraints.find((c) => c.id === id);
+  if (iso) return (iso.K ?? 1) > 1;
+  const dens = gpu.densLayers.find((d) => d.id === id);
+  if (dens) return (dens.K ?? 1) > 1;
+  return false;
+}
+
+/** True when play-mode still needs compileAllExprs / CPU keyframe ensure. */
+export function shouldRunAnimUploadFit(): boolean {
+  const bake = state.lastSceneBake;
+  if (!bake || !isClipBakeGpuReady()) return true;
+  const layers = [
+    ...(bake.isosurfaceLayers || []),
+    ...(bake.cloudLayers || []),
+    ...(bake.flowLayers || []),
+  ];
+  const latexById = new Map(
+    listExpressions()
+      .filter((e) => e.enabled && String(e.latex || "").trim())
+      .map((e) => [e.id, e.latex]),
+  );
+  if (bakeLatexDrift(layers, latexById)) return true;
+  return animTickNeedsCpuFit(layers, collectAnimDirtyParams(), gpuLayerBlendReady);
+}
+
 export function uploadFit(
   opts: {
     fromAnim?: boolean;
@@ -217,9 +245,10 @@ export function uploadFit(
     const deg = opts.fitDeg ?? uiDeg;
     const densScale = Number(els.scale.value);
     const steps = Math.min(96, Math.max(8, Number(els.steps.value) || 32));
-    const isoSteps = Math.min(192, Math.max(16, Number(els.isoSteps?.value) || steps));
+    const isoStepsIn = Math.min(192, Math.max(16, Number(els.isoSteps?.value) || steps));
     els.steps.value = String(steps);
-    if (els.isoSteps) els.isoSteps.value = String(isoSteps);
+    if (els.isoSteps) els.isoSteps.value = String(isoStepsIn);
+    const isoSteps = clampIsoStepsForTier(isoStepsIn, state.deviceTier);
     if (!(boxSize > 0)) throw new Error("box size must be > 0");
     if (deg < 1 || deg > MAX_DEG) throw new Error(`poly deg must be 1…${MAX_DEG}`);
     const half = 0.5 * boxSize;
@@ -328,7 +357,12 @@ export function uploadFit(
     };
 
     startupBegin("uploadFit.layers");
+    const layerAnimMeta = new Map<string, { latex: string; freeParams: string[] }>();
     for (const L of layers) {
+      layerAnimMeta.set(L.item.id, {
+        latex: L.item.latex,
+        freeParams: (L.compiled?.freeParams ?? L.vectorCompiled?.freeParams ?? []).slice(),
+      });
       const { color, color2, colors } = layerRgbFromItem(L.item);
       const fp = layerBakeFingerprint(L, uiDeg, half);
       const paramDepends =
@@ -732,6 +766,18 @@ export function uploadFit(
     }
     startupEnd("uploadFit.layers", { fittedCount, keyframedCount, layerMs: performance.now() - tUpload });
 
+    const stampAnimMeta = <T extends { id?: string; latex?: string; freeParams?: string[] }>(ls: T[]) => {
+      for (const layer of ls) {
+        const meta = layer.id ? layerAnimMeta.get(layer.id) : undefined;
+        if (!meta) continue;
+        layer.latex = meta.latex;
+        layer.freeParams = meta.freeParams;
+      }
+    };
+    stampAnimMeta(isosurfaceLayers);
+    stampAnimMeta(cloudLayers);
+    stampAnimMeta(flowLayers);
+
     // WebGL preview texture: sum of cloud layers (skipped when WebGPU is active).
     let densSum = null;
     if (cloudLayers.length && !useGpuClipPath()) {
@@ -923,9 +969,10 @@ export function scheduleUploadFit(delay = FIT_DEBOUNCE_MS, opts = {}) {
 export function applyRenderHyperparams() {
   const densScale = Number(els.scale.value) || 1;
   const steps = Math.min(96, Math.max(8, Number(els.steps.value) || 32));
-  const isoSteps = Math.min(192, Math.max(16, Number(els.isoSteps?.value) || steps));
+  const isoStepsIn = Math.min(192, Math.max(16, Number(els.isoSteps?.value) || steps));
   els.steps.value = String(steps);
-  if (els.isoSteps) els.isoSteps.value = String(isoSteps);
+  if (els.isoSteps) els.isoSteps.value = String(isoStepsIn);
+  const isoSteps = clampIsoStepsForTier(isoStepsIn, state.deviceTier);
   clipUniforms.uScale.value = densScale;
   clipUniforms.uSteps.value = steps;
   clipUniforms.uIsoSteps.value = isoSteps;

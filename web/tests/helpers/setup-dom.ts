@@ -44,7 +44,7 @@ function makeElement(id: string, tag = "div"): HTMLElement {
   if (id === "isoSteps") node.value = "32";
   if (id === "boxSize") node.value = "5";
   if (id === "marchDownscale") node.value = "2";
-  if (id === "isoMarchDownscale") node.value = "2";
+  if (id === "isoMarchDownscale") node.value = "4";
   if (id === "toggleGridAxes") {
     (node as { getAttribute: (name: string) => string | null }).getAttribute = (name: string) =>
       name === "aria-pressed" ? "true" : null;

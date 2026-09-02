@@ -1,4 +1,6 @@
-/** Occupancy-guided iso refine: coarse march, display-sized compose, edge-only hi-res rays. */
+/** Occupancy-guided iso refine: 16× coarse occupancy, optional 4× mid, slider-sized compose. */
+
+import { ISO_COARSE_DOWNSCALE } from "../../app/qualityMapping.js";
 
 /** Coarse occl.r below this is a surface hit (misses clear to 1). */
 export const ISO_OCC_HIT = 0.999;
@@ -10,23 +12,41 @@ export const ISO_REFINE_EDGE = 1;
 export const ISO_REFINE_INTERSECT = 2;
 
 /**
- * Fine iso compose size: the display framebuffer.
- * Sharing pixels with the box overlay avoids an FXAA stretch that shifts NDC.
+ * Mid occupancy between coarse and compose. Only used when compose is finer than 4×
+ * (surface quality 1–2×), so mixed 16× tiles remarch at 4× instead of at full res.
+ */
+export const ISO_MID_DOWNSCALE = 4;
+
+function isoFramebufferSizeAtDownscale(
+  coarseW: number,
+  coarseH: number,
+  outW: number,
+  outH: number,
+  downscale: number,
+): { fw: number; fh: number } {
+  const cw = Math.max(1, coarseW | 0);
+  const ch = Math.max(1, coarseH | 0);
+  const ow = Math.max(1, outW | 0);
+  const oh = Math.max(1, outH | 0);
+  const d = Math.min(ISO_COARSE_DOWNSCALE, Math.max(1, downscale | 0));
+  return {
+    fw: Math.max(cw, Math.round(ow / d)),
+    fh: Math.max(ch, Math.round(oh / d)),
+  };
+}
+
+/**
+ * Fine iso compose size: display / fineDownscale, never coarser than the occupancy pass.
+ * Coarse occupancy is 16×; `fineDownscale` is the slider (lowest downsampling).
  */
 export function isoFineFramebufferSize(
   coarseW: number,
   coarseH: number,
   outW: number,
   outH: number,
+  fineDownscale = 1,
 ): { fw: number; fh: number } {
-  const cw = Math.max(1, coarseW | 0);
-  const ch = Math.max(1, coarseH | 0);
-  const ow = Math.max(1, outW | 0);
-  const oh = Math.max(1, outH | 0);
-  return {
-    fw: Math.max(cw, ow),
-    fh: Math.max(ch, oh),
-  };
+  return isoFramebufferSizeAtDownscale(coarseW, coarseH, outW, outH, fineDownscale);
 }
 
 export function isoRefineEnabled(
@@ -34,9 +54,39 @@ export function isoRefineEnabled(
   coarseH: number,
   outW: number,
   outH: number,
+  fineDownscale = 1,
 ): boolean {
-  const { fw, fh } = isoFineFramebufferSize(coarseW, coarseH, outW, outH);
+  const { fw, fh } = isoFineFramebufferSize(coarseW, coarseH, outW, outH, fineDownscale);
   return fw > (coarseW | 0) || fh > (coarseH | 0);
+}
+
+/**
+ * 4× mid G-buffer when it sits strictly between coarse occupancy and fine compose.
+ * `null` when the slider is already 4× or coarser (two-tier is enough).
+ */
+export function isoMidFramebufferSize(
+  coarseW: number,
+  coarseH: number,
+  outW: number,
+  outH: number,
+  fineDownscale = 1,
+): { mw: number; mh: number } | null {
+  const fine = isoFineFramebufferSize(coarseW, coarseH, outW, outH, fineDownscale);
+  const mid = isoFramebufferSizeAtDownscale(coarseW, coarseH, outW, outH, ISO_MID_DOWNSCALE);
+  const finerThanCoarse = mid.fw > (coarseW | 0) || mid.fh > (coarseH | 0);
+  const coarserThanFine = mid.fw < fine.fw || mid.fh < fine.fh;
+  if (!finerThanCoarse || !coarserThanFine) return null;
+  return { mw: mid.fw, mh: mid.fh };
+}
+
+export function isoMidRefineEnabled(
+  coarseW: number,
+  coarseH: number,
+  outW: number,
+  outH: number,
+  fineDownscale = 1,
+): boolean {
+  return isoMidFramebufferSize(coarseW, coarseH, outW, outH, fineDownscale) !== null;
 }
 
 /**

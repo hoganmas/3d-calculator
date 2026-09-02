@@ -46,7 +46,6 @@ export interface GpuState {
   beerPipeline: GPURenderPipeline | null;
   blitPipeline: GPURenderPipeline | null;
   fxaaPipeline: GPURenderPipeline | null;
-  ssaoPipeline: GPURenderPipeline | null;
   gridPipeline: GPURenderPipeline | null;
   gridParamBuf: GPUBuffer | null;
   gridVertexBuf: GPUBuffer | null;
@@ -60,13 +59,15 @@ export interface GpuState {
   labelAtlasDirty: boolean;
   drawParamBuf: GPUBuffer | null;
   drawParamBufBeer: GPUBuffer | null;
+  drawParamBufRefine: GPUBuffer | null;
+  /** One uniform buffer per iso layer so a pass can draw all constraints without flushing. */
+  isoDrawParamBufs: GPUBuffer[];
   fxaaParamBuf: GPUBuffer | null;
-  ssaoParamBuf: GPUBuffer | null;
   isoUpsampleParamBuf: GPUBuffer | null;
   volumeBuf: GPUBuffer | null;
   volumeCapacity: number;
   colorBuf: GPUBuffer | null;
-  /** Iso manifold depths (iso write, SSAO + Beer read). */
+  /** Iso manifold depths (iso write, Beer read). */
   occlIsoTex: GPUTexture | null;
   occlIsoW: number;
   occlIsoH: number;
@@ -81,6 +82,13 @@ export interface GpuState {
   isoCoarseDepthTex: GPUTexture | null;
   isoCoarseW: number;
   isoCoarseH: number;
+  /** Mid iso G-buffer (4× occupancy between coarse and compose). */
+  isoMidColorTex: GPUTexture | null;
+  isoMidOcclTex: GPUTexture | null;
+  isoMidNormalTex: GPUTexture | null;
+  isoMidDepthTex: GPUTexture | null;
+  isoMidW: number;
+  isoMidH: number;
   depthTex: GPUTexture | null;
   depthW: number;
   depthH: number;
@@ -90,9 +98,6 @@ export interface GpuState {
   sceneColorTex: GPUTexture | null;
   sceneColorW: number;
   sceneColorH: number;
-  sceneColorAoTex: GPUTexture | null;
-  sceneColorAoW: number;
-  sceneColorAoH: number;
   /** Beer / volume march color (may differ in resolution from iso scene). */
   volColorTex: GPUTexture | null;
   volColorW: number;
@@ -158,7 +163,6 @@ export const gpu: GpuState = {
   beerPipeline: null,
   blitPipeline: null,
   fxaaPipeline: null,
-  ssaoPipeline: null,
   gridPipeline: null,
   gridParamBuf: null,
   gridVertexBuf: null,
@@ -172,8 +176,9 @@ export const gpu: GpuState = {
   labelAtlasDirty: true,
   drawParamBuf: null,
   drawParamBufBeer: null,
+  drawParamBufRefine: null,
+  isoDrawParamBufs: [],
   fxaaParamBuf: null,
-  ssaoParamBuf: null,
   isoUpsampleParamBuf: null,
   volumeBuf: null,
   volumeCapacity: 0,
@@ -190,6 +195,12 @@ export const gpu: GpuState = {
   isoCoarseDepthTex: null,
   isoCoarseW: 0,
   isoCoarseH: 0,
+  isoMidColorTex: null,
+  isoMidOcclTex: null,
+  isoMidNormalTex: null,
+  isoMidDepthTex: null,
+  isoMidW: 0,
+  isoMidH: 0,
   depthTex: null,
   depthW: 0,
   depthH: 0,
@@ -199,9 +210,6 @@ export const gpu: GpuState = {
   sceneColorTex: null,
   sceneColorW: 0,
   sceneColorH: 0,
-  sceneColorAoTex: null,
-  sceneColorAoW: 0,
-  sceneColorAoH: 0,
   volColorTex: null,
   volColorW: 0,
   volColorH: 0,
@@ -249,11 +257,11 @@ export const gpu: GpuState = {
   flowParticlesPerLayer: 0,
 };
 
-export const PIPELINE_EPOCH = 87;
+export const PIPELINE_EPOCH = 89;
 export const labelVertScratch = new Float32Array(18 * 6);
 
 export function resetPipelinesOnDeviceLost(): void {
-  gpu.isoPipeline = gpu.isoRefinePipeline = gpu.isoUpsamplePipeline = gpu.beerPipeline = gpu.fxaaPipeline = gpu.ssaoPipeline = null;
+  gpu.isoPipeline = gpu.isoRefinePipeline = gpu.isoUpsamplePipeline = gpu.beerPipeline = gpu.fxaaPipeline = null;
   gpu.blitPipeline = null;
   gpu.gridPipeline = gpu.labelPipeline = null;
   gpu.flowParticlesPipeline = null;
@@ -266,4 +274,5 @@ export function resetPipelinesOnDeviceLost(): void {
   gpu.labelAtlasDirty = true;
   gpu.volumeUploadEpoch = -1;
   gpu.presentWorkSamplePending = false;
+  gpu.isoDrawParamBufs = [];
 }

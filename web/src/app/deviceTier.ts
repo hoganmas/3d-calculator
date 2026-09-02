@@ -36,7 +36,9 @@ export function detectDeviceTier(opts: { webGpuFailed?: boolean } = {}): DeviceT
 export function bootQualityForTier(tier: DeviceTier): BootQualityPreset {
   switch (tier) {
     case "mobile":
-      return { precisionQuality: 25, scalarQuality: 25, surfaceQuality: 25, vectorQuality: 20 };
+      // Surface 100 → 1× Hermite compose. Occupancy stays 16× with a 4× mid;
+      // silhouettes / intersections remarch at display res. ~40Hz vsync is fine.
+      return { precisionQuality: 25, scalarQuality: 25, surfaceQuality: 100, vectorQuality: 20 };
     case "tablet":
       return { precisionQuality: 40, scalarQuality: 40, surfaceQuality: 40, vectorQuality: 35 };
     default:
@@ -46,4 +48,29 @@ export function bootQualityForTier(tier: DeviceTier): BootQualityPreset {
 
 export function webGpuPowerPreference(tier: DeviceTier): GPUPowerPreference {
   return tier === "mobile" ? "low-power" : "high-performance";
+}
+
+/**
+ * Finest iso compose divisor floor. No floor: phones stay vsync-locked around
+ * 40Hz either way, so 1× Hermite is free sharpness for edges / intersections.
+ */
+export function isoComposeDownscaleFloor(_tier: DeviceTier): number {
+  return 1;
+}
+
+export function effectiveIsoComposeDownscale(slider: number, tier: DeviceTier): number {
+  const n = Math.min(16, Math.max(1, Math.round(slider) || 1));
+  return Math.max(n, isoComposeDownscaleFloor(tier));
+}
+
+/** Occupancy pass can be coarser than the Hermite refine. Shader clamps to ≥16. */
+export function coarseIsoSteps(isoSteps: number, tier: DeviceTier): number {
+  const steps = Math.min(192, Math.max(16, isoSteps | 0));
+  return tier === "mobile" ? Math.min(steps, 16) : steps;
+}
+
+/** Cap refine iso-step count so boot quality 25 (44 steps) does not outrun HTML's 32. */
+export function clampIsoStepsForTier(isoSteps: number, tier: DeviceTier): number {
+  const max = tier === "mobile" ? 32 : 192;
+  return Math.min(max, Math.max(16, isoSteps | 0));
 }

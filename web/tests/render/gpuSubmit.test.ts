@@ -27,6 +27,20 @@ export async function run() {
           "first write of a new buffer does not flush",
         );
         assert(
+          !uniformWriteNeedsFlush(2, written, "drawParamBufRefine"),
+          "refine uniforms on a separate buffer do not flush coarse",
+        );
+        written.add("isoDrawParam1");
+        assert(
+          !uniformWriteNeedsFlush(3, written, "isoDrawParam0"),
+          "a second iso layer on its own uniform buffer does not flush",
+        );
+        written.add("drawParamBufRefine");
+        assert(
+          uniformWriteNeedsFlush(3, written, "drawParamBufRefine"),
+          "mid then fine refine rewrite of the same buffer flushes",
+        );
+        assert(
           !uniformWriteNeedsFlush(0, written, "drawParamBuf"),
           "no pending cmds: overwrite in place",
         );
