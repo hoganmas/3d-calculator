@@ -764,7 +764,7 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
 
   const {
     handles, targets, ro, dirMatrix, half, marchW, marchH, volW, volH,
-    composeW, composeH,
+    composeW, composeH, outW, outH,
   } = setup;
   let { refine, midRefine } = setup;
   const { device, ctx, volumeBuf, colorBuf } = handles;
@@ -907,16 +907,16 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
     ? targets.occlSurfTex.createView()
     : targets.occlIsoTex.createView();
   const ranGrid = !!state.showGridAxes;
-  // Rasterize the box onto the compose buffer with the iso so they share one
-  // present path. Drawing the grid on the swap chain after FXAA let a UV/size
-  // mismatch slide the surface off the wireframe.
+  // Present iso at display res first, then stroke the grid on the swapchain.
+  // Occlusion still samples the compose-sized depth; grid.wgsl maps display
+  // clip → occl texels with dims/fbW. Drawing lines into the 2× compose
+  // buffer made axes look like fat pixel art after FXAA upsample.
+  drawFxaaPass(handles, sceneView, swapTex, true);
   if (ranGrid) {
     drawGridOverlay(
-      handles, occlForGrid, camera, sceneView, half, dirMatrix, ro, presentW, presentH,
+      handles, occlForGrid, camera, swapTex.createView(), half, dirMatrix, ro, outW, outH,
     );
   }
-
-  drawFxaaPass(handles, sceneView, swapTex, true);
 
   const method: string[] = [
     refinePath === "mid" ? "gpu-iso-refine-mid" : refine ? "gpu-iso-refine" : "gpu-iso",
