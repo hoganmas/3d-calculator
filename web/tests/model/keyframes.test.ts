@@ -512,6 +512,53 @@ export async function run() {
       },
     },
     {
+      name: "progressive: play coarse while higher rungs stage",
+      fn: async () => {
+        clearKeyframeCaches();
+        setupAnimParam("t");
+        updateParam("t", { value: 0, min: 0, max: 1 });
+        const opts = { ...keyframeOpts("layer-play-coarse", "t"), deg: 16, K: 5 };
+        ensureLayerKeyframes(opts);
+        const t0 = Date.now();
+        let sawCoarseWhileHigherStaged = false;
+        while (!allKeyframesComplete()) {
+          tickKeyframePump(1);
+          const p = getKeyframeProgress("layer-play-coarse")!;
+          const live = p.displayDeg.filter((d) => d > 0);
+          if (live.length) {
+            assert(
+              live.every((d) => d === live[0]),
+              `single display rung, got ${live.join(",")}`,
+            );
+          }
+          if (p.displayDeg.every((d) => d >= 4)) {
+            for (const v of [0, 0.25, 0.5, 0.75, 1]) {
+              updateParam("t", { value: v });
+              const blend = peekKeyframeBlend("layer-play-coarse");
+              assert(!!blend, `peek at t=${v}`);
+              assert(
+                blend!.i0 !== blend!.i1,
+                `interpolate at t=${v} while display=${p.displayDeg[0]} (not hold)`,
+              );
+            }
+          }
+          if (
+            p.displayDeg.every((d) => d === 4) &&
+            p.stagingDeg.some((d) => d >= 8)
+          ) {
+            sawCoarseWhileHigherStaged = true;
+          }
+          if (Date.now() - t0 > 25000) {
+            throw new Error(
+              `play-coarse fill timed out:\n${JSON.stringify(diagnoseKeyframeCaches(), null, 2)}`,
+            );
+          }
+          await new Promise((r) => setTimeout(r, 0));
+        }
+        assert(sawCoarseWhileHigherStaged, "kept coarse display while deg 8+ staged");
+      },
+    },
+    {
       name: "progressive: cache resets when target deg changes",
       fn: () => {
         clearKeyframeCaches();
@@ -735,6 +782,45 @@ export async function run() {
         assert(rebuilt.M >= 5, `valid grid M, got ${rebuilt.M}`);
         const blend = peekKeyframeBlend("layer-defer-guard");
         assert(!!blend, "blend pair ready after forced sync");
+      },
+    },
+    {
+      name: "sweep to unloaded pair keeps playing at ready rung",
+      fn: () => {
+        clearKeyframeCaches();
+        setupAnimParam("t");
+        updateParam("t", { value: 0, min: 0, max: 1 });
+        const opts = { ...keyframeOpts("e41", "t"), deg: 16, K: 5 };
+        const first = ensureLayerKeyframes(opts);
+        assert(first.blend.i0 === 0 && first.blend.i1 === 1, "starts on first segment");
+        assert(first.M >= 5, "coarse grid");
+        updateParam("t", { value: 1 });
+        const peekHold = peekKeyframeBlend("e41");
+        assert(!!peekHold, "peek stays ready without ensure");
+        const swept = ensureLayerKeyframes({ ...opts, deferSyncBake: true });
+        assert(swept.M >= 5, `kept display grid, got M=${swept.M}`);
+        assert(swept.frames.length === 5, "materialized K");
+        const blend = peekKeyframeBlend("e41");
+        assert(!!blend, "GPU blend stays ready while (3,4) loads");
+        assert(blend!.i0 >= 0 && blend!.i1 >= 0, "valid indices");
+      },
+    },
+    {
+      name: "sync bake promotes first missing blend partner",
+      fn: () => {
+        clearKeyframeCaches();
+        setupAnimParam("t");
+        updateParam("t", { value: 0, min: 0, max: 1 });
+        const opts = { ...keyframeOpts("layer-partner-promote", "t"), deg: 8, K: 5 };
+        ensureLayerKeyframes(opts);
+        updateParam("t", { value: 1 });
+        const forced = ensureLayerKeyframes(opts);
+        const { i0, i1 } = forced.blend;
+        assert(!!forced.rawFrames[i0], `slot ${i0} display-ready`);
+        assert(!!forced.rawFrames[i1], `slot ${i1} display-ready`);
+        const peek = peekKeyframeBlend("layer-partner-promote");
+        assert(!!peek, "pair peekable");
+        assert(peek!.i0 !== peek!.i1 || peek!.t === 0, "real pair or hold");
       },
     },
     {

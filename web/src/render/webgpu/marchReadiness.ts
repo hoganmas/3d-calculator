@@ -9,7 +9,7 @@ export function isClipGpuUploadReady(): boolean {
 export function isClipBakeGpuReady(): boolean {
   return Boolean(
     gpu.device && gpu.isoPipeline && gpu.isoRefinePipeline && gpu.isoUpsamplePipeline &&
-    gpu.beerPipeline && gpu.fxaaPipeline &&
+    gpu.beerPipeline && gpu.beerRefinePipeline && gpu.fxaaPipeline &&
     gpu.gridPipeline && gpu.labelPipeline,
   );
 }

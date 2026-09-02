@@ -94,14 +94,49 @@ fn densBlendT(L: u32) -> f32 {
   return v.w;
 }
 
-@fragment
-fn fsMain(in: VSOut) -> FSOut {
+fn isoOcclusionForVolumePixel(pos: vec2f, fbW: f32, fbH: f32) -> f32 {
+  let isoDims = textureDimensions(occlIsoTex);
+  let isoW = f32(isoDims.x);
+  let isoH = f32(isoDims.y);
+  let ux = clamp(pos.x / fbW, 0.0, 1.0);
+  let uy = clamp(pos.y / fbH, 0.0, 1.0);
+  if (isoW <= fbW + 0.5 && isoH <= fbH + 0.5) {
+    let ix = u32(min(floor(ux * isoW), isoW - 1.0));
+    let iy = u32(min(floor(uy * isoH), isoH - 1.0));
+    return textureLoad(occlIsoTex, vec2u(ix, iy), 0).r;
+  }
+  // Iso finer than beer: clip only fully-covered interior tiles (min depth).
+  // Mixed footprints stay unclipped and remarch at compose res.
+  let x0 = i32(clamp(floor(pos.x / fbW * isoW), 0.0, isoW - 1.0));
+  let y0 = i32(clamp(floor(pos.y / fbH * isoH), 0.0, isoH - 1.0));
+  var x1 = i32(clamp(ceil((pos.x + 1.0) / fbW * isoW) - 1.0, 0.0, isoW - 1.0));
+  var y1 = i32(clamp(ceil((pos.y + 1.0) / fbH * isoH) - 1.0, 0.0, isoH - 1.0));
+  x1 = max(x0, x1);
+  y1 = max(y0, y1);
+  var dMin = 1.0;
+  var dMax = 0.0;
+  let spanX = min(x1 - x0, 7);
+  let spanY = min(y1 - y0, 7);
+  for (var iy = 0; iy < 8; iy++) {
+    if (iy > spanY) { break; }
+    for (var ix = 0; ix < 8; ix++) {
+      if (ix > spanX) { break; }
+      let d = textureLoad(occlIsoTex, vec2u(u32(x0 + ix), u32(y0 + iy)), 0).r;
+      dMin = min(dMin, d);
+      dMax = max(dMax, d);
+    }
+  }
+  if (dMin >= 0.999 || dMax >= 0.999) { return 1.0; }
+  return dMin;
+}
+
+fn marchBeer(pos: vec2f) -> FSOut {
   var out: FSOut;
   out.occl = vec4f(1.0, 0.0, 0.0, 1.0);
 
   let fbW = f32(draw.fbW); let fbH = f32(draw.fbH);
-  let ndcX = -1.0 + 2.0 * in.pos.x / fbW;
-  let ndcY = 1.0 - 2.0 * in.pos.y / fbH;
+  let ndcX = -1.0 + 2.0 * pos.x / fbW;
+  let ndcY = 1.0 - 2.0 * pos.y / fbH;
   let xy1 = vec3f(ndcX, ndcY, 1.0);
   let rd = vec3f(dot(draw.m0.xyz, xy1), dot(draw.m1.xyz, xy1), dot(draw.m2.xyz, xy1));
   let ro = draw.ro; let half = draw.half;
@@ -121,14 +156,8 @@ fn fsMain(in: VSOut) -> FSOut {
   }
 
   let far = max(tExit, half * 4.0);
-  // Remap this volume-res pixel into iso-occlusion texture UVs so iso/volume
-  // march resolutions can differ independently.
-  let isoDims = textureDimensions(occlIsoTex);
-  let ux = clamp(in.pos.x / fbW, 0.0, 1.0);
-  let uy = clamp(in.pos.y / fbH, 0.0, 1.0);
-  let ix = u32(min(floor(ux * f32(isoDims.x)), f32(isoDims.x) - 1.0));
-  let iy = u32(min(floor(uy * f32(isoDims.y)), f32(isoDims.y) - 1.0));
-  let isoD = textureLoad(occlIsoTex, vec2u(ix, iy), 0).r;
+  // Same-res: clip beer to iso. Finer iso: leave tExit alone (isoD == 1).
+  let isoD = isoOcclusionForVolumePixel(pos, fbW, fbH);
   if (isoD < 0.999) { tExit = min(tExit, isoD * far); }
   if (!(tExit > tEnter + 1e-6)) {
     out.color = vec4f(0.0);
@@ -199,6 +228,7 @@ fn fsMain(in: VSOut) -> FSOut {
     s += dt;
   }
   let a = 1.0 - T;
+  // Deferred iso clip stores volume depth only; same-res still mins with isoD.
   out.occl = vec4f(min(isoD, densD), 0.0, 0.0, 1.0);
   if (a < 0.001) {
     out.color = vec4f(0.0);
@@ -206,4 +236,9 @@ fn fsMain(in: VSOut) -> FSOut {
   }
   out.color = vec4f(rgb, a);
   return out;
+}
+
+@fragment
+fn fsMain(in: VSOut) -> FSOut {
+  return marchBeer(in.pos.xy);
 }

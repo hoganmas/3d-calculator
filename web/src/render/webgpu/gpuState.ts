@@ -44,6 +44,7 @@ export interface GpuState {
   isoRefinePipeline: GPURenderPipeline | null;
   isoUpsamplePipeline: GPURenderPipeline | null;
   beerPipeline: GPURenderPipeline | null;
+  beerRefinePipeline: GPURenderPipeline | null;
   blitPipeline: GPURenderPipeline | null;
   fxaaPipeline: GPURenderPipeline | null;
   gridPipeline: GPURenderPipeline | null;
@@ -161,6 +162,7 @@ export const gpu: GpuState = {
   isoRefinePipeline: null,
   isoUpsamplePipeline: null,
   beerPipeline: null,
+  beerRefinePipeline: null,
   blitPipeline: null,
   fxaaPipeline: null,
   gridPipeline: null,
@@ -257,11 +259,12 @@ export const gpu: GpuState = {
   flowParticlesPerLayer: 0,
 };
 
-export const PIPELINE_EPOCH = 89;
+export const PIPELINE_EPOCH = 91;
 export const labelVertScratch = new Float32Array(18 * 6);
 
 export function resetPipelinesOnDeviceLost(): void {
   gpu.isoPipeline = gpu.isoRefinePipeline = gpu.isoUpsamplePipeline = gpu.beerPipeline = gpu.fxaaPipeline = null;
+  gpu.beerRefinePipeline = null;
   gpu.blitPipeline = null;
   gpu.gridPipeline = gpu.labelPipeline = null;
   gpu.flowParticlesPipeline = null;

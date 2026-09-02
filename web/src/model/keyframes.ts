@@ -438,7 +438,7 @@ export interface KeyframeLoadSummary {
 function slotLoadFraction(cache: LayerKeyframeCache, k: number): number {
   const target = cache.targetDeg;
   if (target <= 0) return 1;
-  const d = cache.frameDeg[k] ?? 0;
+  const d = bakedDegAt(cache, k);
   if (d >= target) return 1;
   if (d <= 0) return 0;
   const ladder = lobattoLadderDegrees(target);
@@ -604,10 +604,6 @@ function hypercellCornerIndices(cache: LayerKeyframeCache): number[] {
   return hypercellForCache(cache).corners.map((c) => c.index);
 }
 
-function hypercellCornerSet(cache: LayerKeyframeCache): Set<number> {
-  return new Set(hypercellCornerIndices(cache));
-}
-
 /**
  * @param {Float32Array} a
  * @param {Float32Array} b
@@ -649,10 +645,46 @@ function heaviestCorner(corners: HypercellCorner[]): HypercellCorner {
   return corners.reduce((a, b) => (b.weight > a.weight ? b : a));
 }
 
+function slotHasDisplay(cache: LayerKeyframeCache, k: number): boolean {
+  return !!cache.frames[k] && (cache.frameDeg[k] ?? 0) > 0;
+}
+
+function hasAnyDisplayFrame(cache: LayerKeyframeCache): boolean {
+  for (let k = 0; k < cache.totalFrames; k++) {
+    if (slotHasDisplay(cache, k)) return true;
+  }
+  return false;
+}
+
+/** Nearest display-ready slot to `prefer` (outward search). */
+function nearestReadyDisplaySlot(cache: LayerKeyframeCache, prefer: number): number {
+  const n = cache.totalFrames;
+  if (n <= 0) return -1;
+  const p = Math.min(n - 1, Math.max(0, prefer | 0));
+  if (slotHasDisplay(cache, p)) return p;
+  for (let d = 1; d < n; d++) {
+    const lo = p - d;
+    const hi = p + d;
+    if (lo >= 0 && slotHasDisplay(cache, lo)) return lo;
+    if (hi < n && slotHasDisplay(cache, hi)) return hi;
+  }
+  return -1;
+}
+
 function sampleVolumeFromCache(cache: LayerKeyframeCache) {
   const corners = hypercellForCache(cache).corners;
-  const snapIdx = heaviestCorner(corners).index;
-  const snap = cache.frames[snapIdx];
+  let snapIdx = heaviestCorner(corners).index;
+  let snap = cache.frames[snapIdx];
+  if (!snap) {
+    const readyCorners = corners.filter((c) => slotHasDisplay(cache, c.index));
+    if (readyCorners.length) {
+      snapIdx = heaviestCorner(readyCorners).index;
+      snap = cache.frames[snapIdx];
+    } else {
+      snapIdx = nearestReadyDisplaySlot(cache, snapIdx);
+      snap = snapIdx >= 0 ? cache.frames[snapIdx] : null;
+    }
+  }
   if (!snap) throw new Error("keyframe hypercell missing");
   ensureScratchVolume(cache, frameVolumeN(snap));
   const out = cache.scratch;
@@ -907,15 +939,59 @@ function bakeFrameAtDeg(
   return { frame, complete: true };
 }
 
-function stageOffBlendFrame(
-  cache: LayerKeyframeCache,
-  k: number,
-  frame: KeyframeFrame,
-  deg: number,
-) {
-  const displayDeg = cache.frameDeg[k] ?? 0;
-  if (deg <= displayDeg) return;
-  applyDisplayFrame(cache, k, frame, deg);
+/** Lowest display degree currently on screen (0 if nothing is displayed yet). */
+function playingDisplayDeg(cache: LayerKeyframeCache): number {
+  let min = Infinity;
+  for (let k = 0; k < cache.totalFrames; k++) {
+    const d = cache.frameDeg[k] ?? 0;
+    if (d <= 0) continue;
+    if (d < min) min = d;
+  }
+  return Number.isFinite(min) ? min : 0;
+}
+
+function slotHasRung(cache: LayerKeyframeCache, k: number, deg: number): boolean {
+  if ((cache.frameDeg[k] ?? 0) >= deg) return true;
+  return (cache.stagingDeg[k] ?? 0) >= deg && !!cache.stagingFrames[k];
+}
+
+/**
+ * Promote every slot to the highest ladder rung that is staged (or already
+ * displayed) on all slots. Playback stays on the previous complete rung until
+ * then, so the playhead can keep interpolating at lower quality.
+ */
+function tryPromoteGlobalRung(cache: LayerKeyframeCache): number[] {
+  const ladder = lobattoLadderDegrees(cache.targetDeg);
+  let promoteDeg = 0;
+  for (const d of ladder) {
+    let ready = true;
+    for (let k = 0; k < cache.totalFrames; k++) {
+      if (!slotHasRung(cache, k, d)) {
+        ready = false;
+        break;
+      }
+    }
+    if (!ready) break;
+    promoteDeg = d;
+  }
+  if (promoteDeg <= 0) return [];
+  const promoted: number[] = [];
+  for (let k = 0; k < cache.totalFrames; k++) {
+    if ((cache.frameDeg[k] ?? 0) >= promoteDeg) continue;
+    const sd = cache.stagingDeg[k] ?? 0;
+    const fr = cache.stagingFrames[k];
+    if (!fr || sd < promoteDeg) continue;
+    applyDisplayFrame(cache, k, fr, sd);
+    promoted.push(k);
+  }
+  if (promoted.length) {
+    tearLog("promote-global-rung", {
+      layerId: cache.bakeOpts.layerId,
+      deg: promoteDeg,
+      promoted,
+    });
+  }
+  return promoted;
 }
 
 function clearCoarseStaging(cache: LayerKeyframeCache, k: number) {
@@ -938,77 +1014,29 @@ function isoBlendSceneM(
   const M0 = gridMFromFrame(cache.frames[i0] ?? {});
   const M1 = gridMFromFrame(cache.frames[i1] ?? {});
   if (d0 === d1 && M0 > 0 && M0 === M1) return M0;
+  if (d0 > 0 && d1 > 0 && d0 !== d1) return d0 < d1 ? M0 || M1 || 0 : M1 || M0 || 0;
   if (d0 > d1 || (d0 > 0 && d1 <= 0)) return M0 || M1 || 0;
   if (d1 > d0 || (d1 > 0 && d0 <= 0)) return M1 || M0 || 0;
   if (M0 > 0 && M0 === M1) return M0;
   return t < 0.5 ? M0 || M1 || 0 : M1 || M0 || 0;
 }
 
-/** Promote when all hypercell corners share the same staging degree. */
-function tryPromoteStagingHypercell(cache: LayerKeyframeCache, corners: number[]): number[] {
-  if (!corners.length) return [];
-  const sd0 = cache.stagingDeg[corners[0]!] ?? 0;
-  if (sd0 <= 0) return [];
-  for (const slot of corners) {
-    if ((cache.stagingDeg[slot] ?? 0) !== sd0 || !cache.stagingFrames[slot]) return [];
-  }
-  const promoted: number[] = [];
-  for (const slot of corners) {
-    if ((cache.frameDeg[slot] ?? 0) < sd0) {
-      applyDisplayFrame(cache, slot, cache.stagingFrames[slot]!, sd0);
-      cache.stagingFrames[slot] = null;
-      cache.stagingDeg[slot] = 0;
-      promoted.push(slot);
-    }
-  }
-  if (promoted.length) {
-    tearLog("promote-staging-hypercell", {
-      layerId: cache.bakeOpts.layerId,
-      corners,
-      deg: sd0,
-      promoted,
-    });
-  }
-  return promoted;
-}
-
 /**
- * Flush staging that can never lockstep-promote:
- * - Off-blend slots: staging → display immediately (no tear risk).
- * - Blend slot whose partner already displays the same degree: solo promote.
- * Without this, schedDeg looks done while readyCount never reaches K (pump stalls).
+ * Flush staging onto display when it does not jump ahead of the playing rung,
+ * then promote a complete ladder rung across all slots.
  */
-function reconcileStaging(cache: LayerKeyframeCache, corners: number[]): number[] {
-  const cornerSet = new Set(corners);
+function reconcileStaging(cache: LayerKeyframeCache, _corners: number[]): number[] {
+  const playDeg = playingDisplayDeg(cache);
   const promoted: number[] = [];
   for (let k = 0; k < cache.totalFrames; k++) {
-    if (cornerSet.has(k)) continue;
-    const sd = cache.stagingDeg[k] ?? 0;
-    const fr = cache.stagingFrames[k];
-    if (sd > (cache.frameDeg[k] ?? 0) && fr) {
-      applyDisplayFrame(cache, k, fr, sd);
-      promoted.push(k);
-    }
-  }
-  for (const k of corners) {
     const sd = cache.stagingDeg[k] ?? 0;
     const fr = cache.stagingFrames[k];
     if (!fr || sd <= (cache.frameDeg[k] ?? 0)) continue;
-    const othersReady = corners.every(
-      (c) => c === k || (cache.frameDeg[c] ?? 0) === sd,
-    );
-    if (othersReady) {
-      applyDisplayFrame(cache, k, fr, sd);
-      tearLog("reconcile-solo-promote", {
-        layerId: cache.bakeOpts.layerId,
-        k,
-        corners,
-        deg: sd,
-      });
-      promoted.push(k);
-    }
+    if (playDeg > 0 && sd > playDeg) continue;
+    applyDisplayFrame(cache, k, fr, sd);
+    promoted.push(k);
   }
-  promoted.push(...tryPromoteStagingHypercell(cache, corners));
+  promoted.push(...tryPromoteGlobalRung(cache));
   return promoted;
 }
 
@@ -1058,37 +1086,13 @@ function applyDisplayFrame(
   });
 }
 
-/** Commit a baked frame; blend-pair slots promote to display only when both match degree. */
+/** Commit a baked frame. Display stays on the complete rung; higher rungs stage until all slots catch up. */
 function commitFrame(
   cache: LayerKeyframeCache,
   k: number,
   frame: KeyframeFrame,
   deg: number,
 ): number[] {
-  const corners = hypercellCornerIndices(cache);
-  const cornerSet = hypercellCornerSet(cache);
-
-  if (!cornerSet.has(k)) {
-    if (deg <= (cache.frameDeg[k] ?? 0)) {
-      tearLog("commit-stale-skip", {
-        layerId: cache.bakeOpts.layerId,
-        k,
-        deg,
-        displayDeg: cache.frameDeg[k] ?? 0,
-      });
-      return [];
-    }
-    stageOffBlendFrame(cache, k, frame, deg);
-    tearLog("commit-off-blend-display", {
-      layerId: cache.bakeOpts.layerId,
-      k,
-      deg,
-      corners,
-      M: gridMFromDens(frame.dens),
-    });
-    return [];
-  }
-
   if (deg <= (cache.frameDeg[k] ?? 0)) {
     tearLog("commit-stale-skip", {
       layerId: cache.bakeOpts.layerId,
@@ -1098,63 +1102,31 @@ function commitFrame(
     });
     return [];
   }
-  for (const c of corners) clearCoarseStaging(cache, c);
-
-  cache.stagingFrames[k] = frame;
-  cache.stagingDeg[k] = deg;
-  const allStaged = corners.every(
-    (c) => cache.stagingDeg[c] === deg && !!cache.stagingFrames[c],
-  );
-  if (allStaged) {
-    const maxDisplay = Math.max(...corners.map((c) => cache.frameDeg[c] ?? 0));
-    if (deg < maxDisplay) {
-      cache.stagingFrames[k] = null;
-      cache.stagingDeg[k] = 0;
-      tearLog("commit-promote-blocked", {
-        layerId: cache.bakeOpts.layerId,
-        k,
-        deg,
-        maxDisplay,
-        corners: corners.map((s) => slotSummary(cache, s)),
-      });
-      return [];
-    }
-    const promoted: number[] = [];
-    for (const slot of corners) {
-      applyDisplayFrame(cache, slot, cache.stagingFrames[slot]!, deg);
-      cache.stagingFrames[slot] = null;
-      cache.stagingDeg[slot] = 0;
-      promoted.push(slot);
-    }
-    tearLog("commit-promote", {
-      layerId: cache.bakeOpts.layerId,
-      k,
-      deg,
-      promoted,
-      corners: corners.map((s) => slotSummary(cache, s)),
-    });
-    return promoted;
-  }
-  const partnersReady = corners.filter((c) => c !== k).every((c) => (cache.frameDeg[c] ?? 0) === deg && cache.frames[c]);
-  if (partnersReady && cache.frames[k] && deg >= (cache.frameDeg[k] ?? 0)) {
+  clearCoarseStaging(cache, k);
+  const playDeg = playingDisplayDeg(cache);
+  const displayDeg = cache.frameDeg[k] ?? 0;
+  const joiningPlay = displayDeg === 0 || playDeg === 0 || deg <= playDeg;
+  if (joiningPlay) {
     applyDisplayFrame(cache, k, frame, deg);
-    tearLog("commit-promote-solo", {
+    tearLog("commit-join-play", {
       layerId: cache.bakeOpts.layerId,
       k,
       deg,
-      corners,
+      playDeg,
       M: gridMFromDens(frame.dens),
     });
     return [k];
   }
+  cache.stagingFrames[k] = frame;
+  cache.stagingDeg[k] = deg;
   tearLog("commit-staged", {
     layerId: cache.bakeOpts.layerId,
     k,
     deg,
-    corners,
-    slots: corners.map((s) => slotSummary(cache, s)),
+    playDeg,
+    slots: [slotSummary(cache, k)],
   });
-  return [];
+  return tryPromoteGlobalRung(cache);
 }
 
 /**
@@ -1169,11 +1141,13 @@ function displayBlendForValue(cache: LayerKeyframeCache, value: number) {
   const a = cache.frames[i0];
   const b = cache.frames[i1];
   if (d0 !== d1 || !a || !b) {
+    const ready = nearestReadyDisplaySlot(cache, t < 0.5 ? i0 : i1);
     const snap =
-      d0 > 0 && d1 <= 0 ? { i0, i1, t: 0 } :
-      d1 > 0 && d0 <= 0 ? { i0, i1, t: 1 } :
-      d0 > d1 ? { i0, i1, t: 0 } :
-      d1 > d0 ? { i0, i1, t: 1 } :
+      d0 > 0 && a && d1 <= 0 ? { i0, i1, t: 0 } :
+      d1 > 0 && b && d0 <= 0 ? { i0, i1, t: 1 } :
+      d0 > d1 && a ? { i0, i1, t: 0 } :
+      d1 > d0 && b ? { i0, i1, t: 1 } :
+      ready >= 0 ? { i0: ready, i1: ready, t: 0 } :
       seg;
     tearLogOnce(
       `blend-snap-deg-${cache.bakeOpts.layerId}-${d0}-${d1}`,
@@ -1399,12 +1373,35 @@ function buildLayerKeyframeResult(
   }
 
   const displayBlend = displayBlendForValue(cache, value);
-  const blendM = isoBlendSceneM(cache, displayBlend.i0, displayBlend.i1, displayBlend.t);
-  if (blendM <= 0 || !cache.frames[displayBlend.i0] || !cache.frames[displayBlend.i1]) {
-    throw new Error(
-      `keyframe blend pair not ready · ${opts.layerId} · ` +
-        `(${displayBlend.i0},${displayBlend.i1}) M=${blendM}`,
-    );
+  const a0 = cache.frames[displayBlend.i0];
+  const a1 = cache.frames[displayBlend.i1];
+  let blendM = isoBlendSceneM(cache, displayBlend.i0, displayBlend.i1, displayBlend.t);
+  if (blendM <= 0 || (!a0 && !a1)) {
+    const ready = nearestReadyDisplaySlot(cache, displayBlend.i0);
+    const fallback = ready >= 0 ? cache.frames[ready] : null;
+    if (!fallback) {
+      throw new Error(
+        `keyframe blend pair not ready · ${opts.layerId} · ` +
+          `(${displayBlend.i0},${displayBlend.i1}) M=${blendM}`,
+      );
+    }
+    blendM = gridMFromFrame(fallback);
+    const frames =
+      cache.role === "isosurface"
+        ? materializeKeyframeFramesAtM(cache.frames, blendM)
+        : materializeKeyframeFrames(cache.frames);
+    return {
+      frames,
+      rawFrames: cache.frames.slice(),
+      blend: { i0: ready, i1: ready, t: 0 },
+      cheb: fallback.cheb,
+      fitRel: fallback.fitRel,
+      M: blendM,
+      baked,
+      gpuUploadNeeded: false,
+      readyCount: cache.readyCount,
+      complete: keyframesFullyReady(cache),
+    };
   }
   const frames =
     cache.role === "isosurface"
@@ -1787,15 +1784,15 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
   let syncCount = 0;
   let lastSyncK = cornerIndices[0] ?? 0;
   let syncPromoted: number[] = [];
-  const hypercellHasDisplay = cornerIndices.every(
-    (k) => (cache.frameDeg[k] ?? 0) > 0 && !!cache.frames[k],
-  );
-  if (!opts.deferSyncBake || !hypercellHasDisplay) {
+  let syncDeg = startDeg;
+  const canDeferSync = !!opts.deferSyncBake && hasAnyDisplayFrame(cache);
+  if (!canDeferSync) {
+    syncDeg = Math.max(startDeg, ...cornerIndices.map((c) => cache.frameDeg[c] ?? 0));
     for (const k of cornerIndices) {
-      if (cache.frameDeg[k]! > 0 && cache.frames[k]) continue;
-      const { frame, complete } = bakeFrameAtDeg(cache, k, startDeg, stages, null);
+      if (slotHasDisplay(cache, k)) continue;
+      const { frame, complete } = bakeFrameAtDeg(cache, k, syncDeg, stages, null);
       if (!complete || !frame) throw new Error("sync keyframe bake incomplete");
-      syncPromoted = commitFrame(cache, k, frame, startDeg);
+      syncPromoted = commitFrame(cache, k, frame, syncDeg);
       syncCount++;
       lastSyncK = k;
       baked = true;
@@ -1803,7 +1800,10 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
   }
 
   const proto =
-    cornerIndices.map((k) => cache.frames[k]).find(Boolean) ?? cache.frames[blend.i0] ?? cache.frames[blend.i1];
+    cornerIndices.map((k) => cache.frames[k]).find(Boolean) ??
+    cache.frames[blend.i0] ??
+    cache.frames[blend.i1] ??
+    cache.frames.find(Boolean);
   if (proto) {
     const n = frameVolumeN(proto);
     const scratchN = frameVolumeN(cache.scratch);
@@ -1819,7 +1819,7 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
     lastBakeDetails.push({
       ...stages,
       frames: syncCount,
-      deg: startDeg,
+      deg: syncDeg,
       M: gridMFromFrame(proto ?? { dens: new Float32Array(0) }),
       role: opts.role,
       layerId: opts.layerId,
@@ -1834,7 +1834,7 @@ export function ensureLayerKeyframes(opts: EnsureKeyframesOpts) {
         opts.layerId,
         blend.i0,
         blend.i1,
-        startDeg,
+        syncDeg,
         bakeMs,
         "sync",
         lastSyncK,
@@ -1980,16 +1980,18 @@ export function peekKeyframeBlend(layerId: string) {
   const st = getParam(cache.paramNames[0]!);
   if (!st) return null;
   const blend = displayBlendForValue(cache, st.value);
-  if (!cache.frames[blend.i0] || !cache.frames[blend.i1]) {
-    tearLogOnce(`peek-null-frames-${layerId}`, "peek-null", {
-      layerId,
-      reason: "missing-frame",
-      i0: blend.i0,
-      i1: blend.i1,
-      d0: cache.frameDeg[blend.i0] ?? 0,
-      d1: cache.frameDeg[blend.i1] ?? 0,
-    });
-    return null;
-  }
-  return { id: layerId, i0: blend.i0, i1: blend.i1, t: blend.t };
+  const a = cache.frames[blend.i0];
+  const b = cache.frames[blend.i1];
+  if (a && b) return { id: layerId, i0: blend.i0, i1: blend.i1, t: blend.t };
+  if (a) return { id: layerId, i0: blend.i0, i1: blend.i0, t: 0 };
+  if (b) return { id: layerId, i0: blend.i1, i1: blend.i1, t: 0 };
+  tearLogOnce(`peek-null-frames-${layerId}`, "peek-null", {
+    layerId,
+    reason: "missing-frame",
+    i0: blend.i0,
+    i1: blend.i1,
+    d0: cache.frameDeg[blend.i0] ?? 0,
+    d1: cache.frameDeg[blend.i1] ?? 0,
+  });
+  return null;
 }

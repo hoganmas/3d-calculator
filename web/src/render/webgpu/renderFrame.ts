@@ -623,6 +623,7 @@ function compositeVolumeOntoScene(
   handles: MarchGpuHandles,
   targets: MarchTargets,
   sceneView: GPUTextureView,
+  occTex: GPUTexture,
 ): void {
   if (!gpu.blitPipeline || !gpu.blitSampler) return;
   const { device } = handles;
@@ -631,6 +632,8 @@ function compositeVolumeOntoScene(
     entries: [
       { binding: 0, resource: targets.volColorTex.createView() },
       { binding: 1, resource: gpu.blitSampler },
+      { binding: 2, resource: texView(targets.occlIsoTex) },
+      { binding: 3, resource: texView(occTex) },
     ],
   });
   const enc = device.createCommandEncoder();
@@ -643,6 +646,57 @@ function compositeVolumeOntoScene(
   });
   pass.setPipeline(gpu.blitPipeline);
   pass.setBindGroup(0, bg);
+  setPassViewport(pass, targets.sceneColorTex.width, targets.sceneColorTex.height);
+  pass.draw(3);
+  pass.end();
+  submitEnc(device, enc);
+}
+
+/** Iso-res beer with tExit clip, only on occupancy-refine tiles. */
+function drawBeerRefine(
+  handles: MarchGpuHandles,
+  targets: MarchTargets,
+  sceneView: GPUTextureView,
+  occTex: GPUTexture,
+  destW: number,
+  destH: number,
+  Mgrid: number,
+  steps: number,
+  half: number,
+  scale: number,
+  ro: [number, number, number],
+  dirMatrix: ReturnType<typeof offsetDirMatrix>,
+): void {
+  const { device, beerRefinePipeline, drawParamBufBeer, volumeBuf, colorBuf } = handles;
+  gpuWriteBuffer(
+    device,
+    drawParamBufBeer,
+    packDrawParamsBeer(
+      destW, destH, Mgrid, steps, half, scale,
+      gpu.densBase, gpu.densLayerCount, ro, dirMatrix, gpu.flowLayerStart,
+    ),
+  );
+  const bg = device.createBindGroup({
+    layout: beerRefinePipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: drawParamBufBeer } },
+      { binding: 1, resource: { buffer: volumeBuf } },
+      { binding: 2, resource: texView(targets.occlIsoTex) },
+      { binding: 3, resource: { buffer: colorBuf } },
+      { binding: 4, resource: texView(occTex) },
+    ],
+  });
+  const enc = device.createCommandEncoder();
+  const pass = enc.beginRenderPass({
+    colorAttachments: [{
+      view: sceneView,
+      loadOp: "load",
+      storeOp: "store",
+    }],
+  });
+  pass.setPipeline(beerRefinePipeline);
+  pass.setBindGroup(0, bg);
+  setPassViewport(pass, destW, destH);
   pass.draw(3);
   pass.end();
   submitEnc(device, enc);
@@ -876,11 +930,18 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
       pass.end();
       submitEnc(device, enc);
     } else {
+      const occTex = (midRefine && gpu.isoMidOcclTex) || gpu.isoCoarseOcclTex || targets.occlIsoTex;
       drawBeerPass(
         handles, targets, targets.volColorTex.createView(),
         volW, volH, Mgrid, volumeSteps, half, scale, ro, dirMatrix,
       );
-      compositeVolumeOntoScene(handles, targets, sceneView);
+      compositeVolumeOntoScene(handles, targets, sceneView, occTex);
+      if (gpu.sceneConstraints.length > 0) {
+        drawBeerRefine(
+          handles, targets, sceneView, occTex,
+          presentW, presentH, Mgrid, volumeSteps, half, scale, ro, dirMatrix,
+        );
+      }
     }
   }
 
@@ -922,7 +983,7 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
   const method: string[] = [
     refinePath === "mid" ? "gpu-iso-refine-mid" : refine ? "gpu-iso-refine" : "gpu-iso",
   ];
-  if (ranBeer) method.push(sameRes ? "beer" : "beer(volFB)+blit");
+  if (ranBeer) method.push(sameRes ? "beer" : "beer(volFB)+occl+iso-tiles");
   if (ranFlow) method.push("flow");
   method.push("fxaa");
   if (ranGrid) method.push("grid");

@@ -4,6 +4,7 @@ import isoEdgeWgsl from "./isoEdge.wgsl?raw";
 import isoUpsampleWgsl from "./isoUpsample.wgsl?raw";
 import isoRefineAppendWgsl from "./isoRefineAppend.wgsl?raw";
 import beerWgsl from "./beer.wgsl?raw";
+import beerRefineAppendWgsl from "./beerRefineAppend.wgsl?raw";
 import gridWgsl from "./grid.wgsl?raw";
 import axisLabelWgsl from "./axisLabel.wgsl?raw";
 import fxaaWgsl from "./fxaa.wgsl?raw";
@@ -48,6 +49,12 @@ export function getBeerShader(maxGradStops: number, maxDensLayers: number): stri
   });
 }
 
+export function getBeerRefineShader(maxGradStops: number, maxDensLayers: number): string {
+  return getBeerShader(maxGradStops, maxDensLayers) + "\n" + inject(beerRefineAppendWgsl, {
+    ISO_EDGE_WGSL: isoEdgeWgsl,
+  });
+}
+
 export function getGridShader(): string {
   return gridWgsl;
 }
@@ -61,7 +68,7 @@ export function getFxaaShader(): string {
 }
 
 export function getBlitShader(): string {
-  return blitWgsl;
+  return inject(blitWgsl, { ISO_EDGE_WGSL: isoEdgeWgsl });
 }
 
 export function getFlowParticlesShader(): string {
