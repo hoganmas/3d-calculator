@@ -942,7 +942,17 @@ export function uploadFit(
     state.clipDirty = true;
 
     tryMarkSplashBakeReady(layers.length > 0);
-    lastBakedParamValues = { ...baseParams };
+    // Only settle at the true target degree (mirrors commitLayerFp's gate) —
+    // an intermediate progressive-ladder step isn't "baked" yet. Updating
+    // this unconditionally cleared the jumped param's dirtiness after the
+    // ladder's first (coarsest) step, so every later step's paramDepends
+    // check saw nothing dirty and reused that coarse result via the
+    // sceneMetaOk/reuseDens shortcut instead of refitting — the ladder kept
+    // "running" (uploadFit was still called for each step) but visibly
+    // never advanced past the lowest rung.
+    if (deg === uiDeg || opts.progressiveFinal || (!progressive && !fromAnim)) {
+      lastBakedParamValues = { ...baseParams };
+    }
     startupEnd("uploadFit", { uploadMs: Math.round((performance.now() - tUpload) * 10) / 10 });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
