@@ -33,7 +33,12 @@ import {
 } from "./webglFallback.js";
 import { scheduleMarchPipelines } from "../render/webgpu/march.js";
 import { uploadFit, tickGpuKeyframeBlends, shouldRunAnimUploadFit } from "./pipeline.js";
-import { tickKeyframePump, KEYFRAME_PUMP_FRAME_BUDGET_MS } from "../model/keyframes.js";
+import {
+  tickKeyframePump,
+  KEYFRAME_PUMP_FRAME_BUDGET_MS,
+  hasActiveKeyframeCaches,
+  allKeyframesComplete,
+} from "../model/keyframes.js";
 import { hudText, refreshMetricsDump } from "./hud.js";
 import { isSplashContentReady, markSplashFrameReady } from "./splash.js";
 import { startupMark } from "./startupProfile.js";
@@ -56,44 +61,57 @@ function reportSplashFrameReady() {
 
 function tickSimulation(t0: number) {
   // Named param animation → Chebyshev refit (throttled).
-  if (anyParamAnimating()) {
+  const animating = anyParamAnimating();
+  let animChanged = false;
+  let eqChanged = false;
+  if (animating) {
     const tSec = t0 / 1000;
-    const animChanged = tickParamAnimation(tSec);
-    const eqChanged = evalParamEquations();
-    if (animChanged || eqChanged) {
-      if (animChanged) {
-        for (const name of listParamNames()) {
-          const p = getParam(name);
-          if (p?.exprId && !p.driven) {
-            updateExprSilent(p.exprId, {
-              latex: p.latex,
-              sliderAnimating: p.animating,
-              sliderPhase: p.phase,
-              sliderSpeed: p.speed,
-              sliderAnimMode: p.animMode,
-            });
-          }
+    animChanged = tickParamAnimation(tSec);
+    eqChanged = evalParamEquations();
+    if (animChanged) {
+      for (const name of listParamNames()) {
+        const p = getParam(name);
+        if (p?.exprId && !p.driven) {
+          updateExprSilent(p.exprId, {
+            latex: p.latex,
+            sliderAnimating: p.animating,
+            sliderPhase: p.phase,
+            sliderSpeed: p.speed,
+            sliderAnimMode: p.animMode,
+          });
         }
       }
       state.exprListApi?.syncAllParamSliders?.();
-      // GPU iso keyframes: blend every rAF so the thumb + field stay continuous.
-      tickGpuKeyframeBlends();
-      if (t0 - state.lastAnimFitAt >= ANIM_FIT_MIN_MS) {
-        state.lastAnimFitAt = t0;
-        // Don't cancel a pending structural (latex) refit — anim would starve it.
-        const pendingStructural =
-          !!state.fitTimer && state.pendingFitOpts?.fromAnim !== true;
-        if (state.uploadFitBusy || pendingStructural) {
-          // Keep the timer; GPU keyframe blends above still run this frame.
-        } else if (shouldRunAnimUploadFit()) {
-          if (state.fitTimer) {
-            clearTimeout(state.fitTimer);
-            state.fitTimer = 0;
-          }
-          uploadFit({ fromAnim: true });
-        } else {
-          state.lastAnimFitAt = t0;
+    }
+  }
+
+  // GPU iso keyframes: blend + pick up newly-ready (promoted) frames every
+  // rAF whenever there's any active keyframe cache — not just while playing.
+  // Background generation (the pump below) keeps refining ladder rungs
+  // regardless of play state; gating this on `animating` too meant a paused
+  // isosurface never got shown the higher-degree frame once it finished
+  // baking, so it stayed stuck at whatever coarse rung was on-screen at the
+  // moment of pausing.
+  if (hasActiveKeyframeCaches()) {
+    tickGpuKeyframeBlends();
+  }
+
+  if (animating && (animChanged || eqChanged)) {
+    if (t0 - state.lastAnimFitAt >= ANIM_FIT_MIN_MS) {
+      state.lastAnimFitAt = t0;
+      // Don't cancel a pending structural (latex) refit — anim would starve it.
+      const pendingStructural =
+        !!state.fitTimer && state.pendingFitOpts?.fromAnim !== true;
+      if (state.uploadFitBusy || pendingStructural) {
+        // Keep the timer; GPU keyframe blends above still run this frame.
+      } else if (shouldRunAnimUploadFit()) {
+        if (state.fitTimer) {
+          clearTimeout(state.fitTimer);
+          state.fitTimer = 0;
         }
+        uploadFit({ fromAnim: true });
+      } else {
+        state.lastAnimFitAt = t0;
       }
     }
   }
@@ -177,7 +195,11 @@ function frame(rafNow: number) {
   // real cadence, so this cuts total generation wall time without touching
   // render pacing: it still yields well within the frame once out of budget
   // or once there's no more pending work.
-  if (anyParamAnimating()) {
+  // Runs whenever there's active, incomplete keyframe work — not gated on
+  // playback — so pausing mid-generation doesn't freeze it: without this,
+  // an isosurface paused before its ladder finished stayed stuck at whatever
+  // coarse rung was on-screen, since nothing ever pumped it further.
+  if (hasActiveKeyframeCaches() && !allKeyframesComplete()) {
     const tPump0 = performance.now();
     while (performance.now() - tPump0 < KEYFRAME_PUMP_FRAME_BUDGET_MS) {
       if (tickKeyframePump(1) === 0) break;
