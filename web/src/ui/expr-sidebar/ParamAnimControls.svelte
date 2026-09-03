@@ -2,6 +2,9 @@
   import type { ExprItem } from "../../types/models.js";
   import { getParam, toggleParamAnimate } from "../../model/params.js";
   import { updateExprSilent } from "../../model/expressions.js";
+  // Aliased: this component uses the $state rune, and Svelte 5's compiler
+  // gets confused if a plain import is also named `state`.
+  import { state as appState } from "../../app/state.js";
   import { ANIM_OPTS_ICON, PAUSE_ICON, PLAY_ICON } from "./helpers.ts";
   import {
     openAnimOptions,
@@ -41,6 +44,13 @@
   function syncAll() {
     syncOptsChrome();
     onAnimSync?.();
+    // playChrome is derived from the paramTick *prop*, which only advances
+    // when the parent re-renders it — normally driven by loop.ts bumping it
+    // after a value change on the per-frame animation tick. Pausing flips
+    // `animating` without changing the value, so that tick never fires
+    // again for this param and the button silently keeps showing "playing"
+    // forever unless something pokes the shared tick directly here.
+    appState.exprListApi?.syncAllParamSliders?.();
   }
 
   $effect(() => {
