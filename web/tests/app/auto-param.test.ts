@@ -97,13 +97,44 @@ export async function run() {
       },
     },
     {
-      name: "disabled field row does not reference free params",
+      name: "disabled field row does not auto-create param rows",
       fn: () => {
         resetScene();
         setExpressions([{ id: "e1", latex: "b x", enabled: false }]);
         compileAllExprs({ rebuildUi: false });
         assert(!paramRow("b"), "no auto row for disabled field");
-        assert(!collectParamReferences().has("b"), "b not referenced");
+        assert(collectParamReferences().has("b"), "hidden latex still references b");
+      },
+    },
+    {
+      name: "hiding field does not prune auto-param it still references",
+      fn: () => {
+        resetScene();
+        setExpressions([{ id: "e1", latex: "b x", enabled: true }]);
+        createParamRows(["b"]);
+        assert(!!paramRow("b"), "b exists");
+        updateExprSilent("e1", { enabled: false });
+        compileAllExprs({ rebuildUi: false });
+        assert(!!paramRow("b"), "b survives hide");
+        assert(paramRow("b")?.autoParam === true, "still ephemeral until commit");
+      },
+    },
+    {
+      name: "hiding field does not prune auto-params in its equation chain",
+      fn: () => {
+        resetScene();
+        setExpressions([
+          { id: "e1", latex: "a x", enabled: true },
+          { id: "e2", latex: "a=2 b", enabled: true, autoParam: true },
+        ]);
+        createParamRows(["b"]);
+        compileAllExprs({ rebuildUi: false });
+        assert(!!paramRow("a"), "a exists");
+        assert(!!paramRow("b"), "b exists");
+        updateExprSilent("e1", { enabled: false });
+        compileAllExprs({ rebuildUi: false });
+        assert(!!paramRow("a"), "driven a survives hide");
+        assert(!!paramRow("b"), "dep b survives after a leaves the visible scene");
       },
     },
     {

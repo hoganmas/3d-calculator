@@ -98,13 +98,15 @@ function listNonemptyExprs() {
   return listExpressions().filter((e) => String(e.latex || "").trim());
 }
 
-/** Names referenced by field free-symbols or parameter RHS deps. */
+/**
+ * Names referenced by field free-symbols or parameter RHS deps.
+ * Hidden rows still count: visibility only skips rendering, not latex references.
+ */
 export function collectParamReferences() {
   const allItems = listNonemptyExprs();
-  const enabledItems = allItems.filter((e) => e.enabled);
   const { registry } = buildSymbolRegistry(allItems);
   const refs = new Set<string>();
-  for (const item of enabledItems) {
+  for (const item of allItems) {
     try {
       const classified = classifyExpr(item.latex);
       if (classified.kind === "parameter") {

@@ -38,6 +38,7 @@ import {
 import {
   getParamValues,
   collectAnimDirtyParams,
+  collectValueDirtyParams,
 } from "../model/params.js";
 import {
   isClipGpuUploadReady,
@@ -109,6 +110,9 @@ interface CachedLayer {
 
 /** Last successful dens/keyframe fingerprint per layer id (decoupled invalidation). */
 const layerBakeFingerprints = new Map<string, string>();
+
+/** Param values baked into `lastSceneBake` dens, for static slider dirty tracking. */
+let lastBakedParamValues: Record<string, number> = {};
 
 /** Drop bake fingerprint so the next fit sees content dirtiness (latex/role edits). */
 export function invalidateLayerBakeFingerprint(layerId: string) {
@@ -277,6 +281,7 @@ export function uploadFit(
     if (!layers.length) {
       syncKeyframeScene();
       layerBakeFingerprints.clear();
+      lastBakedParamValues = {};
       state.lastSceneBake = { cloudLayers: [], isosurfaceLayers: [], flowLayers: [], M: Math.max(2, deg + 1), dens: null };
       state.lastFitTiming = null;
       state.lastNCoeff = 0;
@@ -318,8 +323,12 @@ export function uploadFit(
 
     // Anim ticks: only refit layers that depend on dirty params; reuse the rest.
     // Structural refits: reuse per-expression when latex/role/deg/half unchanged.
+    // Static slider edits: value-dirty params must refit even though field latex is unchanged.
     // Dirty layers with exactly one animating slider: GPU keyframe blend (iso) / CPU lerp (dens).
-    const dirty = fromAnim ? collectAnimDirtyParams() : null;
+    const dirty = collectValueDirtyParams(lastBakedParamValues, getParamValues());
+    if (fromAnim) {
+      for (const name of collectAnimDirtyParams()) dirty.add(name);
+    }
     syncKeyframeScene();
     if (fromAnim) beginKeyframePass();
 
@@ -366,14 +375,11 @@ export function uploadFit(
       const { color, color2, colors } = layerRgbFromItem(L.item);
       const fp = layerBakeFingerprint(L, uiDeg, half);
       const paramDepends =
-        !!dirty &&
-        (L.role === "flow"
+        L.role === "flow"
           ? L.vectorCompiled!.freeParams.some((p) => dirty.has(p))
-          : L.compiled!.freeParams.some((p) => dirty.has(p)));
-      // Structural: dirty when fingerprint changed. Anim: dirty when params depend.
-      // Content dirtiness must still force a refit during anim — otherwise latex edits
-      // on layers unrelated to the animating param(s) reuse stale dens forever
-      // (anim ticks also cancel the scheduled structural uploadFit).
+          : L.compiled!.freeParams.some((p) => dirty.has(p));
+      // Structural: dirty when fingerprint changed. Param value changes (static
+      // slider or anim tick) refit dependent layers even when latex is unchanged.
       const contentDirty = layerBakeFingerprints.get(L.item.id) !== fp;
       const depends = layerNeedsRefit(fromAnim, contentDirty, paramDepends);
       const prev = sceneMetaOk && !depends ? prevById.get(L.item.id) : null;
@@ -935,6 +941,7 @@ export function uploadFit(
     state.clipDirty = true;
 
     tryMarkSplashBakeReady(layers.length > 0);
+    lastBakedParamValues = { ...baseParams };
     startupEnd("uploadFit", { uploadMs: Math.round((performance.now() - tUpload) * 10) / 10 });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
