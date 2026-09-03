@@ -443,6 +443,19 @@ export interface KeyframeLoadSummary {
   label: string;
 }
 
+/**
+ * Relative cost of baking one ladder rung. Sampling and the separable IDCT
+ * transform (chebLobatto.ts) both run over an (deg+1)^3 grid, so rungs near
+ * the target (ladder doubles each step) dominate wall-clock time even though
+ * they're a small fraction of the rung *count* — weight by grid size instead
+ * of by rung index, or the bar sprints through cheap early rungs and crawls
+ * the expensive final ones.
+ */
+function rungCost(deg: number): number {
+  const m = deg + 1;
+  return m * m * m;
+}
+
 function slotLoadFraction(cache: LayerKeyframeCache, k: number): number {
   const target = cache.targetDeg;
   if (target <= 0) return 1;
@@ -450,12 +463,14 @@ function slotLoadFraction(cache: LayerKeyframeCache, k: number): number {
   if (d >= target) return 1;
   if (d <= 0) return 0;
   const ladder = lobattoLadderDegrees(target);
-  let rung = -1;
-  for (let i = 0; i < ladder.length; i++) {
-    if (d >= ladder[i]!) rung = i;
+  let totalCost = 0;
+  let doneCost = 0;
+  for (const deg of ladder) {
+    const cost = rungCost(deg);
+    totalCost += cost;
+    if (d >= deg) doneCost += cost;
   }
-  if (rung < 0) return 0;
-  return (rung + 1) / ladder.length;
+  return totalCost > 0 ? doneCost / totalCost : 0;
 }
 
 /** Aggregate animation keyframe load for UI progress bars. */
