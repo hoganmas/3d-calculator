@@ -1,5 +1,7 @@
 import { bootQualityForTier, detectDeviceTier, type DeviceTier } from "./deviceTier.js";
+import { els } from "./dom.js";
 import { setPanelCollapsed } from "./panelLayout.js";
+import { markMarchDirty } from "./presentation.js";
 import { applyQualityFromState, isProdUi, syncQualitySliderDom } from "./quality.js";
 import { state } from "./state.js";
 import {
@@ -43,6 +45,20 @@ export function applyBootPerfTier(restoredDocument: boolean) {
   state.surfaceQuality = preset.surfaceQuality;
   state.vectorQuality = preset.vectorQuality;
   applyQualityFromState({ refit: false });
+
+  // Downscale overrides apply after quality so they don't perturb the
+  // quality-derived step counts (scalarQuality/surfaceQuality also drive
+  // volumeSteps/isoSteps — see BootQualityPreset).
+  let overrode = false;
+  if (preset.marchDownscaleOverride != null) {
+    els.marchDownscale.value = String(preset.marchDownscaleOverride);
+    overrode = true;
+  }
+  if (preset.isoMarchDownscaleOverride != null && els.isoMarchDownscale) {
+    els.isoMarchDownscale.value = String(preset.isoMarchDownscaleOverride);
+    overrode = true;
+  }
+  if (overrode) markMarchDirty();
 }
 
 function maybeAutoCollapsePanel() {

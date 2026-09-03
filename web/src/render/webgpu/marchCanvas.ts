@@ -185,6 +185,23 @@ export function ensureIsoMidTargets(w: number, h: number): void {
   ensureIsoMidColorTex(w, h);
 }
 
+/** Beer remarch target matching the 4× mid iso G-buffer. */
+export function ensureVolMidColorTex(w: number, h: number): void {
+  if (gpu.volMidColorTex && gpu.volMidW === w && gpu.volMidH === h) return;
+  destroyTexture(gpu.volMidColorTex);
+  gpu.volMidColorTex = null;
+  gpu.volMidW = 0;
+  gpu.volMidH = 0;
+  if (!gpu.device) return;
+  gpu.volMidColorTex = gpu.device.createTexture({
+    size: [w, h],
+    format: gpu.canvasFormat,
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+  });
+  gpu.volMidW = w;
+  gpu.volMidH = h;
+}
+
 /** Beer / volume targets at scalar-quality resolution (may differ from iso). */
 export function ensureVolumeTargets(w: number, h: number): void {
   ensureVolColorTex(w, h);

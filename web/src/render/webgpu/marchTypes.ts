@@ -66,6 +66,7 @@ export interface MarchGpuHandles {
   isoRefinePipeline: GPURenderPipeline;
   isoUpsamplePipeline: GPURenderPipeline;
   beerPipeline: GPURenderPipeline;
+  beerRefinePipeline: GPURenderPipeline;
   fxaaPipeline: GPURenderPipeline;
   gridPipeline: GPURenderPipeline;
   drawParamBuf: GPUBuffer;
@@ -101,8 +102,9 @@ export function acquireMarchGpuHandles(): MarchGpuHandles | null {
     !isClipBakeGpuReady() || !gpu.ctx || !gpu.volumeBuf || !gpu.colorBuf ||
     !gpu.fxaaParamBuf || !gpu.fxaaSampler || !gpu.gridParamBuf ||
     !gpu.device || !gpu.isoPipeline || !gpu.isoRefinePipeline || !gpu.isoUpsamplePipeline ||
-    !gpu.beerPipeline ||
-    !gpu.fxaaPipeline || !gpu.blitPipeline || !gpu.blitSampler || !gpu.gridPipeline ||
+    !gpu.beerPipeline || !gpu.beerRefinePipeline ||
+    !gpu.fxaaPipeline || !gpu.blitPipeline || !gpu.blitMidPipeline ||
+    !gpu.blitSampler || !gpu.blitSamplerNearest || !gpu.gridPipeline ||
     !gpu.drawParamBuf || !gpu.drawParamBufBeer || !gpu.drawParamBufRefine || !gpu.isoUpsampleParamBuf
   ) {
     return null;
@@ -125,6 +127,7 @@ export function acquireMarchGpuHandles(): MarchGpuHandles | null {
     isoRefinePipeline: gpu.isoRefinePipeline,
     isoUpsamplePipeline: gpu.isoUpsamplePipeline,
     beerPipeline: gpu.beerPipeline,
+    beerRefinePipeline: gpu.beerRefinePipeline,
     fxaaPipeline: gpu.fxaaPipeline,
     gridPipeline: gpu.gridPipeline,
     drawParamBuf: gpu.drawParamBuf,

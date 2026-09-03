@@ -85,6 +85,13 @@ export function packDrawParamsBeer(
   ro: number[],
   M: Float64Array | Float32Array | number[],
   flowLayerStart: number = -1,
+  /** isoRefineDebug tint: 0 = off, 1 = cheap, 2 = mid, 3 = final beer tier. */
+  debugTier: number = 0,
+  /** Should this pass's fsRefine also claim box-silhouette pixels? Only the
+   *  final pass does — the mid composite always defers them to final rather
+   *  than ever keeping mid's answer, so mid claiming them would be wasted
+   *  work (and previously double-composited with the cheap layer). */
+  nearEdgeActive: number = 1,
 ): ArrayBuffer {
   const u32 = beerDrawParamU32;
   const f32 = beerDrawParamF32;
@@ -96,6 +103,8 @@ export function packDrawParamsBeer(
   f32[16] = M[3]; f32[17] = M[4]; f32[18] = M[5];
   f32[20] = M[6]; f32[21] = M[7]; f32[22] = M[8];
   f32[24] = flowLayerStart;
+  f32[25] = debugTier;
+  f32[26] = nearEdgeActive;
   const volN = gridM * gridM * gridM;
   for (let L = 0; L < MAX_DENS_LAYERS; L++) {
     const d = gpu.densLayers[L];
