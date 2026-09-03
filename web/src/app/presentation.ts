@@ -269,14 +269,24 @@ export function resize() {
   resizeClipGpuCanvas(vw, vh);
 }
 
-export function syncClipPresentation() {
+/**
+ * @param liveGpuPath When supplied (the render loop passes its already-computed
+ * per-frame `useGpuClipPath()` result), the WebGL fallback's visibility flags
+ * are derived from that exact value instead of a fresh call — so they can
+ * never lag a frame behind the live check `drawClipGpuFrame` uses to decide
+ * whether to draw the WebGPU grid/label overlay. A stale cached `false` here
+ * while the WebGPU path was already live drawing its own grid+labels was
+ * causing both to render at once (doubled axes/gridlines on mobile, where
+ * the async pipeline-ready → resync events land less predictably).
+ */
+export function syncClipPresentation(liveGpuPath?: boolean) {
   const hasVolume = hasUploadedVolume() || Boolean(
     state.lastSceneBake &&
       (state.lastSceneBake.cloudLayers.length ||
         state.lastSceneBake.isosurfaceLayers.length ||
         (state.lastSceneBake.flowLayers?.length ?? 0) > 0),
   );
-  const gpu = useGpuClipPath() && hasVolume;
+  const gpu = (liveGpuPath ?? useGpuClipPath()) && hasVolume;
   clipQuad.visible = !gpu && hasVolume && Boolean(state.worldCheb);
   // Grid/box/labels depth-test on the WebGPU overlay; WebGL fallback keeps
   // labels on a higher canvas (isos don't write depth there).

@@ -1,6 +1,12 @@
 import type { DeviceTier } from "./deviceTier.js";
 
-/** Lava skybox on the GPU iso path — phones share one GPU with WebGPU. */
+/**
+ * Lava skybox on the GPU iso path — phones share one GPU with WebGPU.
+ * Confirmed the throttle itself (background lagging the every-rAF WebGPU
+ * foreground) was the source of "camera jitters as rotation slows" on
+ * mobile. Kept throttled for the GPU-sharing win; loop.ts now reprojects the
+ * frozen frame via CSS transform between real renders to close the gap.
+ */
 export const GPU_PATH_LAVA_INTERVAL_MOBILE_MS = 50;
 export const GPU_PATH_LAVA_INTERVAL_TABLET_MS = 33;
 

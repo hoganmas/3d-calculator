@@ -12,8 +12,10 @@ import {
   getParam,
 } from "../model/params.js";
 import { updateExprSilent } from "../model/expressions.js";
+import { Vector3 } from "three";
 import { els, viewportSize } from "./dom.js";
 import { state, ANIM_FIT_MIN_MS } from "./state.js";
+import { syncClipPresentation } from "./presentation.js";
 import {
   renderer,
   labelRenderer,
@@ -50,6 +52,42 @@ let splashFrameReported = false;
 let lastThreeJsPresentAt = 0;
 let lastThreeJsFbW = 0;
 let lastThreeJsFbH = 0;
+
+// Approximate skybox reprojection between throttled lava re-renders (mobile
+// GPU iso path): the camera keeps updating every rAF, but the lava shader is
+// only re-run every ~50ms to share the GPU with WebGPU. Left alone, the
+// frozen lava frame visibly lags the every-rAF WebGPU foreground — most
+// noticeable as rotation slows, since the same fixed lag is a bigger fraction
+// of the (now smaller) per-frame motion. Since the skybox is a huge sphere
+// re-centered on the camera each real render (background.ts), its on-screen
+// pattern depends only on camera *orientation*, so panning the frozen canvas
+// by the camera's angular delta since that render is a good approximation
+// for the small deltas involved. Applied via CSS transform on the canvas,
+// never on `rendererInputSurface` (scene.ts) — OrbitControls reads that
+// element's untransformed rect for touch math.
+const lastLavaRight = new Vector3(1, 0, 0);
+const lastLavaUp = new Vector3(0, 1, 0);
+const _basisScratch = new Vector3();
+const _curForward = new Vector3();
+
+function snapshotLavaOrientation(): void {
+  camera.matrixWorld.extractBasis(lastLavaRight, lastLavaUp, _basisScratch);
+}
+
+function applyLavaReprojection(): void {
+  camera.getWorldDirection(_curForward);
+  const dx = _curForward.dot(lastLavaRight);
+  const dy = _curForward.dot(lastLavaUp);
+  const { vw, vh } = viewportSize();
+  if (vw <= 0 || vh <= 0) return;
+  const vFov = (camera.fov * Math.PI) / 180;
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+  const pxPerRadX = vw / (2 * Math.tan(hFov / 2));
+  const pxPerRadY = vh / (2 * Math.tan(vFov / 2));
+  const tx = -dx * pxPerRadX;
+  const ty = dy * pxPerRadY;
+  renderer.domElement.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px)`;
+}
 
 function reportSplashFrameReady() {
   if (splashFrameReported) return;
@@ -132,15 +170,19 @@ function presentThreeJs(now: number, gpuPath: boolean) {
   const h = renderer.domElement.height;
   const resized = w !== lastThreeJsFbW || h !== lastThreeJsFbH;
   const interval = threeJsPresentIntervalMs(state.deviceTier, gpuPath);
-  if (!resized && !shouldPresentThreeJs(now, lastThreeJsPresentAt, interval)) return;
-
-  lavaBg.setTime(now / 1000);
-  lavaBg.syncCamera(camera);
-  renderer.autoClear = true;
-  renderer.render(scene, camera);
-  lastThreeJsPresentAt = now;
-  lastThreeJsFbW = w;
-  lastThreeJsFbH = h;
+  if (resized || shouldPresentThreeJs(now, lastThreeJsPresentAt, interval)) {
+    lavaBg.setTime(now / 1000);
+    lavaBg.syncCamera(camera);
+    renderer.autoClear = true;
+    renderer.render(scene, camera);
+    lastThreeJsPresentAt = now;
+    lastThreeJsFbW = w;
+    lastThreeJsFbH = h;
+    if (renderer.domElement.style.transform) renderer.domElement.style.transform = "";
+    if (interval > 0) snapshotLavaOrientation();
+    return;
+  }
+  if (interval > 0) applyLavaReprojection();
 }
 
 function presentGpuClip(gpuPath: boolean) {
@@ -173,6 +215,12 @@ function frame(rafNow: number) {
   clipUniforms.uCameraPos.value.copy(camera.position);
 
   const gpuPath = useGpuClipPath();
+  // Re-derive the WebGL fallback's grid/label/box visibility from this exact
+  // per-frame value every frame, not just on scene-bake events — otherwise
+  // the cached flags can lag the live check `drawClipGpuFrame` uses below,
+  // and both paths draw the axes/grid at once (worse on mobile, where the
+  // pipeline-ready → resync events land less predictably).
+  syncClipPresentation(gpuPath);
   if (!gpuPath) {
     syncClipCpuVolume();
   }
