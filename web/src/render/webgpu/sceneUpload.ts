@@ -225,6 +225,7 @@ export function uploadSceneVolumes(scene: SceneUploadPayload | null): SceneUploa
   writeLayerColors(gpu.device, gpu.colorBuf, gpu.densGradStops);
 
   gpu.profileBakeMs = gpu.profileBakeMs * 0.5 + (performance.now() - t0) * 0.5;
+  gpu.profileBakeAt = performance.now();
   gpu.profileGridM = M;
 
   if (flow.length > 0) {

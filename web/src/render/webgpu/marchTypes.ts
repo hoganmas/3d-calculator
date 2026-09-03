@@ -14,10 +14,23 @@ export interface ClipGpuTheme {
 }
 
 export interface ClipGpuProfile {
-  idctMs: number;
+  /** Scene-volume repack + GPU upload time (uploadSceneVolumes) — NOT a per-frame IDCT cost. Only updates when a real upload runs (M-change/ladder-promote/rebind), so check sceneUploadAt before reading this as "current". */
+  sceneUploadMs: number;
+  /** performance.now() when sceneUploadMs was last updated. */
+  sceneUploadAt: number;
+  /** iso/march stage only. */
   marchMs: number;
+  /** Beer/volume compositing stage. */
+  beerMs: number;
+  /** Flow particles stage. */
+  flowMs: number;
+  /** FXAA stage. */
+  fxaaMs: number;
+  /** Grid overlay stage — previously untimestamped entirely. */
+  gridMs: number;
   marchFbW: number;
   marchFbH: number;
+  /** Total measured GPU work this frame (begin → end of grid). Compare against gpu_present_iv in the HUD — the gap is present/vsync/compositor overhead outside these timestamps. */
   presentWallMs: number;
   presentIntervalMs: number;
   lastPresentAt: number;

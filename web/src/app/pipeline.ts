@@ -818,6 +818,7 @@ export function uploadFit(
       kfChebMs: kf.stages?.chebMs,
       kfIdctMs: kf.stages?.idctMs,
       kfGradMs: kf.stages?.gradMs,
+      capturedAt: performance.now(),
     };
     if (keyframeBaked) {
       logKeyframeBake(fromAnim ? "play/anim" : "bake");

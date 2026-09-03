@@ -25,8 +25,14 @@ import {
   endGpuFrame,
   gpuWriteBuffer,
   sampleGpuPresent,
+  stampCheckpoint,
   submitEnc,
   withStampWrites,
+  STAMP_END_MARCH,
+  STAMP_END_BEER,
+  STAMP_END_FLOW,
+  STAMP_END_FXAA,
+  STAMP_END_GRID,
 } from "./gpuSubmit.js";
 import { hasFlowGpuLayers } from "./flowGpu.js";
 import {
@@ -736,7 +742,6 @@ function drawFxaaPass(
   handles: MarchGpuHandles,
   sceneView: GPUTextureView,
   swapTex: GPUTexture,
-  stampEnd: boolean,
 ): void {
   const { device, fxaaPipeline, fxaaParamBuf, fxaaSampler } = handles;
   const destW = Math.max(1, swapTex.width);
@@ -760,7 +765,7 @@ function drawFxaaPass(
       storeOp: "store",
     }],
   };
-  const pass = enc.beginRenderPass(stampEnd ? withStampWrites(passDesc, "end") : passDesc);
+  const pass = enc.beginRenderPass(withStampWrites(passDesc, STAMP_END_FXAA));
   pass.setPipeline(fxaaPipeline);
   pass.setBindGroup(0, bg);
   setPassViewport(pass, destW, destH);
@@ -921,6 +926,7 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
   }
 
   const sceneView = targets.sceneColorTex.createView();
+  stampCheckpoint(device, sceneView, STAMP_END_MARCH);
   const presentW = targets.sceneColorTex.width;
   const presentH = targets.sceneColorTex.height;
 
@@ -1038,6 +1044,7 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
       }
     }
   }
+  stampCheckpoint(device, sceneView, STAMP_END_BEER);
 
   const ranFlow = hasFlowGpuLayers();
   if (ranFlow) {
@@ -1058,6 +1065,7 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
       presentH,
     );
   }
+  stampCheckpoint(device, sceneView, STAMP_END_FLOW);
 
   const occlForGrid = ranBeer
     ? targets.occlSurfTex.createView()
@@ -1067,12 +1075,13 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
   // Occlusion still samples the compose-sized depth; grid.wgsl maps display
   // clip → occl texels with dims/fbW. Drawing lines into the 2× compose
   // buffer made axes look like fat pixel art after FXAA upsample.
-  drawFxaaPass(handles, sceneView, swapTex, true);
+  drawFxaaPass(handles, sceneView, swapTex);
   if (ranGrid) {
     drawGridOverlay(
       handles, occlForGrid, camera, swapTex.createView(), half, dirMatrix, ro, outW, outH,
     );
   }
+  stampCheckpoint(device, swapTex.createView(), STAMP_END_GRID);
 
   const method: string[] = [
     refinePath === "mid" ? "gpu-iso-refine-mid" : refine ? "gpu-iso-refine" : "gpu-iso",
