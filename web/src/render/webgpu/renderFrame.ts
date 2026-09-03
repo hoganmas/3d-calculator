@@ -593,6 +593,7 @@ function drawBeerPass(
       ro,
       dirMatrix,
       gpu.flowLayerStart,
+      isIsoRefineDebugEnabled() ? 1 : 0,
     ),
   );
   const bg = device.createBindGroup({
@@ -632,6 +633,7 @@ function compositeVolumeOntoScene(
   occTex: GPUTexture,
   sampler: GPUSampler | null = gpu.blitSampler,
   pipeline: GPURenderPipeline | null = gpu.blitPipeline,
+  beerBoxBuf: GPUBuffer | null = handles.drawParamBufBeer,
 ): void {
   if (!pipeline) return;
   const { device } = handles;
@@ -640,9 +642,13 @@ function compositeVolumeOntoScene(
     { binding: 2, resource: texView(targets.occlIsoTex) },
     { binding: 3, resource: texView(occTex) },
   ];
-  // fsMainSwap (TEMP DIAGNOSTIC pipeline) does a manual textureLoad-based
-  // bilinear and never touches srcSamp, so its auto layout has no binding 1.
+  // fsMainSwap (mid-cascade pipeline) does a manual textureLoad-based
+  // bilinear and never touches srcSamp/beerBox, so its auto layout omits
+  // bindings 1 and 4. beerBoxBuf must already hold this draw's ro/half/M
+  // (drawBeerPass writes it right before this call) — fsMain reads it to
+  // recompute the exact box-silhouette test at compose resolution.
   if (sampler) entries.push({ binding: 1, resource: sampler });
+  if (beerBoxBuf) entries.push({ binding: 4, resource: { buffer: beerBoxBuf } });
   const bg = device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
     entries,
@@ -678,6 +684,9 @@ function drawBeerRefine(
   scale: number,
   ro: [number, number, number],
   dirMatrix: ReturnType<typeof offsetDirMatrix>,
+  debugTier: number,
+  nearEdgeActive: boolean,
+  dilateNdc: number,
 ): void {
   const { device, beerRefinePipeline, drawParamBufBeer, volumeBuf, colorBuf } = handles;
   gpuWriteBuffer(
@@ -686,6 +695,9 @@ function drawBeerRefine(
     packDrawParamsBeer(
       destW, destH, Mgrid, steps, half, scale,
       gpu.densBase, gpu.densLayerCount, ro, dirMatrix, gpu.flowLayerStart,
+      isIsoRefineDebugEnabled() ? debugTier : 0,
+      nearEdgeActive ? 1 : 0,
+      dilateNdc,
     ),
   );
   const bg = device.createBindGroup({
@@ -958,27 +970,41 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
       const punchOcc = (midBeer ? coarseOcc : (midOcc || coarseOcc)) || targets.occlIsoTex;
       compositeVolumeOntoScene(handles, targets, sceneView, targets.volColorTex, punchOcc);
       if (midBeer && midBeerTex && midOcc && coarseOcc) {
+        // Half this pass's own NDC pixel width: dilates the near-edge test
+        // across its own footprint instead of just its (coarser) center, so
+        // it's a safe superset of the compose-resolution grid — not a fixed
+        // margin guess, so it holds regardless of camera zoom/distance.
         drawBeerRefine(
           handles, texView(midBeerTex), gpu.volMidW, gpu.volMidH,
           midOcc, coarseOcc, "clear",
-          Mgrid, volumeSteps, half, scale, ro, dirMatrix,
+          Mgrid, volumeSteps, half, scale, ro, dirMatrix, 2, true,
+          1 / Math.max(1, gpu.volMidW),
         );
-        // TEMP DIAGNOSTIC: fsMainSwap does a manual bilinear with diagonally
-        // swapped corners (testing a reported corner-swap in this mid-tier
-        // upscale), falling back to nearest at the shaded/cleared boundary
-        // (same reason the nearest sampler was used before: midBeerTex is
+        // fsMainSwap does a manual bilinear, falling back to the true
+        // nearest corner at the shaded/cleared boundary (midBeerTex is
         // cleared to (0,0,0,0) outside the coarse-mixed tiles it shaded, and
         // blending real color with hard zero there thins alpha into a ring).
+        // It also defers box-silhouette pixels to the final tier instead of
+        // compositing mid's 4× answer for them, so edges reach full compose
+        // resolution — beerBoxBuf (ro/half/M) lets it recompute that test;
+        // drawBeerRefine just wrote this frame's values into the same buffer.
         compositeVolumeOntoScene(
-          handles, targets, sceneView, midBeerTex, midOcc, null, gpu.blitMidPipeline,
+          handles, targets, sceneView, midBeerTex, midOcc,
+          null, gpu.blitMidPipeline, handles.drawParamBufBeer,
         );
       }
       if (gpu.sceneConstraints.length > 0) {
         const fineOcc = midOcc || coarseOcc || targets.occlIsoTex;
+        // Near-edge is always active here now: when a mid tier ran, its own
+        // composite mask (fsMainSwap above) already deferred exactly the
+        // silhouette pixels to us — using the same undilated test we use
+        // below — so there's no overlap. Without a mid tier, we're the only
+        // finer pass and must claim them ourselves.
         drawBeerRefine(
           handles, sceneView, presentW, presentH,
           targets.occlIsoTex, fineOcc, "load",
-          Mgrid, volumeSteps, half, scale, ro, dirMatrix,
+          Mgrid, volumeSteps, half, scale, ro, dirMatrix, 3, true,
+          0,
         );
       }
     }

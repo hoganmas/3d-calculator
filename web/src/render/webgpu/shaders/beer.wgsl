@@ -13,9 +13,9 @@ struct DrawParams {
   m1: vec4f,
   m2: vec4f,
   flowLayerStart: f32,
-  _p2: f32,
-  _p3: f32,
-  _p4: f32,
+  debugTier: f32,
+  nearEdgeActive: f32,
+  dilateNdc: f32,
   densBlend: array<vec4f, 8>,
   densT: array<vec4f, 2>,
 }
@@ -53,6 +53,14 @@ struct FSOut {
 }
 
 const OCCL_ALPHA: f32 = 0.15;
+
+/** isoRefineDebug tint: keep the sample's luminance, swap in a tier color. */
+fn beerDebugTint(c: vec4f, rgb: vec3f) -> vec4f {
+  if (c.a < 0.001) { return c; }
+  let lin = c.rgb / max(c.a, 1e-4);
+  let lum = clamp(dot(lin, vec3f(0.299, 0.587, 0.114)), 0.08, 1.0);
+  return vec4f(rgb * lum * c.a, c.a);
+}
 
 @vertex
 fn vsMain(@builtin(vertex_index) vi: u32) -> VSOut {
@@ -160,6 +168,81 @@ fn isoOcclusionForVolumePixel(pos: vec2f, fbW: f32, fbH: f32) -> f32 {
   return dMin;
 }
 
+// Box-path fraction (of one edge length) below which a ray counts as
+// "grazing" the box — near the silhouette, regardless of which face/edge.
+const BEER_NEAR_EDGE_PATH_FRAC: f32 = 0.12;
+// Box scaled up by this fraction when checking for near-misses just outside
+// the true bounds — a ray that only clips the expanded box is treated the
+// same as a grazing hit (path length 0 < the threshold above).
+const BEER_NEAR_EDGE_MISS_MARGIN: f32 = 0.08;
+
+/**
+ * True near the box's screen-space silhouette. A grazing ray — one whose
+ * path through the box is short relative to the box's own edge length —
+ * naturally covers the whole silhouette outline (any face, any angle), not
+ * just literal 3D edges: cross a single face at a shallow angle and the
+ * path is short too. A ray that misses the true box but clips a slightly
+ * expanded one counts as well (path length 0), covering pixels just outside
+ * the bounds. Cheap/downres beer marches alias most in this region (a thin,
+ * grazing cross-section of the box, or the abrupt cutoff at its edge), so
+ * treat it like a coarse-mixed tile and force the finer beer tiers.
+ */
+fn beerNearBoxEdgeAtNdc(ndcX: f32, ndcY: f32) -> bool {
+  let xy1 = vec3f(ndcX, ndcY, 1.0);
+  let rd = vec3f(dot(draw.m0.xyz, xy1), dot(draw.m1.xyz, xy1), dot(draw.m2.xyz, xy1));
+  let ro = draw.ro; let half = max(draw.half, 1e-6);
+  let invRd = vec3f(
+    select(1e15, 1.0 / rd.x, abs(rd.x) >= 1e-15),
+    select(1e15, 1.0 / rd.y, abs(rd.y) >= 1e-15),
+    select(1e15, 1.0 / rd.z, abs(rd.z) >= 1e-15),
+  );
+  let halfExp = half * (1.0 + BEER_NEAR_EDGE_MISS_MARGIN);
+  let tAExp = (-vec3f(halfExp) - ro) * invRd;
+  let tBExp = (vec3f(halfExp) - ro) * invRd;
+  let tminExp = min(tAExp, tBExp); let tmaxExp = max(tAExp, tBExp);
+  let tEnterExp = max(max(max(tminExp.x, tminExp.y), tminExp.z), 0.0);
+  let tExitExp = min(min(tmaxExp.x, tmaxExp.y), tmaxExp.z);
+  // Doesn't even clip the expanded box — nowhere near the bounds.
+  if (!(tExitExp > tEnterExp + 1e-6)) { return false; }
+  let tA = (-vec3f(half) - ro) * invRd;
+  let tB = (vec3f(half) - ro) * invRd;
+  let tmin = min(tA, tB); let tmax = max(tA, tB);
+  let tEnter = max(max(max(tmin.x, tmin.y), tmin.z), 0.0);
+  let tExit = min(min(tmax.x, tmax.y), tmax.z);
+  let pathLen = max(0.0, tExit - tEnter); // 0 when the true box is missed
+  return pathLen < BEER_NEAR_EDGE_PATH_FRAC * (2.0 * half);
+}
+
+/**
+ * dilateNdc = 0: single sample at this pixel's own center (matches
+ * blit.wgsl's blitNearBoxEdge and the final beer tier exactly — both
+ * evaluate at compose resolution, so there's nothing coarser to disagree
+ * with; dilating here would claim pixels the cheap layer didn't defer,
+ * double-compositing them).
+ *
+ * dilateNdc > 0: OR the test across this pixel's own screen footprint
+ * (center + 4 corners, ±dilateNdc in NDC) instead of just its center. NDC
+ * space is shared across every resolution, so passing half this pixel's own
+ * NDC width guarantees the result is a safe superset of whatever a finer
+ * grid (e.g. the compose-resolution cheap-layer punch decision) would find
+ * anywhere within this pixel's footprint — unlike a fixed box-space margin,
+ * which doesn't scale with the actual resolution ratio or camera distance.
+ * Used by the mid beer tier, whose own pixel grid is coarser than compose.
+ */
+fn beerNearBoxEdge(pos: vec2f, fbW: f32, fbH: f32, dilateNdc: f32) -> bool {
+  let ndcX = -1.0 + 2.0 * pos.x / fbW;
+  let ndcY = 1.0 - 2.0 * pos.y / fbH;
+  if (dilateNdc <= 0.0) {
+    return beerNearBoxEdgeAtNdc(ndcX, ndcY);
+  }
+  if (beerNearBoxEdgeAtNdc(ndcX, ndcY)) { return true; }
+  if (beerNearBoxEdgeAtNdc(ndcX - dilateNdc, ndcY - dilateNdc)) { return true; }
+  if (beerNearBoxEdgeAtNdc(ndcX + dilateNdc, ndcY - dilateNdc)) { return true; }
+  if (beerNearBoxEdgeAtNdc(ndcX - dilateNdc, ndcY + dilateNdc)) { return true; }
+  if (beerNearBoxEdgeAtNdc(ndcX + dilateNdc, ndcY + dilateNdc)) { return true; }
+  return false;
+}
+
 fn marchBeer(pos: vec2f) -> FSOut {
   var out: FSOut;
   out.occl = vec4f(1.0, 0.0, 0.0, 1.0);
@@ -265,6 +348,12 @@ fn marchBeer(pos: vec2f) -> FSOut {
     return out;
   }
   out.color = vec4f(rgb, a);
+  if (draw.debugTier > 0.5) {
+    var tint = vec3f(0.15, 0.82, 1.0); // cheap — cyan, matches iso's lo/mid tint
+    if (draw.debugTier > 2.5) { tint = vec3f(1.0, 0.25, 0.85); } // final — magenta
+    else if (draw.debugTier > 1.5) { tint = vec3f(1.0, 0.6, 0.1); } // mid — orange
+    out.color = beerDebugTint(out.color, tint);
+  }
   return out;
 }
 

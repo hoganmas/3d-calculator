@@ -10,6 +10,66 @@ struct VSOut {
 @group(0) @binding(2) var occlIsoTex: texture_2d<f32>;
 @group(0) @binding(3) var occTex: texture_2d<f32>;
 
+// Prefix of beer.wgsl's DrawParams (same buffer, same field offsets) — just
+// enough to recompute the ray/box test exactly. fsMain-only; fsMainSwap
+// doesn't reference it, so its auto layout omits binding 4.
+struct BeerBoxParams {
+  fbW: u32,
+  fbH: u32,
+  gridM: u32,
+  steps: u32,
+  half: f32,
+  scale: f32,
+  densBase: f32,
+  layerCount: u32,
+  ro: vec3f,
+  _p1: f32,
+  m0: vec4f,
+  m1: vec4f,
+  m2: vec4f,
+}
+@group(0) @binding(4) var<uniform> beerBox: BeerBoxParams;
+
+const BLIT_NEAR_EDGE_PATH_FRAC: f32 = 0.12;
+const BLIT_NEAR_EDGE_MISS_MARGIN: f32 = 0.08;
+
+/** Same test as beer.wgsl's beerNearBoxEdgeAtNdc, duplicated since blit.wgsl
+ *  isn't concatenated with beer.wgsl — evaluated here at compose
+ *  (destW/destH) resolution so it's phase-exact with the mid/final tiers'
+ *  own recompute of it (a smooth analytic ray/box test, not a quantized
+ *  texel lookup, so it classifies the same physical location identically at
+ *  any resolution). A grazing ray (short path through the box, any
+ *  face/edge) or a near-miss against a slightly expanded box both count —
+ *  see beer.wgsl's doc comment for why. Keep the two constants above in
+ *  sync with BEER_NEAR_EDGE_PATH_FRAC / BEER_NEAR_EDGE_MISS_MARGIN. */
+fn blitNearBoxEdge(pos: vec2f, fbW: f32, fbH: f32) -> bool {
+  let ndcX = -1.0 + 2.0 * pos.x / fbW;
+  let ndcY = 1.0 - 2.0 * pos.y / fbH;
+  let xy1 = vec3f(ndcX, ndcY, 1.0);
+  let rd = vec3f(dot(beerBox.m0.xyz, xy1), dot(beerBox.m1.xyz, xy1), dot(beerBox.m2.xyz, xy1));
+  let ro = beerBox.ro;
+  let half = max(beerBox.half, 1e-6);
+  let invRd = vec3f(
+    select(1e15, 1.0 / rd.x, abs(rd.x) >= 1e-15),
+    select(1e15, 1.0 / rd.y, abs(rd.y) >= 1e-15),
+    select(1e15, 1.0 / rd.z, abs(rd.z) >= 1e-15),
+  );
+  let halfExp = half * (1.0 + BLIT_NEAR_EDGE_MISS_MARGIN);
+  let tAExp = (-vec3f(halfExp) - ro) * invRd;
+  let tBExp = (vec3f(halfExp) - ro) * invRd;
+  let tminExp = min(tAExp, tBExp); let tmaxExp = max(tAExp, tBExp);
+  let tEnterExp = max(max(max(tminExp.x, tminExp.y), tminExp.z), 0.0);
+  let tExitExp = min(min(tmaxExp.x, tmaxExp.y), tmaxExp.z);
+  if (!(tExitExp > tEnterExp + 1e-6)) { return false; }
+  let tA = (-vec3f(half) - ro) * invRd;
+  let tB = (vec3f(half) - ro) * invRd;
+  let tmin = min(tA, tB); let tmax = max(tA, tB);
+  let tEnter = max(max(max(tmin.x, tmin.y), tmin.z), 0.0);
+  let tExit = min(min(tmax.x, tmax.y), tmax.z);
+  let pathLen = max(0.0, tExit - tEnter);
+  return pathLen < BLIT_NEAR_EDGE_PATH_FRAC * (2.0 * half);
+}
+
 @vertex
 fn vsMain(@builtin(vertex_index) vi: u32) -> VSOut {
   var p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
@@ -26,8 +86,11 @@ fn fsMain(in: VSOut) -> @location(0) vec4f {
   let destW = f32(isoDims.x);
   let destH = f32(isoDims.y);
   // Leave occupancy-refine tiles empty: the matching beer cascade remarchs
-  // them (16× mixed → 4× beer, 4× mixed → 1× beer).
-  if (isoNeedRefine(occTex, destW, destH, in.pos.xy)) {
+  // them (16× mixed → 4× beer, 4× mixed → 1× beer). Also defer box-silhouette
+  // pixels to the finer beer tiers — the cheap layer's downres march aliases
+  // most right at the box edge.
+  let nearEdge = blitNearBoxEdge(in.pos.xy, destW, destH);
+  if (nearEdge || isoNeedRefine(occTex, destW, destH, in.pos.xy)) {
     return vec4f(0.0);
   }
   return beer;
@@ -47,7 +110,14 @@ fn fsMainSwap(in: VSOut) -> @location(0) vec4f {
   let isoDims = textureDimensions(occlIsoTex);
   let destW = f32(isoDims.x);
   let destH = f32(isoDims.y);
-  if (isoNeedRefine(occTex, destW, destH, in.pos.xy)) {
+  // Defer box-silhouette pixels to the final (compose-res, highest-quality)
+  // tier instead of settling for the mid tier's 4× — same hand-off pattern
+  // as isoNeedRefine below: this uses the exact same undilated test the
+  // final pass's own gate uses, so the two are perfectly complementary (no
+  // gap, no double-composite) — mid still shaded a dilated cushion around
+  // this via beerNearBoxEdge, so pixels just outside this exact boundary
+  // still get composited from mid below.
+  if (blitNearBoxEdge(in.pos.xy, destW, destH) || isoNeedRefine(occTex, destW, destH, in.pos.xy)) {
     return vec4f(0.0);
   }
   let srcDims = vec2f(textureDimensions(srcTex));
