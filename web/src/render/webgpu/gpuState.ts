@@ -44,7 +44,10 @@ export interface GpuState {
   isoRefinePipeline: GPURenderPipeline | null;
   isoUpsamplePipeline: GPURenderPipeline | null;
   beerPipeline: GPURenderPipeline | null;
+  beerRefinePipeline: GPURenderPipeline | null;
   blitPipeline: GPURenderPipeline | null;
+  /** TEMP DIAGNOSTIC: blit.wgsl's fsMainSwap entry point (mid-cascade corner-swap test). */
+  blitMidPipeline: GPURenderPipeline | null;
   fxaaPipeline: GPURenderPipeline | null;
   gridPipeline: GPURenderPipeline | null;
   gridParamBuf: GPUBuffer | null;
@@ -102,8 +105,16 @@ export interface GpuState {
   volColorTex: GPUTexture | null;
   volColorW: number;
   volColorH: number;
+  /** Beer remarch at 4× mid iso size (coarse-mixed tiles). */
+  volMidColorTex: GPUTexture | null;
+  volMidW: number;
+  volMidH: number;
   fxaaSampler: GPUSampler | null;
   blitSampler: GPUSampler | null;
+  /** Nearest-filter blit sampler — for compositing textures with a hard-cleared
+   *  (transparent) exterior, where a linear filter would bleed real color into
+   *  the clear value right at the shaded/unshaded boundary. */
+  blitSamplerNearest: GPUSampler | null;
   sceneConstraints: GpuSceneConstraint[];
   densPacked: boolean;
   densGradStops: RgbTriplet[][];
@@ -125,9 +136,21 @@ export interface GpuState {
   /** At most one in-flight `onSubmittedWorkDone` sample (avoid per-frame GPU idle waits). */
   presentWorkSamplePending: boolean;
   profileBakeMs: number;
+  /** performance.now() when profileBakeMs was last updated — tells a live reading from a frozen one. */
+  profileBakeAt: number;
+  /** iso/march stage only (begin → end of the iso-refine-ladder / iso-constraints / clear branch). */
   profileMarchMs: number;
+  /** Beer/volume compositing stage (end of march → end of beer). */
+  profileBeerMs: number;
+  /** Flow particles stage (end of beer → end of flow). */
+  profileFlowMs: number;
+  /** FXAA stage (end of flow → end of fxaa). */
+  profileFxaaMs: number;
+  /** Grid overlay stage (end of fxaa → end of grid) — previously untimestamped entirely. */
+  profileGridMs: number;
   profileMarchFbW: number;
   profileMarchFbH: number;
+  /** Total measured GPU work this frame (begin → end of grid) — compare against gpu_present_iv; the gap is present/vsync/compositor overhead outside these timestamps. */
   profilePresentWallMs: number;
   profilePresentIntervalMs: number;
   lastPresentAt: number;
@@ -161,7 +184,9 @@ export const gpu: GpuState = {
   isoRefinePipeline: null,
   isoUpsamplePipeline: null,
   beerPipeline: null,
+  beerRefinePipeline: null,
   blitPipeline: null,
+  blitMidPipeline: null,
   fxaaPipeline: null,
   gridPipeline: null,
   gridParamBuf: null,
@@ -213,8 +238,12 @@ export const gpu: GpuState = {
   volColorTex: null,
   volColorW: 0,
   volColorH: 0,
+  volMidColorTex: null,
+  volMidW: 0,
+  volMidH: 0,
   fxaaSampler: null,
   blitSampler: null,
+  blitSamplerNearest: null,
   sceneConstraints: [],
   densPacked: false,
   densGradStops: [],
@@ -234,7 +263,12 @@ export const gpu: GpuState = {
   stampReadPending: false,
   presentWorkSamplePending: false,
   profileBakeMs: 0,
+  profileBakeAt: 0,
   profileMarchMs: 0,
+  profileBeerMs: 0,
+  profileFlowMs: 0,
+  profileFxaaMs: 0,
+  profileGridMs: 0,
   profileMarchFbW: 0,
   profileMarchFbH: 0,
   profilePresentWallMs: 0,
@@ -257,12 +291,14 @@ export const gpu: GpuState = {
   flowParticlesPerLayer: 0,
 };
 
-export const PIPELINE_EPOCH = 89;
+export const PIPELINE_EPOCH = 92;
 export const labelVertScratch = new Float32Array(18 * 6);
 
 export function resetPipelinesOnDeviceLost(): void {
   gpu.isoPipeline = gpu.isoRefinePipeline = gpu.isoUpsamplePipeline = gpu.beerPipeline = gpu.fxaaPipeline = null;
+  gpu.beerRefinePipeline = null;
   gpu.blitPipeline = null;
+  gpu.blitMidPipeline = null;
   gpu.gridPipeline = gpu.labelPipeline = null;
   gpu.flowParticlesPipeline = null;
   gpu.flowParticlesParamBuf = null;

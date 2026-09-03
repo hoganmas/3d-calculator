@@ -25,13 +25,20 @@
   let sliderEl: HTMLInputElement | undefined = $state();
   let trackEl: HTMLDivElement | undefined = $state();
   let zeroEl: HTMLSpanElement | undefined = $state();
+  // Only the pointer actually being down on the thumb should block live
+  // resync — gating on focus instead left the thumb frozen forever after a
+  // single click, since a range input keeps focus long after the pointer is
+  // released and nothing else ever blurred it. That looked like "jumping to
+  // a value stops the animation from visibly continuing," even though the
+  // underlying param kept animating the whole time.
+  let scrubbing = false;
 
   export function syncFromParam() {
     const p = getParam(paramName);
     if (!p) return;
     const min = p.min;
     const max = p.max;
-    if (sliderEl && document.activeElement !== sliderEl) {
+    if (sliderEl && !scrubbing) {
       sliderEl.min = String(min);
       sliderEl.max = String(max);
       sliderEl.step = p.animating && !p.driven ? "any" : String(p.step);
@@ -89,13 +96,24 @@
 
   function onSliderInput() {
     if (!sliderEl) return;
+    // Scrubbing the slider retargets the value but must not interrupt
+    // playback — setParamValue rebases phase so animation continues forward
+    // from the new position instead of snapping back on the next tick.
     const next = setParamValue(paramName, Number(sliderEl.value), {
-      stopAnim: true,
+      stopAnim: false,
       rewriteLatex: true,
     });
     if (!next) return;
     const mf = getMathField();
-    updateExprSilent(item.id, { latex: next.latex, sliderAnimating: false });
+    // sliderPhase must travel with sliderAnimating — compileAllExprs() rebuilds
+    // every param's phase from this stored field, so leaving it stale here
+    // clobbers the just-rebased in-memory phase right back on the next
+    // onParamChange-triggered resync, undoing setParamValue's rebase.
+    updateExprSilent(item.id, {
+      latex: next.latex,
+      sliderAnimating: next.animating,
+      sliderPhase: next.phase,
+    });
     if (mf && !isMathFieldFocused(mf)) {
       if (typeof mf.setValue === "function") {
         mf.setValue(next.latex, { silenceNotifications: true });
@@ -105,6 +123,15 @@
     }
     syncFromParam();
     onParamChange();
+  }
+
+  function onSliderPointerDown() {
+    scrubbing = true;
+  }
+
+  function onSliderPointerUp() {
+    scrubbing = false;
+    syncFromParam();
   }
 
   const p = $derived.by(() => {
@@ -132,6 +159,9 @@
           class="expr-param-slider"
           disabled={p.driven}
           oninput={onSliderInput}
+          onpointerdown={onSliderPointerDown}
+          onpointerup={onSliderPointerUp}
+          onpointercancel={onSliderPointerUp}
         />
       </div>
       <input

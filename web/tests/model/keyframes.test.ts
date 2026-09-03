@@ -395,24 +395,34 @@ export async function run() {
       },
     },
     {
-      name: "progressive: degree-first fills all slots before next rung",
+      name: "progressive: no two ready slots ever show different degrees",
       fn: async () => {
+        // Regression test for "graduate only once every keyframe at that
+        // quality level is ready": commitFrame stages every rung past a
+        // slot's first bake, and only promotes once every slot in the grid
+        // has it, so two baked slots should never be visible at different
+        // degrees mid-refinement (the "ladder hopping" symptom playing
+        // while generation is still in flight).
         clearKeyframeCaches();
         setupAnimParam("t", 0.5);
-        const opts = { ...keyframeOpts("layer-prog-phase", "t"), deg: 16, K: 3 };
-        let sawAllCoarse = false;
-        setKeyframeProgressHandler(() => {
-          const p = getKeyframeProgress("layer-prog-phase");
-          if (p?.frameDeg.every((d) => d === 4)) sawAllCoarse = true;
-        });
-        const result = ensureLayerKeyframes(opts);
-        const afterSync = getKeyframeProgress("layer-prog-phase")!;
-        const third = [0, 1, 2].find((k) => k !== result.blend.i0 && k !== result.blend.i1)!;
-        assert(afterSync.frameDeg[third] === 0, "third slot still empty after sync");
-        assert(afterSync.frameDeg[result.blend.i0] === 4, "blend coarse after sync");
-        await waitForComplete(20000);
-        assert(sawAllCoarse, "all slots reached deg 4 before advancing");
-        setKeyframeProgressHandler(null);
+        const opts = { ...keyframeOpts("layer-prog-phase", "t"), deg: 16, K: 5 };
+        ensureLayerKeyframes(opts);
+        const t0 = Date.now();
+        while (!allKeyframesComplete()) {
+          tickKeyframePump(1);
+          const p = getKeyframeProgress("layer-prog-phase")!;
+          const shown = new Set(p.displayDeg.filter((d) => d > 0));
+          assert(
+            shown.size <= 1,
+            `every baked slot should share one degree at a time, got displayDeg=${JSON.stringify(p.displayDeg)}`,
+          );
+          if (Date.now() - t0 > 20000) {
+            throw new Error(
+              `fill timed out:\n${JSON.stringify(diagnoseKeyframeCaches(), null, 2)}`,
+            );
+          }
+          await new Promise((r) => setTimeout(r, 0));
+        }
       },
     },
     {
@@ -509,6 +519,94 @@ export async function run() {
         const prog = getKeyframeProgress("layer-prog-lock")!;
         const { i0, i1 } = peekKeyframeBlend("layer-prog-lock")!;
         assert(prog.frameDeg[i0] === prog.frameDeg[i1], "lockstep during refine");
+      },
+    },
+    {
+      name: "progressive: every slot reaches target together, not one at a time",
+      fn: async () => {
+        clearKeyframeCaches();
+        setupAnimParam("t");
+        updateParam("t", { value: 0, min: 0, max: 1 });
+        const opts = { ...keyframeOpts("layer-play-coarse", "t"), deg: 16, K: 5 };
+        ensureLayerKeyframes(opts);
+        const t0 = Date.now();
+        while (!allKeyframesComplete()) {
+          tickKeyframePump(1);
+          const p = getKeyframeProgress("layer-play-coarse")!;
+          // Displayed degree only ever moves forward, per slot.
+          for (let k = 0; k < p.displayDeg.length; k++) {
+            assert(p.displayDeg[k]! <= p.frameDeg[k]!, `no regression at slot ${k}`);
+          }
+          // Never partway: either nobody has reached target yet, or every
+          // slot has -- readyCount jumps straight from some N < K to K.
+          assert(
+            p.readyCount === 0 || p.readyCount === p.totalFrames,
+            `readyCount should jump straight to ${p.totalFrames}, not sit partway at ${p.readyCount}`,
+          );
+          if (Date.now() - t0 > 25000) {
+            throw new Error(
+              `play-coarse fill timed out:\n${JSON.stringify(diagnoseKeyframeCaches(), null, 2)}`,
+            );
+          }
+          await new Promise((r) => setTimeout(r, 0));
+        }
+      },
+    },
+    {
+      name: "progressive: continuous playhead movement does not abandon in-flight work",
+      fn: async () => {
+        // Regression test: pickNextKeyframeWork always finishes whatever's
+        // already mid-chunk (anyInFlightWork) before starting anything new,
+        // no matter how far the playhead has since moved -- otherwise a
+        // multi-chunk job gets discarded the instant the active pair drifts
+        // past it, wasting the partial work and never reliably finishing
+        // anything (visible as quality jumping around / freezing instead of
+        // progressing smoothly).
+        clearKeyframeCaches();
+        setupAnimParam("t");
+        updateParam("t", { value: 0, min: 0, max: 1 });
+        const opts = { ...keyframeOpts("layer-continuous-play", "t"), deg: 16, K: 8 };
+        ensureLayerKeyframes(opts);
+        const layerId = "layer-continuous-play";
+        const t0 = Date.now();
+        // Find a slot that goes in-flight on a multi-chunk job.
+        let inFlightK = -1;
+        let degBefore = 0;
+        while (inFlightK < 0) {
+          tickKeyframePump(1);
+          const diag = diagnoseKeyframeCaches().find((l) => l.layerId === layerId)!;
+          const slot = diag.slots.find((s) => s.inFlight);
+          if (slot) {
+            inFlightK = slot.k;
+            degBefore = slot.schedDeg;
+          }
+          if (Date.now() - t0 > 20000) throw new Error("nothing went in-flight");
+          await new Promise((r) => setTimeout(r, 0));
+        }
+        // Keep playing — moving the value every tick, like real playback —
+        // while that job runs, and confirm it still finishes and advances
+        // instead of being reset or silently swapped for a different slot's
+        // job once the playhead has moved elsewhere.
+        let i = 0;
+        while (true) {
+          updateParam("t", { value: (i % (opts.K - 1)) / (opts.K - 1) });
+          tickKeyframePump(1);
+          i++;
+          const diag = diagnoseKeyframeCaches().find((l) => l.layerId === layerId)!;
+          const slot = diag.slots[inFlightK]!;
+          if (slot.schedDeg > 0 && slot.schedDeg < degBefore) {
+            throw new Error(
+              `slot ${inFlightK} regressed from ${degBefore} to ${slot.schedDeg} — job was abandoned/reset`,
+            );
+          }
+          if (!slot.inFlight && slot.schedDeg > degBefore) break;
+          if (Date.now() - t0 > 25000) {
+            throw new Error(
+              `in-flight job for slot ${inFlightK} never completed while the playhead kept moving`,
+            );
+          }
+          await new Promise((r) => setTimeout(r, 0));
+        }
       },
     },
     {
@@ -735,6 +833,45 @@ export async function run() {
         assert(rebuilt.M >= 5, `valid grid M, got ${rebuilt.M}`);
         const blend = peekKeyframeBlend("layer-defer-guard");
         assert(!!blend, "blend pair ready after forced sync");
+      },
+    },
+    {
+      name: "sweep to unloaded pair keeps playing at ready rung",
+      fn: () => {
+        clearKeyframeCaches();
+        setupAnimParam("t");
+        updateParam("t", { value: 0, min: 0, max: 1 });
+        const opts = { ...keyframeOpts("e41", "t"), deg: 16, K: 5 };
+        const first = ensureLayerKeyframes(opts);
+        assert(first.blend.i0 === 0 && first.blend.i1 === 1, "starts on first segment");
+        assert(first.M >= 5, "coarse grid");
+        updateParam("t", { value: 1 });
+        const peekHold = peekKeyframeBlend("e41");
+        assert(!!peekHold, "peek stays ready without ensure");
+        const swept = ensureLayerKeyframes({ ...opts, deferSyncBake: true });
+        assert(swept.M >= 5, `kept display grid, got M=${swept.M}`);
+        assert(swept.frames.length === 5, "materialized K");
+        const blend = peekKeyframeBlend("e41");
+        assert(!!blend, "GPU blend stays ready while (3,4) loads");
+        assert(blend!.i0 >= 0 && blend!.i1 >= 0, "valid indices");
+      },
+    },
+    {
+      name: "sync bake promotes first missing blend partner",
+      fn: () => {
+        clearKeyframeCaches();
+        setupAnimParam("t");
+        updateParam("t", { value: 0, min: 0, max: 1 });
+        const opts = { ...keyframeOpts("layer-partner-promote", "t"), deg: 8, K: 5 };
+        ensureLayerKeyframes(opts);
+        updateParam("t", { value: 1 });
+        const forced = ensureLayerKeyframes(opts);
+        const { i0, i1 } = forced.blend;
+        assert(!!forced.rawFrames[i0], `slot ${i0} display-ready`);
+        assert(!!forced.rawFrames[i1], `slot ${i1} display-ready`);
+        const peek = peekKeyframeBlend("layer-partner-promote");
+        assert(!!peek, "pair peekable");
+        assert(peek!.i0 !== peek!.i1 || peek!.t === 0, "real pair or hold");
       },
     },
     {

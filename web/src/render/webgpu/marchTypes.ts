@@ -14,10 +14,23 @@ export interface ClipGpuTheme {
 }
 
 export interface ClipGpuProfile {
-  idctMs: number;
+  /** Scene-volume repack + GPU upload time (uploadSceneVolumes) — NOT a per-frame IDCT cost. Only updates when a real upload runs (M-change/ladder-promote/rebind), so check sceneUploadAt before reading this as "current". */
+  sceneUploadMs: number;
+  /** performance.now() when sceneUploadMs was last updated. */
+  sceneUploadAt: number;
+  /** iso/march stage only. */
   marchMs: number;
+  /** Beer/volume compositing stage. */
+  beerMs: number;
+  /** Flow particles stage. */
+  flowMs: number;
+  /** FXAA stage. */
+  fxaaMs: number;
+  /** Grid overlay stage — previously untimestamped entirely. */
+  gridMs: number;
   marchFbW: number;
   marchFbH: number;
+  /** Total measured GPU work this frame (begin → end of grid). Compare against gpu_present_iv in the HUD — the gap is present/vsync/compositor overhead outside these timestamps. */
   presentWallMs: number;
   presentIntervalMs: number;
   lastPresentAt: number;
@@ -66,6 +79,7 @@ export interface MarchGpuHandles {
   isoRefinePipeline: GPURenderPipeline;
   isoUpsamplePipeline: GPURenderPipeline;
   beerPipeline: GPURenderPipeline;
+  beerRefinePipeline: GPURenderPipeline;
   fxaaPipeline: GPURenderPipeline;
   gridPipeline: GPURenderPipeline;
   drawParamBuf: GPUBuffer;
@@ -101,8 +115,9 @@ export function acquireMarchGpuHandles(): MarchGpuHandles | null {
     !isClipBakeGpuReady() || !gpu.ctx || !gpu.volumeBuf || !gpu.colorBuf ||
     !gpu.fxaaParamBuf || !gpu.fxaaSampler || !gpu.gridParamBuf ||
     !gpu.device || !gpu.isoPipeline || !gpu.isoRefinePipeline || !gpu.isoUpsamplePipeline ||
-    !gpu.beerPipeline ||
-    !gpu.fxaaPipeline || !gpu.blitPipeline || !gpu.blitSampler || !gpu.gridPipeline ||
+    !gpu.beerPipeline || !gpu.beerRefinePipeline ||
+    !gpu.fxaaPipeline || !gpu.blitPipeline || !gpu.blitMidPipeline ||
+    !gpu.blitSampler || !gpu.blitSamplerNearest || !gpu.gridPipeline ||
     !gpu.drawParamBuf || !gpu.drawParamBufBeer || !gpu.drawParamBufRefine || !gpu.isoUpsampleParamBuf
   ) {
     return null;
@@ -125,6 +140,7 @@ export function acquireMarchGpuHandles(): MarchGpuHandles | null {
     isoRefinePipeline: gpu.isoRefinePipeline,
     isoUpsamplePipeline: gpu.isoUpsamplePipeline,
     beerPipeline: gpu.beerPipeline,
+    beerRefinePipeline: gpu.beerRefinePipeline,
     fxaaPipeline: gpu.fxaaPipeline,
     gridPipeline: gpu.gridPipeline,
     drawParamBuf: gpu.drawParamBuf,

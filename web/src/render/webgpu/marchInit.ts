@@ -8,6 +8,7 @@ import {
 } from "./gpuState.js";
 import { writeLayerColors } from "./uniforms.js";
 import { ensureVolumeBuf } from "./sceneUpload.js";
+import { STAMP_COUNT } from "./gpuSubmit.js";
 import { ensurePipelinesForDegree as buildPipelines } from "./pipelines.js";
 import { ensureFlowParticlesPipeline } from "./flowParticles.js";
 import { syncClipGpuWorldGrid } from "./gridOverlay.js";
@@ -103,13 +104,15 @@ export async function initClipBakeGpu(
         void import("../../app/webglFallback.js").then((m) => m.resetGpuPresentSync());
       });
       if (gpu.timestampsSupported) {
-        gpu.stampQuerySet = gpu.device.createQuerySet({ type: "timestamp", count: 2 });
+        // 6 slots: 0=begin, 1=end-march, 2=end-beer, 3=end-flow, 4=end-fxaa, 5=end-grid.
+        // See STAMP_COUNT in gpuSubmit.ts.
+        gpu.stampQuerySet = gpu.device.createQuerySet({ type: "timestamp", count: STAMP_COUNT });
         gpu.stampResolveBuf = gpu.device.createBuffer({
-          size: 16,
+          size: STAMP_COUNT * 8,
           usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
         });
         gpu.stampReadBuf = gpu.device.createBuffer({
-          size: 16,
+          size: STAMP_COUNT * 8,
           usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
         });
       }

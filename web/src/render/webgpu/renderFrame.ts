@@ -12,20 +12,27 @@ import {
 import { packGridParams, syncClipGpuWorldGrid, uploadAxisLabelBillboards } from "./gridOverlay.js";
 import { state } from "../../app/state.js";
 import { clampIsoStepsForTier, coarseIsoSteps } from "../../app/deviceTier.js";
-import { ensureMarchTargets, ensureIsoCoarseTargets, ensureIsoMidTargets, ensureVolumeTargets, resizeClipGpuCanvas } from "./marchCanvas.js";
+import { ensureMarchTargets, ensureIsoCoarseTargets, ensureIsoMidTargets, ensureVolumeTargets, ensureVolMidColorTex, resizeClipGpuCanvas } from "./marchCanvas.js";
 import {
   isoFineFramebufferSize,
   isoMidFramebufferSize,
   isoRefineEnabled,
 } from "./isoRefine.js";
+import { beerClipCascade, beerHasMidPass } from "./volComposite.js";
 import { isIsoRefineDebugEnabled } from "../../app/isoRefineDebug.js";
 import {
   beginGpuFrame,
   endGpuFrame,
   gpuWriteBuffer,
   sampleGpuPresent,
+  stampCheckpoint,
   submitEnc,
   withStampWrites,
+  STAMP_END_MARCH,
+  STAMP_END_BEER,
+  STAMP_END_FLOW,
+  STAMP_END_FXAA,
+  STAMP_END_GRID,
 } from "./gpuSubmit.js";
 import { hasFlowGpuLayers } from "./flowGpu.js";
 import {
@@ -213,15 +220,25 @@ function buildRaySetup(
   const outW = Math.max(1, (displayW | 0) || marchW);
   const outH = Math.max(1, (displayH | 0) || marchH);
   const fineDown = Math.min(16, Math.max(1, (params.isoFineDownscale ?? 1) | 0));
-  const refine = gpu.sceneConstraints.length > 0 && isoRefineEnabled(marchW, marchH, outW, outH, fineDown);
-  const { fw: composeW, fh: composeH } = refine
+  // Resolution-only: does the fine (display-quality) compose size actually
+  // beat the coarse march size? Deliberately NOT gated on sceneConstraints —
+  // compose sizing needs to stay at display quality for beer's own sake
+  // (the near-edge silhouette pass) even with zero isosurfaces. `refine`
+  // below stays sceneConstraints-gated for the iso ladder itself, which
+  // genuinely has nothing to draw without isosurfaces.
+  const composeFineEnabled = isoRefineEnabled(marchW, marchH, outW, outH, fineDown);
+  const refine = gpu.sceneConstraints.length > 0 && composeFineEnabled;
+  const { fw: composeW, fh: composeH } = composeFineEnabled
     ? isoFineFramebufferSize(marchW, marchH, outW, outH, fineDown)
     : { fw: marchW, fh: marchH };
   const midSize = refine ? isoMidFramebufferSize(marchW, marchH, outW, outH, fineDown) : null;
 
   resizeClipGpuCanvas(outW, outH);
   if (refine) ensureIsoCoarseTargets(marchW, marchH);
-  if (midSize) ensureIsoMidTargets(midSize.mw, midSize.mh);
+  if (midSize) {
+    ensureIsoMidTargets(midSize.mw, midSize.mh);
+    if (gpu.densLayerCount > 0) ensureVolMidColorTex(midSize.mw, midSize.mh);
+  }
   ensureMarchTargets(composeW, composeH);
   if (gpu.densLayerCount > 0) ensureVolumeTargets(volW, volH);
   else ensureVolumeTargets(1, 1);
@@ -568,9 +585,10 @@ function drawBeerPass(
   scale: number,
   ro: [number, number, number],
   dirMatrix: ReturnType<typeof offsetDirMatrix>,
+  clipOccl: GPUTexture,
 ): void {
   const { device, beerPipeline, drawParamBufBeer, volumeBuf, colorBuf } = handles;
-  const occlIsoView = targets.occlIsoTex.createView();
+  const occlIsoView = texView(clipOccl);
   const occlSurfView = targets.occlSurfTex.createView();
 
   gpuWriteBuffer(
@@ -588,6 +606,7 @@ function drawBeerPass(
       ro,
       dirMatrix,
       gpu.flowLayerStart,
+      isIsoRefineDebugEnabled() ? 1 : 0,
     ),
   );
   const bg = device.createBindGroup({
@@ -623,15 +642,29 @@ function compositeVolumeOntoScene(
   handles: MarchGpuHandles,
   targets: MarchTargets,
   sceneView: GPUTextureView,
+  srcTex: GPUTexture,
+  occTex: GPUTexture,
+  sampler: GPUSampler | null = gpu.blitSampler,
+  pipeline: GPURenderPipeline | null = gpu.blitPipeline,
+  beerBoxBuf: GPUBuffer | null = handles.drawParamBufBeer,
 ): void {
-  if (!gpu.blitPipeline || !gpu.blitSampler) return;
+  if (!pipeline) return;
   const { device } = handles;
+  const entries: GPUBindGroupEntry[] = [
+    { binding: 0, resource: texView(srcTex) },
+    { binding: 2, resource: texView(targets.occlIsoTex) },
+    { binding: 3, resource: texView(occTex) },
+  ];
+  // fsMainSwap (mid-cascade pipeline) does a manual textureLoad-based
+  // bilinear and never touches srcSamp/beerBox, so its auto layout omits
+  // bindings 1 and 4. beerBoxBuf must already hold this draw's ro/half/M
+  // (drawBeerPass writes it right before this call) — fsMain reads it to
+  // recompute the exact box-silhouette test at compose resolution.
+  if (sampler) entries.push({ binding: 1, resource: sampler });
+  if (beerBoxBuf) entries.push({ binding: 4, resource: { buffer: beerBoxBuf } });
   const bg = device.createBindGroup({
-    layout: gpu.blitPipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: targets.volColorTex.createView() },
-      { binding: 1, resource: gpu.blitSampler },
-    ],
+    layout: pipeline.getBindGroupLayout(0),
+    entries,
   });
   const enc = device.createCommandEncoder();
   const pass = enc.beginRenderPass({
@@ -641,8 +674,65 @@ function compositeVolumeOntoScene(
       storeOp: "store",
     }],
   });
-  pass.setPipeline(gpu.blitPipeline);
+  pass.setPipeline(pipeline);
   pass.setBindGroup(0, bg);
+  setPassViewport(pass, targets.sceneColorTex.width, targets.sceneColorTex.height);
+  pass.draw(3);
+  pass.end();
+  submitEnc(device, enc);
+}
+
+/** Occupancy-masked beer at dest res with tExit clip against clipOccl. */
+function drawBeerRefine(
+  handles: MarchGpuHandles,
+  destView: GPUTextureView,
+  destW: number,
+  destH: number,
+  clipOccl: GPUTexture,
+  occTex: GPUTexture,
+  loadOp: GPULoadOp,
+  Mgrid: number,
+  steps: number,
+  half: number,
+  scale: number,
+  ro: [number, number, number],
+  dirMatrix: ReturnType<typeof offsetDirMatrix>,
+  debugTier: number,
+  nearEdgeActive: boolean,
+): void {
+  const { device, beerRefinePipeline, drawParamBufBeer, volumeBuf, colorBuf } = handles;
+  gpuWriteBuffer(
+    device,
+    drawParamBufBeer,
+    packDrawParamsBeer(
+      destW, destH, Mgrid, steps, half, scale,
+      gpu.densBase, gpu.densLayerCount, ro, dirMatrix, gpu.flowLayerStart,
+      isIsoRefineDebugEnabled() ? debugTier : 0,
+      nearEdgeActive ? 1 : 0,
+    ),
+  );
+  const bg = device.createBindGroup({
+    layout: beerRefinePipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: drawParamBufBeer } },
+      { binding: 1, resource: { buffer: volumeBuf } },
+      { binding: 2, resource: texView(clipOccl) },
+      { binding: 3, resource: { buffer: colorBuf } },
+      { binding: 4, resource: texView(occTex) },
+    ],
+  });
+  const enc = device.createCommandEncoder();
+  const pass = enc.beginRenderPass({
+    colorAttachments: [{
+      view: destView,
+      loadOp,
+      storeOp: "store",
+      ...(loadOp === "clear" ? { clearValue: { r: 0, g: 0, b: 0, a: 0 } } : {}),
+    }],
+  });
+  pass.setPipeline(beerRefinePipeline);
+  pass.setBindGroup(0, bg);
+  setPassViewport(pass, destW, destH);
   pass.draw(3);
   pass.end();
   submitEnc(device, enc);
@@ -652,7 +742,6 @@ function drawFxaaPass(
   handles: MarchGpuHandles,
   sceneView: GPUTextureView,
   swapTex: GPUTexture,
-  stampEnd: boolean,
 ): void {
   const { device, fxaaPipeline, fxaaParamBuf, fxaaSampler } = handles;
   const destW = Math.max(1, swapTex.width);
@@ -676,7 +765,7 @@ function drawFxaaPass(
       storeOp: "store",
     }],
   };
-  const pass = enc.beginRenderPass(stampEnd ? withStampWrites(passDesc, "end") : passDesc);
+  const pass = enc.beginRenderPass(withStampWrites(passDesc, STAMP_END_FXAA));
   pass.setPipeline(fxaaPipeline);
   pass.setBindGroup(0, bg);
   setPassViewport(pass, destW, destH);
@@ -837,6 +926,7 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
   }
 
   const sceneView = targets.sceneColorTex.createView();
+  stampCheckpoint(device, sceneView, STAMP_END_MARCH);
   const presentW = targets.sceneColorTex.width;
   const presentH = targets.sceneColorTex.height;
 
@@ -876,13 +966,85 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
       pass.end();
       submitEnc(device, enc);
     } else {
+      // Gated by `refine`, not read unconditionally: gpu.isoCoarseOcclTex is
+      // a persistent texture only ever (re)written inside runIsoRefineLadder,
+      // which only runs `if (refine)`. Reading it unconditionally left it
+      // holding the last frame's occupancy data once an isosurface was
+      // removed/disabled and refine went false — punchOcc below would then
+      // fall through to this stale texture instead of the freshly-cleared
+      // targets.occlIsoTex, so the cheap beer layer deferred pixels shaped
+      // like the old isosurface, and with no scene constraints left the
+      // final pass (which would otherwise fill deferred pixels) never runs
+      // to cover them — a permanent ghost of the removed surface.
+      const coarseOcc = (refine && gpu.isoCoarseOcclTex) || null;
+      const midOcc = (midRefine && gpu.isoMidOcclTex) || null;
+      const midBeerTex = (midRefine && gpu.volMidColorTex) || null;
+      const midBeer = beerHasMidPass(midRefine) && !!coarseOcc && !!midOcc && !!midBeerTex;
+      const cheapClip = beerClipCascade(midBeer) === "coarse" && coarseOcc
+        ? coarseOcc
+        : targets.occlIsoTex;
       drawBeerPass(
         handles, targets, targets.volColorTex.createView(),
         volW, volH, Mgrid, volumeSteps, half, scale, ro, dirMatrix,
+        cheapClip,
       );
-      compositeVolumeOntoScene(handles, targets, sceneView);
+      const punchOcc = (midBeer ? coarseOcc : (midOcc || coarseOcc)) || targets.occlIsoTex;
+      compositeVolumeOntoScene(handles, targets, sceneView, targets.volColorTex, punchOcc);
+      if (midBeer && midBeerTex && midOcc && coarseOcc) {
+        // nearEdgeActive=false: the mid composite below always defers exact
+        // near-edge pixels to the final tier (so edges reach full compose
+        // resolution), so mid never actually composites near-edge data —
+        // shading it here anyway (previously via a dilated cushion, to avoid
+        // gaps in coverage mid would never use) only wasted work and, worse,
+        // created a thin double-composited band wherever the dilated test
+        // and cheap's exact test disagreed. Iso occupancy is unaffected —
+        // that classification is already phase-consistent across tiers
+        // (isoRefine.ts sizes each cascade as an exact multiple of the one
+        // below it), so it never needed this kind of safety cushion.
+        drawBeerRefine(
+          handles, texView(midBeerTex), gpu.volMidW, gpu.volMidH,
+          midOcc, coarseOcc, "clear",
+          Mgrid, volumeSteps, half, scale, ro, dirMatrix, 2, false,
+        );
+        // fsMainSwap does a manual bilinear, falling back to the true
+        // nearest corner at the shaded/cleared boundary (midBeerTex is
+        // cleared to (0,0,0,0) outside the coarse-mixed tiles it shaded, and
+        // blending real color with hard zero there thins alpha into a ring).
+        // It also defers box-silhouette pixels to the final tier instead of
+        // compositing mid's 4× answer for them, so edges reach full compose
+        // resolution — beerBoxBuf (ro/half/M) lets it recompute that test;
+        // drawBeerRefine just wrote this frame's values into the same buffer.
+        compositeVolumeOntoScene(
+          handles, targets, sceneView, midBeerTex, midOcc,
+          null, gpu.blitMidPipeline, handles.drawParamBufBeer,
+        );
+      }
+      {
+        // Unconditional (no longer gated by sceneConstraints.length > 0):
+        // we're already inside `ranBeer`, and this pass also fills in
+        // near-edge silhouette pixels now — a pure beer/density concern,
+        // unrelated to whether any isosurface exists. Gating it on
+        // isosurfaces meant a scene with density but no isosurface never
+        // ran this pass at all, so cheap's deferred near-edge pixels
+        // (blitNearBoxEdge fires regardless of isosurfaces) were never
+        // filled back in. The iso-mixed half of the shader's own check
+        // (isoNeedRefine) already no-ops correctly when there are no scene
+        // constraints, so this is safe to always run.
+        const fineOcc = midOcc || coarseOcc || targets.occlIsoTex;
+        // Near-edge is always active here now: when a mid tier ran, its own
+        // composite mask (fsMainSwap above) already deferred exactly the
+        // silhouette pixels to us — using the same undilated test we use
+        // below — so there's no overlap. Without a mid tier, we're the only
+        // finer pass and must claim them ourselves.
+        drawBeerRefine(
+          handles, sceneView, presentW, presentH,
+          targets.occlIsoTex, fineOcc, "load",
+          Mgrid, volumeSteps, half, scale, ro, dirMatrix, 3, true,
+        );
+      }
     }
   }
+  stampCheckpoint(device, sceneView, STAMP_END_BEER);
 
   const ranFlow = hasFlowGpuLayers();
   if (ranFlow) {
@@ -903,6 +1065,7 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
       presentH,
     );
   }
+  stampCheckpoint(device, sceneView, STAMP_END_FLOW);
 
   const occlForGrid = ranBeer
     ? targets.occlSurfTex.createView()
@@ -912,17 +1075,22 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
   // Occlusion still samples the compose-sized depth; grid.wgsl maps display
   // clip → occl texels with dims/fbW. Drawing lines into the 2× compose
   // buffer made axes look like fat pixel art after FXAA upsample.
-  drawFxaaPass(handles, sceneView, swapTex, true);
+  drawFxaaPass(handles, sceneView, swapTex);
   if (ranGrid) {
     drawGridOverlay(
       handles, occlForGrid, camera, swapTex.createView(), half, dirMatrix, ro, outW, outH,
     );
   }
+  stampCheckpoint(device, swapTex.createView(), STAMP_END_GRID);
 
   const method: string[] = [
     refinePath === "mid" ? "gpu-iso-refine-mid" : refine ? "gpu-iso-refine" : "gpu-iso",
   ];
-  if (ranBeer) method.push(sameRes ? "beer" : "beer(volFB)+blit");
+  if (ranBeer) {
+    if (sameRes) method.push("beer");
+    else if (beerHasMidPass(midRefine) && gpu.volMidColorTex) method.push("beer(volFB)+mid-tiles+iso-tiles");
+    else method.push("beer(volFB)+occl+iso-tiles");
+  }
   if (ranFlow) method.push("flow");
   method.push("fxaa");
   if (ranGrid) method.push("grid");

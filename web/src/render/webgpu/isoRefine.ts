@@ -29,9 +29,22 @@ function isoFramebufferSizeAtDownscale(
   const ow = Math.max(1, outW | 0);
   const oh = Math.max(1, outH | 0);
   const d = Math.min(ISO_COARSE_DOWNSCALE, Math.max(1, downscale | 0));
+  // Snap to an exact multiple of the coarse grid. isoNeedRefine (isoEdge.wgsl)
+  // maps a fine fragment into coarse-texel space via dims(coarseOcc)/fineSize;
+  // if two tiers round outW/downscale independently they land at slightly
+  // different multiples of coarseW/H, so the same screen pixel resolves to a
+  // different coarse texel depending on which tier asks. That phase drift is
+  // invisible to the iso ladder (each tier only ever compares against the one
+  // directly below it) but the beer/volume cascade compares both mid- and
+  // compose-resolution fragments against the same coarse occupancy texture —
+  // a pixel classified "mixed" from one tier and "safe" from the other falls
+  // through every layer's paint mask, showing up as transparency right at
+  // cascade tile borders.
+  const multW = Math.max(1, Math.round(Math.round(ow / d) / cw));
+  const multH = Math.max(1, Math.round(Math.round(oh / d) / ch));
   return {
-    fw: Math.max(cw, Math.round(ow / d)),
-    fh: Math.max(ch, Math.round(oh / d)),
+    fw: cw * multW,
+    fh: ch * multH,
   };
 }
 
