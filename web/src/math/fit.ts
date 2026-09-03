@@ -1532,6 +1532,18 @@ export function compileExpr(
 
   const shade = usesSpace ? classified.shade : "none";
 
+  // Most density expressions only reference x/y/z — skip the polar conversion
+  // (2 hypots + atan2 + acos, plus its own allocation) on the hot per-sample
+  // path when the compiled expression never reads r/theta/phi/rho.
+  let usesPolar = false;
+  for (const s of result.freeSymbols ?? []) {
+    const id = String(s);
+    if (id === "r" || id === "theta" || id === "phi" || id === "rho") {
+      usesPolar = true;
+      break;
+    }
+  }
+
   return {
     freeParams,
     usesSpace,
@@ -1541,6 +1553,16 @@ export function compileExpr(
     classifyLabel: usesSpace ? classified.label : "constant (not graphed)",
     /** Bind current parameter values → f(x,y,z); injects r,θ,φ,ρ. */
     bind(params: Record<string, number> = {}) {
+      if (!usesPolar) {
+        return (x: number, y: number, z: number) => {
+          const scope: Record<string, number> = { x, y, z };
+          for (const name of freeParams) {
+            const v = params[name];
+            scope[name] = Number.isFinite(v) ? v : 1;
+          }
+          return coerceNumber(run(scope));
+        };
+      }
       return (x: number, y: number, z: number) => {
         const { r, theta, phi, rho } = polarFromCartesian(x, y, z);
         const scope: Record<string, number> = { x, y, z, r, theta, phi, rho };

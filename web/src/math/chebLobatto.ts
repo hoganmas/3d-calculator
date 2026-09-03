@@ -51,14 +51,36 @@ export function lobattoDCT1D(vals: ArrayLike<number>): Float64Array {
     out[0] = vals[0] ?? 0;
     return out;
   }
-  const invN = Math.PI / N;
+  const table = getForwardCosTable(n);
   for (let k = 0; k < n; k++) {
+    const base = k * n;
     let s = 0.5 * (vals[0] ?? 0);
-    for (let j = 1; j < n - 1; j++) s += (vals[j] ?? 0) * Math.cos(k * j * invN);
-    s += 0.5 * (vals[n - 1] ?? 0) * Math.cos(k * N * invN);
+    for (let j = 1; j < n - 1; j++) s += (vals[j] ?? 0) * table[base + j]!;
+    s += 0.5 * (vals[n - 1] ?? 0) * table[base + N]!;
     out[k] = (2 / N) * s;
   }
   return out;
+}
+
+/**
+ * Forward-DCT cosine table cos(k·j·π/N) for k,j = 0..N, packed [k*n+j].
+ * Cached per n so every fit/refine at the same degree reuses it instead of
+ * re-evaluating Math.cos O(n²) times per row across O(n²) rows per axis.
+ */
+const forwardCosTableCache = new Map<number, Float64Array>();
+
+function getForwardCosTable(n: number): Float64Array {
+  const cached = forwardCosTableCache.get(n);
+  if (cached) return cached;
+  const N = n - 1;
+  const invN = N > 0 ? Math.PI / N : 0;
+  const table = new Float64Array(n * n);
+  for (let k = 0; k < n; k++) {
+    const base = k * n;
+    for (let j = 0; j < n; j++) table[base + j] = Math.cos(k * j * invN);
+  }
+  forwardCosTableCache.set(n, table);
+  return table;
 }
 
 /**
@@ -134,17 +156,19 @@ export function lobattoDCT3DSeparable(vals: Float64Array, n: number): Float32Arr
   const tmp = new Float64Array(n * n * n);
   const tmp2 = new Float64Array(n * n * n);
   const out = new Float32Array(n * n * n);
-  const invN = N > 0 ? Math.PI / N : 0;
+  const scale = N > 0 ? 2 / N : 1;
+  const table = getForwardCosTable(n);
 
   // X
   for (let y = 0; y < n; y++) {
     for (let z = 0; z < n; z++) {
       const base = y * n + z * n2;
       for (let k = 0; k < n; k++) {
+        const tbase = k * n;
         let sum = 0.5 * vals[base];
-        for (let j = 1; j < n - 1; j++) sum += vals[base + j] * Math.cos(k * j * invN);
-        sum += 0.5 * vals[base + n - 1] * Math.cos(k * N * invN);
-        tmp[base + k] = N > 0 ? (2 / N) * sum : sum;
+        for (let j = 1; j < n - 1; j++) sum += vals[base + j] * table[tbase + j]!;
+        sum += 0.5 * vals[base + n - 1] * table[tbase + N]!;
+        tmp[base + k] = scale * sum;
       }
     }
   }
@@ -153,10 +177,11 @@ export function lobattoDCT3DSeparable(vals: Float64Array, n: number): Float32Arr
   for (let x = 0; x < n; x++) {
     for (let z = 0; z < n; z++) {
       for (let k = 0; k < n; k++) {
+        const tbase = k * n;
         let sum = 0.5 * tmp[x + z * n2];
-        for (let j = 1; j < n - 1; j++) sum += tmp[x + j * n + z * n2] * Math.cos(k * j * invN);
-        sum += 0.5 * tmp[x + (n - 1) * n + z * n2] * Math.cos(k * N * invN);
-        tmp2[x + k * n + z * n2] = N > 0 ? (2 / N) * sum : sum;
+        for (let j = 1; j < n - 1; j++) sum += tmp[x + j * n + z * n2] * table[tbase + j]!;
+        sum += 0.5 * tmp[x + (n - 1) * n + z * n2] * table[tbase + N]!;
+        tmp2[x + k * n + z * n2] = scale * sum;
       }
     }
   }
@@ -166,10 +191,11 @@ export function lobattoDCT3DSeparable(vals: Float64Array, n: number): Float32Arr
     for (let y = 0; y < n; y++) {
       const xy = x + y * n;
       for (let k = 0; k < n; k++) {
+        const tbase = k * n;
         let sum = 0.5 * tmp2[xy];
-        for (let j = 1; j < n - 1; j++) sum += tmp2[xy + j * n2] * Math.cos(k * j * invN);
-        sum += 0.5 * tmp2[xy + (n - 1) * n2] * Math.cos(k * N * invN);
-        out[xy + k * n2] = N > 0 ? (2 / N) * sum : sum;
+        for (let j = 1; j < n - 1; j++) sum += tmp2[xy + j * n2] * table[tbase + j]!;
+        sum += 0.5 * tmp2[xy + (n - 1) * n2] * table[tbase + N]!;
+        out[xy + k * n2] = scale * sum;
       }
     }
   }
