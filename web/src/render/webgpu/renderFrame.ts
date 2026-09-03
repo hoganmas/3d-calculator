@@ -214,8 +214,15 @@ function buildRaySetup(
   const outW = Math.max(1, (displayW | 0) || marchW);
   const outH = Math.max(1, (displayH | 0) || marchH);
   const fineDown = Math.min(16, Math.max(1, (params.isoFineDownscale ?? 1) | 0));
-  const refine = gpu.sceneConstraints.length > 0 && isoRefineEnabled(marchW, marchH, outW, outH, fineDown);
-  const { fw: composeW, fh: composeH } = refine
+  // Resolution-only: does the fine (display-quality) compose size actually
+  // beat the coarse march size? Deliberately NOT gated on sceneConstraints —
+  // compose sizing needs to stay at display quality for beer's own sake
+  // (the near-edge silhouette pass) even with zero isosurfaces. `refine`
+  // below stays sceneConstraints-gated for the iso ladder itself, which
+  // genuinely has nothing to draw without isosurfaces.
+  const composeFineEnabled = isoRefineEnabled(marchW, marchH, outW, outH, fineDown);
+  const refine = gpu.sceneConstraints.length > 0 && composeFineEnabled;
+  const { fw: composeW, fh: composeH } = composeFineEnabled
     ? isoFineFramebufferSize(marchW, marchH, outW, outH, fineDown)
     : { fw: marchW, fh: marchH };
   const midSize = refine ? isoMidFramebufferSize(marchW, marchH, outW, outH, fineDown) : null;
@@ -953,7 +960,17 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
       pass.end();
       submitEnc(device, enc);
     } else {
-      const coarseOcc = gpu.isoCoarseOcclTex;
+      // Gated by `refine`, not read unconditionally: gpu.isoCoarseOcclTex is
+      // a persistent texture only ever (re)written inside runIsoRefineLadder,
+      // which only runs `if (refine)`. Reading it unconditionally left it
+      // holding the last frame's occupancy data once an isosurface was
+      // removed/disabled and refine went false — punchOcc below would then
+      // fall through to this stale texture instead of the freshly-cleared
+      // targets.occlIsoTex, so the cheap beer layer deferred pixels shaped
+      // like the old isosurface, and with no scene constraints left the
+      // final pass (which would otherwise fill deferred pixels) never runs
+      // to cover them — a permanent ghost of the removed surface.
+      const coarseOcc = (refine && gpu.isoCoarseOcclTex) || null;
       const midOcc = (midRefine && gpu.isoMidOcclTex) || null;
       const midBeerTex = (midRefine && gpu.volMidColorTex) || null;
       const midBeer = beerHasMidPass(midRefine) && !!coarseOcc && !!midOcc && !!midBeerTex;
@@ -996,7 +1013,17 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
           null, gpu.blitMidPipeline, handles.drawParamBufBeer,
         );
       }
-      if (gpu.sceneConstraints.length > 0) {
+      {
+        // Unconditional (no longer gated by sceneConstraints.length > 0):
+        // we're already inside `ranBeer`, and this pass also fills in
+        // near-edge silhouette pixels now — a pure beer/density concern,
+        // unrelated to whether any isosurface exists. Gating it on
+        // isosurfaces meant a scene with density but no isosurface never
+        // ran this pass at all, so cheap's deferred near-edge pixels
+        // (blitNearBoxEdge fires regardless of isosurfaces) were never
+        // filled back in. The iso-mixed half of the shader's own check
+        // (isoNeedRefine) already no-ops correctly when there are no scene
+        // constraints, so this is safe to always run.
         const fineOcc = midOcc || coarseOcc || targets.occlIsoTex;
         // Near-edge is always active here now: when a mid tier ran, its own
         // composite mask (fsMainSwap above) already deferred exactly the
