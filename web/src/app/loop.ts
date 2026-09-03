@@ -33,7 +33,7 @@ import {
 } from "./webglFallback.js";
 import { scheduleMarchPipelines } from "../render/webgpu/march.js";
 import { uploadFit, tickGpuKeyframeBlends, shouldRunAnimUploadFit } from "./pipeline.js";
-import { tickKeyframePump } from "../model/keyframes.js";
+import { tickKeyframePump, KEYFRAME_PUMP_FRAME_BUDGET_MS } from "../model/keyframes.js";
 import { hudText, refreshMetricsDump } from "./hud.js";
 import { isSplashContentReady, markSplashFrameReady } from "./splash.js";
 import { startupMark } from "./startupProfile.js";
@@ -172,7 +172,17 @@ function frame(rafNow: number) {
   state.cpuMsSmooth = state.cpuMsSmooth * 0.85 + dt * 0.15;
 
   // Keyframe progressive fill runs after draw so animation stays smooth.
-  if (anyParamAnimating()) tickKeyframePump();
+  // Chain several maxWorks=1 units per frame (time-budgeted, not a fixed
+  // count) instead of exactly one — units are cheap relative to the frame's
+  // real cadence, so this cuts total generation wall time without touching
+  // render pacing: it still yields well within the frame once out of budget
+  // or once there's no more pending work.
+  if (anyParamAnimating()) {
+    const tPump0 = performance.now();
+    while (performance.now() - tPump0 < KEYFRAME_PUMP_FRAME_BUDGET_MS) {
+      if (tickKeyframePump(1) === 0) break;
+    }
+  }
   syncKeyframeLoadBar();
 
   requestAnimationFrame(frame);

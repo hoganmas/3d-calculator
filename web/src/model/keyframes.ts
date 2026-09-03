@@ -26,6 +26,14 @@ import type { CompiledExpr, CompiledVectorExpr, KeyframeFrame } from "../types/m
 export const DEFAULT_KEYFRAME_K = 8;
 /** Max Lobatto work (sample + IDCT + grad) per render frame during async fill. */
 export const KEYFRAME_LOBATTO_BUDGET_MS = 3;
+/**
+ * Wall-clock budget (ms) for the async keyframe pump per rendered frame — how
+ * many maxWorks=1 units of KEYFRAME_LOBATTO_BUDGET_MS work tickKeyframePump
+ * may chain in one rAF before yielding to render. Frame cadence (~16-21ms,
+ * GPU-present-paced) is well above this, so it leaves headroom for render +
+ * GPU submit while still processing several units instead of exactly one.
+ */
+export const KEYFRAME_PUMP_FRAME_BUDGET_MS = 7;
 
 type KeyframeRole = "cloud" | "isosurface" | "flow";
 
