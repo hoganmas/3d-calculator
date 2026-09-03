@@ -1121,17 +1121,23 @@ function applyDisplayFrame(
 }
 
 /**
- * Commit a baked frame: display it as soon as it's ready.
+ * Commit a baked frame.
  *
- * Used to hold higher rungs back in staging until every slot in the K^N
- * grid reached the same rung (playingDisplayDeg/tryPromoteGlobalRung) —
- * intended to avoid visible mismatch, but the only mismatch that's ever
- * actually rendered is between the *currently blending* pair (i0, i1), and
- * isoBlendSceneM() already handles that case on its own (falls back to the
- * lower-degree side's M until both catch up). Gating on the whole grid
- * instead meant any slot's completed bake sat invisible until distant,
- * rarely-visited parts of the timeline finished too — jumping to a fresh
- * point showed its first (coarse) rung, then stayed stuck there.
+ * A slot's very first bake (nothing shown for it yet) displays immediately,
+ * so first paint doesn't wait on the rest of the K^N grid — matches the
+ * synchronous corner bake in ensureLayerKeyframes, and every slot's first
+ * bake lands at the same starting ladder rung regardless of order, so this
+ * never creates a mismatched *pair*.
+ *
+ * Every later rung is staged instead and only promoted once every slot in
+ * the grid has reached it (tryPromoteGlobalRung) — no slot is ever shown
+ * mid-refinement one rung ahead of its neighbor. This was tried the other
+ * way (apply each slot's bake immediately) to fix a *different* bug —
+ * jumping to a fresh point stayed stuck at a stale coarse rung because nothing
+ * else pumped it — but that pump gate was the actual bug (see
+ * hasActiveKeyframeCaches in loop.ts) and is fixed independently of this now;
+ * applying immediately bought responsiveness at the cost of visibly playing
+ * through partial rungs while generation and playback overlap.
  */
 function commitFrame(
   cache: LayerKeyframeCache,
@@ -1148,15 +1154,28 @@ function commitFrame(
     });
     return [];
   }
-  clearCoarseStaging(cache, k);
-  applyDisplayFrame(cache, k, frame, deg);
-  tearLog("commit-join-play", {
+  if ((cache.frameDeg[k] ?? 0) === 0) {
+    clearCoarseStaging(cache, k);
+    applyDisplayFrame(cache, k, frame, deg);
+    tearLog("commit-first-bake", {
+      layerId: cache.bakeOpts.layerId,
+      k,
+      deg,
+      M: gridMFromDens(frame.dens),
+    });
+    return [k];
+  }
+  cache.stagingFrames[k] = frame;
+  cache.stagingDeg[k] = deg;
+  const promoted = tryPromoteGlobalRung(cache);
+  tearLog("commit-staged", {
     layerId: cache.bakeOpts.layerId,
     k,
     deg,
     M: gridMFromDens(frame.dens),
+    promoted,
   });
-  return [k];
+  return promoted;
 }
 
 /**
@@ -1308,70 +1327,19 @@ function anyInFlightWork(cache: LayerKeyframeCache): KeyframeWork | null {
   return null;
 }
 
-/**
- * Start new work for whichever of the actively-blended pair is behind,
- * through its own ladder, independent of the rest of the K^N grid — keeps
- * the two slots roughly in lockstep with each other (matches
- * isoBlendSceneM's assumption that a mismatch is at most one rung), but
- * doesn't wait on unrelated, rarely-visited parts of the timeline the way
- * the old phase-first/whole-grid scan did. That scan tried every slot's
- * rung N before any slot's rung N+1, so jumping to a fresh point meant the
- * pair sat at whatever coarse rung the *slowest* corner of the grid had
- * reached, even once its own bake finished. Assumes anyInFlightWork() has
- * already been checked — it doesn't itself look at in-flight jobs.
- *
- * Once the pair itself has nothing left to do (both caught up, or both
- * mid-chunk elsewhere), gives the immediately neighboring segments — the
- * ones the playhead is about to enter — a head start as a secondary
- * priority, below the pair but still ahead of the rest of the grid. Without
- * this, crossing into a fresh segment starts it from zero baked data right
- * as you reach it, which isoBlendSceneM has no choice but to show as a
- * visible quality drop at every segment boundary (a "rung hop").
- */
-function pickNewWorkForActivePair(
-  cache: LayerKeyframeCache,
-  i0: number,
-  i1: number,
-): KeyframeWork | null {
-  const target = cache.targetDeg;
-  const ladder = lobattoLadderDegrees(target);
-  const start = ladder[0] ?? startLadderDeg(target);
-  const tryAdvance = (k: number): KeyframeWork | null => {
-    if (cache.lobattoFinalizeByK.has(k) || cache.lobattoJobByK.has(k)) return null;
-    const d = schedDegAt(cache, k);
-    if (d >= target) return null;
-    if (d === 0) return { kind: "coarse", k };
-    const next = ladder[ladder.indexOf(d) + 1] ?? (d < start ? start : undefined);
-    return next != null ? { kind: "refine", k, nextDeg: next } : null;
-  };
-
-  const core = i0 === i1 ? [i0] : [i0, i1];
-  core.sort((a, b) => schedDegAt(cache, a) - schedDegAt(cache, b));
-  for (const k of core) {
-    const w = tryAdvance(k);
-    if (w) return w;
-  }
-
-  const K = cache.K;
-  const lookahead = [i0 - 1, i1 + 1].filter((k) => k >= 0 && k < K && k !== i0 && k !== i1);
-  lookahead.sort((a, b) => schedDegAt(cache, a) - schedDegAt(cache, b));
-  for (const k of lookahead) {
-    const w = tryAdvance(k);
-    if (w) return w;
-  }
-  return null;
-}
-
 function pickNextKeyframeWork(cache: LayerKeyframeCache): KeyframeWork[] {
-  // Finish anything already mid-chunk before starting something new, no
-  // matter where the active pair has drifted to since that job began.
+  // Finish anything already mid-chunk before starting something new.
   const inFlight = anyInFlightWork(cache);
   if (inFlight) return [inFlight];
-  if (cacheNDims(cache) === 1) {
-    const { i0, i1 } = segmentForValue(cache, currentParamValues(cache)[0]!);
-    const paired = pickNewWorkForActivePair(cache, i0, i1);
-    if (paired) return [paired];
-  }
+  // Breadth-first by ladder rung: every slot reaches rung N (bakeOrderForCache
+  // still starts from the active pair and expands outward, so the visible
+  // area finishes each rung first) before any slot starts rung N+1. Combined
+  // with commitFrame staging non-first bakes, this guarantees a rung is only
+  // ever displayed once every slot in the grid has it — no slot is shown one
+  // rung ahead of its paired neighbor mid-refinement (a "rung hop"). Racing
+  // the active pair on ahead of the rest of the grid was tried instead, but
+  // that's exactly what let a segment show a higher-degree side paired with
+  // a lower/absent one while the two overlap during playback.
   const ladder = lobattoLadderDegrees(cache.targetDeg);
   for (const phaseDeg of ladder) {
     const w = pickWorkAtPhase(cache, phaseDeg);
