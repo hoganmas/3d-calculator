@@ -284,7 +284,13 @@ export function syncClipPresentation() {
   worldGrid.visible = !gpu && showGrid;
   worldLabels.visible = !gpu && showGrid;
   boxHelper.visible = !gpu;
-  labelRenderer.domElement.style.visibility = gpu ? "hidden" : "visible";
+  // `display:none` (not `visibility:hidden`) — the label canvas sits at a
+  // higher z-index than the WebGPU canvas underneath it, and mobile Safari
+  // has been known to keep compositing a `visibility:hidden` WebGL canvas
+  // for a frame or two after it stops rendering, ghosting stale axis labels
+  // over the live WebGPU-drawn ones. `display:none` fully removes it from
+  // paint instead of relying on the compositor to honor visibility.
+  labelRenderer.domElement.style.display = gpu ? "none" : "block";
   setClipGpuCanvasVisible(isClipBakeGpuReady());
 }
 
