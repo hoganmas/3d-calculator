@@ -15,7 +15,7 @@ struct DrawParams {
   flowLayerStart: f32,
   debugTier: f32,
   nearEdgeActive: f32,
-  dilateNdc: f32,
+  _p4: f32,
   densBlend: array<vec4f, 8>,
   densT: array<vec4f, 2>,
 }
@@ -214,33 +214,20 @@ fn beerNearBoxEdgeAtNdc(ndcX: f32, ndcY: f32) -> bool {
 }
 
 /**
- * dilateNdc = 0: single sample at this pixel's own center (matches
- * blit.wgsl's blitNearBoxEdge and the final beer tier exactly — both
- * evaluate at compose resolution, so there's nothing coarser to disagree
- * with; dilating here would claim pixels the cheap layer didn't defer,
- * double-compositing them).
- *
- * dilateNdc > 0: OR the test across this pixel's own screen footprint
- * (center + 4 corners, ±dilateNdc in NDC) instead of just its center. NDC
- * space is shared across every resolution, so passing half this pixel's own
- * NDC width guarantees the result is a safe superset of whatever a finer
- * grid (e.g. the compose-resolution cheap-layer punch decision) would find
- * anywhere within this pixel's footprint — unlike a fixed box-space margin,
- * which doesn't scale with the actual resolution ratio or camera distance.
- * Used by the mid beer tier, whose own pixel grid is coarser than compose.
+ * Single sample at this pixel's own center — matches blit.wgsl's
+ * blitNearBoxEdge exactly, both evaluated at compose resolution. Only the
+ * final beer tier calls this (draw.nearEdgeActive is false for the mid
+ * pass): the mid composite always defers exact near-edge pixels to final
+ * (see fsMainSwap in blit.wgsl), so mid never has a reason to claim them
+ * itself, undilated or otherwise — an earlier dilated version of this,
+ * meant to give the mid tier its own safety cushion, ended up double-
+ * compositing with the cheap layer instead once mid stopped keeping
+ * near-edge pixels at all.
  */
-fn beerNearBoxEdge(pos: vec2f, fbW: f32, fbH: f32, dilateNdc: f32) -> bool {
+fn beerNearBoxEdge(pos: vec2f, fbW: f32, fbH: f32) -> bool {
   let ndcX = -1.0 + 2.0 * pos.x / fbW;
   let ndcY = 1.0 - 2.0 * pos.y / fbH;
-  if (dilateNdc <= 0.0) {
-    return beerNearBoxEdgeAtNdc(ndcX, ndcY);
-  }
-  if (beerNearBoxEdgeAtNdc(ndcX, ndcY)) { return true; }
-  if (beerNearBoxEdgeAtNdc(ndcX - dilateNdc, ndcY - dilateNdc)) { return true; }
-  if (beerNearBoxEdgeAtNdc(ndcX + dilateNdc, ndcY - dilateNdc)) { return true; }
-  if (beerNearBoxEdgeAtNdc(ndcX - dilateNdc, ndcY + dilateNdc)) { return true; }
-  if (beerNearBoxEdgeAtNdc(ndcX + dilateNdc, ndcY + dilateNdc)) { return true; }
-  return false;
+  return beerNearBoxEdgeAtNdc(ndcX, ndcY);
 }
 
 fn marchBeer(pos: vec2f) -> FSOut {

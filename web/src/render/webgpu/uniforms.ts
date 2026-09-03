@@ -87,15 +87,11 @@ export function packDrawParamsBeer(
   flowLayerStart: number = -1,
   /** isoRefineDebug tint: 0 = off, 1 = cheap, 2 = mid, 3 = final beer tier. */
   debugTier: number = 0,
-  /** Should this pass's fsRefine also claim box-silhouette pixels? False for
-   *  the final pass when a mid tier already claimed them this frame. */
+  /** Should this pass's fsRefine also claim box-silhouette pixels? Only the
+   *  final pass does — the mid composite always defers them to final rather
+   *  than ever keeping mid's answer, so mid claiming them would be wasted
+   *  work (and previously double-composited with the cheap layer). */
   nearEdgeActive: number = 1,
-  /** NDC-space dilation radius for beerNearBoxEdge: 0 for a single center
-   *  sample (final pass — matches blit.wgsl's compose-res evaluation
-   *  exactly); half this pass's own NDC pixel width for the mid pass, so it
-   *  samples its own footprint instead of just its (coarser) pixel center —
-   *  see beer.wgsl's beerNearBoxEdge doc comment. */
-  dilateNdc: number = 0,
 ): ArrayBuffer {
   const u32 = beerDrawParamU32;
   const f32 = beerDrawParamF32;
@@ -109,7 +105,6 @@ export function packDrawParamsBeer(
   f32[24] = flowLayerStart;
   f32[25] = debugTier;
   f32[26] = nearEdgeActive;
-  f32[27] = dilateNdc;
   const volN = gridM * gridM * gridM;
   for (let L = 0; L < MAX_DENS_LAYERS; L++) {
     const d = gpu.densLayers[L];

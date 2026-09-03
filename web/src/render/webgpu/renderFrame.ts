@@ -686,7 +686,6 @@ function drawBeerRefine(
   dirMatrix: ReturnType<typeof offsetDirMatrix>,
   debugTier: number,
   nearEdgeActive: boolean,
-  dilateNdc: number,
 ): void {
   const { device, beerRefinePipeline, drawParamBufBeer, volumeBuf, colorBuf } = handles;
   gpuWriteBuffer(
@@ -697,7 +696,6 @@ function drawBeerRefine(
       gpu.densBase, gpu.densLayerCount, ro, dirMatrix, gpu.flowLayerStart,
       isIsoRefineDebugEnabled() ? debugTier : 0,
       nearEdgeActive ? 1 : 0,
-      dilateNdc,
     ),
   );
   const bg = device.createBindGroup({
@@ -970,15 +968,20 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
       const punchOcc = (midBeer ? coarseOcc : (midOcc || coarseOcc)) || targets.occlIsoTex;
       compositeVolumeOntoScene(handles, targets, sceneView, targets.volColorTex, punchOcc);
       if (midBeer && midBeerTex && midOcc && coarseOcc) {
-        // Half this pass's own NDC pixel width: dilates the near-edge test
-        // across its own footprint instead of just its (coarser) center, so
-        // it's a safe superset of the compose-resolution grid — not a fixed
-        // margin guess, so it holds regardless of camera zoom/distance.
+        // nearEdgeActive=false: the mid composite below always defers exact
+        // near-edge pixels to the final tier (so edges reach full compose
+        // resolution), so mid never actually composites near-edge data —
+        // shading it here anyway (previously via a dilated cushion, to avoid
+        // gaps in coverage mid would never use) only wasted work and, worse,
+        // created a thin double-composited band wherever the dilated test
+        // and cheap's exact test disagreed. Iso occupancy is unaffected —
+        // that classification is already phase-consistent across tiers
+        // (isoRefine.ts sizes each cascade as an exact multiple of the one
+        // below it), so it never needed this kind of safety cushion.
         drawBeerRefine(
           handles, texView(midBeerTex), gpu.volMidW, gpu.volMidH,
           midOcc, coarseOcc, "clear",
-          Mgrid, volumeSteps, half, scale, ro, dirMatrix, 2, true,
-          1 / Math.max(1, gpu.volMidW),
+          Mgrid, volumeSteps, half, scale, ro, dirMatrix, 2, false,
         );
         // fsMainSwap does a manual bilinear, falling back to the true
         // nearest corner at the shaded/cleared boundary (midBeerTex is
@@ -1004,7 +1007,6 @@ export function renderClipFrameGpu(params: RenderClipFrameGpuParams): boolean {
           handles, sceneView, presentW, presentH,
           targets.occlIsoTex, fineOcc, "load",
           Mgrid, volumeSteps, half, scale, ro, dirMatrix, 3, true,
-          0,
         );
       }
     }
