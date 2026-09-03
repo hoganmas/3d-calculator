@@ -61,6 +61,52 @@ export function lobattoDCT1D(vals: ArrayLike<number>): Float64Array {
   return out;
 }
 
+/**
+ * IDCT-I basis (0.5-weighted endpoints baked in) for length-n → length-M
+ * Lobatto IDCT, packed [j*n+k]. Cached per (n, M) so every expression at
+ * the same degree/grid reuses it instead of each re-deriving its own cos table.
+ */
+const lobattoBasisCache = new Map<number, Float64Array>();
+
+function getLobattoBasis(n: number, M: number): Float64Array {
+  const key = n * 100000 + M;
+  const cached = lobattoBasisCache.get(key);
+  if (cached) return cached;
+  const basis = new Float64Array(M * n);
+  const denom = M - 1;
+  for (let j = 0; j < M; j++) {
+    const base = j * n;
+    basis[base] = 0.5;
+    for (let k = 1; k < n - 1; k++) basis[base + k] = Math.cos((Math.PI * k * j) / denom);
+    basis[base + n - 1] = 0.5 * Math.cos((Math.PI * (n - 1) * j) / denom);
+  }
+  lobattoBasisCache.set(key, basis);
+  return basis;
+}
+
+/** Same as lobattoIDCT1D but writes into dst (stride dstStride, from dstBase) — avoids a per-row allocation across a 3D pass's many rows. */
+function applyLobattoBasisRow(
+  n: number,
+  M: number,
+  coeff: ArrayLike<number>,
+  dst: Float64Array | Float32Array,
+  dstBase: number,
+  dstStride: number,
+): void {
+  if (n - 1 === 0) {
+    const v = coeff[0] ?? 0;
+    for (let j = 0; j < M; j++) dst[dstBase + j * dstStride] = v;
+    return;
+  }
+  const basis = getLobattoBasis(n, M);
+  for (let j = 0; j < M; j++) {
+    const base = j * n;
+    let s = 0;
+    for (let k = 0; k < n; k++) s += (coeff[k] ?? 0) * basis[base + k];
+    dst[dstBase + j * dstStride] = s;
+  }
+}
+
 /** 1D Lobatto inverse (IDCT-I) at M Lobatto nodes (default M = n). */
 export function lobattoIDCT1D(coeff: ArrayLike<number>, gridM?: number): Float64Array {
   const n = coeff.length;
@@ -71,11 +117,11 @@ export function lobattoIDCT1D(coeff: ArrayLike<number>, gridM?: number): Float64
     out.fill(coeff[0] ?? 0);
     return out;
   }
-  const denom = M - 1;
+  const basis = getLobattoBasis(n, M);
   for (let j = 0; j < M; j++) {
-    let s = 0.5 * (coeff[0] ?? 0);
-    for (let k = 1; k < n - 1; k++) s += (coeff[k] ?? 0) * Math.cos((Math.PI * k * j) / denom);
-    s += 0.5 * (coeff[n - 1] ?? 0) * Math.cos((Math.PI * (n - 1) * j) / denom);
+    const base = j * n;
+    let s = 0;
+    for (let k = 0; k < n; k++) s += (coeff[k] ?? 0) * basis[base + k];
     out[j] = s;
   }
   return out;
@@ -145,8 +191,7 @@ export function idctLobatto3D(
   for (let j = 0; j < n; j++) {
     for (let k = 0; k < n; k++) {
       for (let i = 0; i < n; i++) row[i] = cheb[i + j * n + k * n * n] || 0;
-      const v = lobattoIDCT1D(row, M);
-      for (let m = 0; m < M; m++) tmp1[m + j * M + k * M * n] = v[m]!;
+      applyLobattoBasisRow(n, M, row, tmp1, j * M + k * M * n, 1);
     }
   }
 
@@ -155,8 +200,7 @@ export function idctLobatto3D(
   for (let m = 0; m < M; m++) {
     for (let k = 0; k < n; k++) {
       for (let j = 0; j < n; j++) rowY[j] = tmp1[m + j * M + k * M * n]!;
-      const v = lobattoIDCT1D(rowY, M);
-      for (let p = 0; p < M; p++) tmp2[m + p * M + k * M * M] = v[p]!;
+      applyLobattoBasisRow(n, M, rowY, tmp2, m + k * M * M, M);
     }
   }
 
@@ -165,8 +209,7 @@ export function idctLobatto3D(
   for (let m = 0; m < M; m++) {
     for (let p = 0; p < M; p++) {
       for (let k = 0; k < n; k++) rowZ[k] = tmp2[m + p * M + k * M * M]!;
-      const v = lobattoIDCT1D(rowZ, M);
-      for (let q = 0; q < M; q++) dens[m + p * M + q * M * M] = v[q]!;
+      applyLobattoBasisRow(n, M, rowZ, dens, m + p * M, M * M);
     }
   }
 
@@ -226,8 +269,7 @@ export function stepLobattoIdct3D(
       const j = (job.cursor / n) | 0;
       const k = job.cursor % n;
       for (let i = 0; i < n; i++) job.row[i] = cheb[i + j * n + k * n * n] || 0;
-      const v = lobattoIDCT1D(job.row, M);
-      for (let m = 0; m < M; m++) job.tmp1[m + j * M + k * M * n] = v[m]!;
+      applyLobattoBasisRow(n, M, job.row, job.tmp1, j * M + k * M * n, 1);
       job.cursor++;
       continue;
     }
@@ -242,8 +284,7 @@ export function stepLobattoIdct3D(
       const m = (job.cursor / n) | 0;
       const k = job.cursor % n;
       for (let j = 0; j < n; j++) job.row[j] = job.tmp1[m + j * M + k * M * n]!;
-      const v = lobattoIDCT1D(job.row, M);
-      for (let p = 0; p < M; p++) job.tmp2[m + p * M + k * M * M] = v[p]!;
+      applyLobattoBasisRow(n, M, job.row, job.tmp2, m + k * M * M, M);
       job.cursor++;
       continue;
     }
@@ -253,8 +294,7 @@ export function stepLobattoIdct3D(
     const m = (job.cursor / M) | 0;
     const p = job.cursor % M;
     for (let k = 0; k < n; k++) job.row[k] = job.tmp2[m + p * M + k * M * M]!;
-    const v = lobattoIDCT1D(job.row, M);
-    for (let q = 0; q < M; q++) job.dens[m + p * M + q * M * M] = v[q]!;
+    applyLobattoBasisRow(n, M, job.row, job.dens, m + p * M, M * M);
     job.cursor++;
   }
 

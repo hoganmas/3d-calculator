@@ -11,21 +11,65 @@ import type {
 } from "../types/models.js";
 import type { ChebAxis } from "./calcOps.js";
 
-/** Univariate IDCT at M Chebyshev roots: v_m = Σ_{i=0}^{n-1} c_i T_i(ξ_m). */
-function idctCheb1D(coeff: ArrayLike<number>, M: number): Float64Array {
-  const n = coeff.length;
-  const out = new Float64Array(M);
+/**
+ * cos(i·(m+½)·π/M) basis for the length-n → length-M Chebyshev IDCT-III,
+ * packed [m*n+i]. Every expression sharing a (n, M) pair (typically all
+ * layers at the current UI degree) reuses the same basis instead of each
+ * paying its own O(n·M) transcendental cost.
+ */
+const chebBasisCache = new Map<number, Float64Array>();
+
+function getChebBasis(n: number, M: number): Float64Array {
+  const key = n * 100000 + M;
+  const cached = chebBasisCache.get(key);
+  if (cached) return cached;
+  const basis = new Float64Array(M * n);
   const invM = Math.PI / M;
   for (let m = 0; m < M; m++) {
     const phase = (m + 0.5) * invM;
+    const base = m * n;
+    for (let i = 0; i < n; i++) basis[base + i] = Math.cos(i * phase);
+  }
+  chebBasisCache.set(key, basis);
+  return basis;
+}
+
+/** Univariate IDCT at M Chebyshev roots: v_m = Σ_{i=0}^{n-1} c_i T_i(ξ_m). */
+function idctCheb1D(coeff: ArrayLike<number>, M: number): Float64Array {
+  const n = coeff.length;
+  const basis = getChebBasis(n, M);
+  const out = new Float64Array(M);
+  for (let m = 0; m < M; m++) {
+    const base = m * n;
     let s = 0;
     for (let i = 0; i < n; i++) {
       const c = coeff[i];
-      if (c !== 0) s += c * Math.cos(i * phase);
+      if (c !== 0) s += c * basis[base + i];
     }
     out[m] = s;
   }
   return out;
+}
+
+/** Same as idctCheb1D but writes straight into dst (stride dstStride, from dstBase) — avoids a per-row allocation when a 3D pass runs this over many rows. */
+function applyChebBasisRow(
+  basis: Float64Array,
+  n: number,
+  M: number,
+  coeff: ArrayLike<number>,
+  dst: Float64Array | Float32Array,
+  dstBase: number,
+  dstStride: number,
+): void {
+  for (let m = 0; m < M; m++) {
+    const base = m * n;
+    let s = 0;
+    for (let i = 0; i < n; i++) {
+      const c = coeff[i];
+      if (c !== 0) s += c * basis[base + i];
+    }
+    dst[dstBase + m * dstStride] = s;
+  }
 }
 
 /**
@@ -56,14 +100,14 @@ export function idctCheb3D(
 ): Idct3DResult {
   const n = deg + 1;
   const M = Math.max(n, (gridM ?? n) | 0 || n);
+  const basis = getChebBasis(n, M);
   const tmp1 = new Float64Array(M * n * n);
   const row = new Float64Array(n);
 
   for (let j = 0; j < n; j++) {
     for (let k = 0; k < n; k++) {
       for (let i = 0; i < n; i++) row[i] = cheb[i + j * n + k * n * n] || 0;
-      const v = idctCheb1D(row, M);
-      for (let m = 0; m < M; m++) tmp1[m + j * M + k * M * n] = v[m];
+      applyChebBasisRow(basis, n, M, row, tmp1, j * M + k * M * n, 1);
     }
   }
 
@@ -72,8 +116,7 @@ export function idctCheb3D(
   for (let m = 0; m < M; m++) {
     for (let k = 0; k < n; k++) {
       for (let j = 0; j < n; j++) rowY[j] = tmp1[m + j * M + k * M * n];
-      const v = idctCheb1D(rowY, M);
-      for (let p = 0; p < M; p++) tmp2[m + p * M + k * M * M] = v[p];
+      applyChebBasisRow(basis, n, M, rowY, tmp2, m + k * M * M, M);
     }
   }
 
@@ -82,8 +125,7 @@ export function idctCheb3D(
   for (let m = 0; m < M; m++) {
     for (let p = 0; p < M; p++) {
       for (let k = 0; k < n; k++) rowZ[k] = tmp2[m + p * M + k * M * M];
-      const v = idctCheb1D(rowZ, M);
-      for (let q = 0; q < M; q++) dens[m + p * M + q * M * M] = v[q];
+      applyChebBasisRow(basis, n, M, rowZ, dens, m + p * M, M * M);
     }
   }
 
@@ -131,6 +173,7 @@ export function stepIdctCheb3D(
 ): { job: IdctCheb3DJob | null; done: boolean; dens?: Float32Array } {
   const t0 = performance.now();
   const { cheb, n, M } = job;
+  const basis = getChebBasis(n, M);
 
   while (performance.now() - t0 < budgetMs) {
     if (job.pass === 0) {
@@ -143,8 +186,7 @@ export function stepIdctCheb3D(
       const j = (job.cursor / n) | 0;
       const k = job.cursor % n;
       for (let i = 0; i < n; i++) job.row[i] = cheb[i + j * n + k * n * n] || 0;
-      const v = idctCheb1D(job.row, M);
-      for (let m = 0; m < M; m++) job.tmp1[m + j * M + k * M * n] = v[m]!;
+      applyChebBasisRow(basis, n, M, job.row, job.tmp1, j * M + k * M * n, 1);
       job.cursor++;
       continue;
     }
@@ -159,8 +201,7 @@ export function stepIdctCheb3D(
       const m = (job.cursor / n) | 0;
       const k = job.cursor % n;
       for (let j = 0; j < n; j++) job.row[j] = job.tmp1[m + j * M + k * M * n]!;
-      const v = idctCheb1D(job.row, M);
-      for (let p = 0; p < M; p++) job.tmp2[m + p * M + k * M * M] = v[p]!;
+      applyChebBasisRow(basis, n, M, job.row, job.tmp2, m + k * M * M, M);
       job.cursor++;
       continue;
     }
@@ -170,8 +211,7 @@ export function stepIdctCheb3D(
     const m = (job.cursor / M) | 0;
     const p = job.cursor % M;
     for (let k = 0; k < n; k++) job.row[k] = job.tmp2[m + p * M + k * M * M]!;
-    const v = idctCheb1D(job.row, M);
-    for (let q = 0; q < M; q++) job.dens[m + p * M + q * M * M] = v[q]!;
+    applyChebBasisRow(basis, n, M, job.row, job.dens, m + p * M, M * M);
     job.cursor++;
   }
 
