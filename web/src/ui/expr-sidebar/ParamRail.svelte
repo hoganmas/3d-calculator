@@ -25,13 +25,20 @@
   let sliderEl: HTMLInputElement | undefined = $state();
   let trackEl: HTMLDivElement | undefined = $state();
   let zeroEl: HTMLSpanElement | undefined = $state();
+  // Only the pointer actually being down on the thumb should block live
+  // resync — gating on focus instead left the thumb frozen forever after a
+  // single click, since a range input keeps focus long after the pointer is
+  // released and nothing else ever blurred it. That looked like "jumping to
+  // a value stops the animation from visibly continuing," even though the
+  // underlying param kept animating the whole time.
+  let scrubbing = false;
 
   export function syncFromParam() {
     const p = getParam(paramName);
     if (!p) return;
     const min = p.min;
     const max = p.max;
-    if (sliderEl && document.activeElement !== sliderEl) {
+    if (sliderEl && !scrubbing) {
       sliderEl.min = String(min);
       sliderEl.max = String(max);
       sliderEl.step = p.animating && !p.driven ? "any" : String(p.step);
@@ -118,6 +125,15 @@
     onParamChange();
   }
 
+  function onSliderPointerDown() {
+    scrubbing = true;
+  }
+
+  function onSliderPointerUp() {
+    scrubbing = false;
+    syncFromParam();
+  }
+
   const p = $derived.by(() => {
     void paramTick;
     return getParam(paramName);
@@ -143,6 +159,9 @@
           class="expr-param-slider"
           disabled={p.driven}
           oninput={onSliderInput}
+          onpointerdown={onSliderPointerDown}
+          onpointerup={onSliderPointerUp}
+          onpointercancel={onSliderPointerUp}
         />
       </div>
       <input

@@ -8,6 +8,7 @@ import {
   DEFAULT_KEYFRAME_K,
   diagnoseKeyframeCaches,
   ensureLayerKeyframes,
+  getIsoBlendSceneM,
   getKeyframeLoadSummary,
   getKeyframeProgress,
   getKeyframeMetrics,
@@ -395,24 +396,38 @@ export async function run() {
       },
     },
     {
-      name: "progressive: degree-first fills all slots before next rung",
+      name: "progressive: active pair advances ahead of untouched slots",
       fn: async () => {
         clearKeyframeCaches();
         setupAnimParam("t", 0.5);
         const opts = { ...keyframeOpts("layer-prog-phase", "t"), deg: 16, K: 3 };
-        let sawAllCoarse = false;
-        setKeyframeProgressHandler(() => {
-          const p = getKeyframeProgress("layer-prog-phase");
-          if (p?.frameDeg.every((d) => d === 4)) sawAllCoarse = true;
-        });
         const result = ensureLayerKeyframes(opts);
         const afterSync = getKeyframeProgress("layer-prog-phase")!;
         const third = [0, 1, 2].find((k) => k !== result.blend.i0 && k !== result.blend.i1)!;
         assert(afterSync.frameDeg[third] === 0, "third slot still empty after sync");
         assert(afterSync.frameDeg[result.blend.i0] === 4, "blend coarse after sync");
-        await waitForComplete(20000);
-        assert(sawAllCoarse, "all slots reached deg 4 before advancing");
-        setKeyframeProgressHandler(null);
+        const t0 = Date.now();
+        let sawPairAheadOfThird = false;
+        while (!allKeyframesComplete()) {
+          tickKeyframePump(1);
+          const p = getKeyframeProgress("layer-prog-phase")!;
+          if (
+            p.frameDeg[result.blend.i0]! > p.frameDeg[third]! ||
+            p.frameDeg[result.blend.i1]! > p.frameDeg[third]!
+          ) {
+            sawPairAheadOfThird = true;
+          }
+          if (Date.now() - t0 > 20000) {
+            throw new Error(
+              `active-pair fill timed out:\n${JSON.stringify(diagnoseKeyframeCaches(), null, 2)}`,
+            );
+          }
+          await new Promise((r) => setTimeout(r, 0));
+        }
+        assert(
+          sawPairAheadOfThird,
+          "active pair should advance past the untouched third slot instead of waiting for it",
+        );
       },
     },
     {
@@ -512,7 +527,7 @@ export async function run() {
       },
     },
     {
-      name: "progressive: play coarse while higher rungs stage",
+      name: "progressive: current pair reaches target without waiting on distant slots",
       fn: async () => {
         clearKeyframeCaches();
         setupAnimParam("t");
@@ -520,33 +535,18 @@ export async function run() {
         const opts = { ...keyframeOpts("layer-play-coarse", "t"), deg: 16, K: 5 };
         ensureLayerKeyframes(opts);
         const t0 = Date.now();
-        let sawCoarseWhileHigherStaged = false;
+        let sawPairAheadOfDistantSlot = false;
         while (!allKeyframesComplete()) {
           tickKeyframePump(1);
           const p = getKeyframeProgress("layer-play-coarse")!;
-          const live = p.displayDeg.filter((d) => d > 0);
-          if (live.length) {
-            assert(
-              live.every((d) => d === live[0]),
-              `single display rung, got ${live.join(",")}`,
-            );
+          // Displayed degree only ever moves forward, per slot.
+          for (let k = 0; k < p.displayDeg.length; k++) {
+            assert(p.displayDeg[k]! <= p.frameDeg[k]!, `no regression at slot ${k}`);
           }
-          if (p.displayDeg.every((d) => d >= 4)) {
-            for (const v of [0, 0.25, 0.5, 0.75, 1]) {
-              updateParam("t", { value: v });
-              const blend = peekKeyframeBlend("layer-play-coarse");
-              assert(!!blend, `peek at t=${v}`);
-              assert(
-                blend!.i0 !== blend!.i1,
-                `interpolate at t=${v} while display=${p.displayDeg[0]} (not hold)`,
-              );
-            }
-          }
-          if (
-            p.displayDeg.every((d) => d === 4) &&
-            p.stagingDeg.some((d) => d >= 8)
-          ) {
-            sawCoarseWhileHigherStaged = true;
+          // Pair near t=0 (slots 0,1) should be able to outpace a distant,
+          // never-visited slot (4) instead of waiting for it to catch up.
+          if (p.frameDeg[0]! > 0 && p.frameDeg[4]! < p.frameDeg[0]!) {
+            sawPairAheadOfDistantSlot = true;
           }
           if (Date.now() - t0 > 25000) {
             throw new Error(
@@ -555,7 +555,137 @@ export async function run() {
           }
           await new Promise((r) => setTimeout(r, 0));
         }
-        assert(sawCoarseWhileHigherStaged, "kept coarse display while deg 8+ staged");
+        assert(
+          sawPairAheadOfDistantSlot,
+          "current pair should progress past a distant, unvisited slot instead of waiting for it",
+        );
+      },
+    },
+    {
+      name: "progressive: continuous playhead movement does not starve in-flight work",
+      fn: async () => {
+        // Regression test: prioritizing the active pair (previous test) is
+        // recomputed fresh every pump tick from the *current* param value.
+        // During real playback that value moves every frame, so the active
+        // pair drifts continuously — if in-flight work is only ever checked
+        // for the current pair, a job started for slot k gets abandoned the
+        // instant the pair drifts past it, and progress scatters across many
+        // slots without ever finishing any (visible as quality jumping
+        // around / freezing instead of advancing smoothly).
+        clearKeyframeCaches();
+        setupAnimParam("t");
+        updateParam("t", { value: 0, min: 0, max: 1 });
+        const opts = { ...keyframeOpts("layer-continuous-play", "t"), deg: 16, K: 8 };
+        ensureLayerKeyframes(opts);
+        const t0 = Date.now();
+        // Sweep the playhead forward across the whole range exactly once —
+        // never revisiting slot 0's neighborhood — like a single play-through
+        // rather than scrubbing back and forth (which would let a starved
+        // slot get "rediscovered" once the sweep wraps around and masks the
+        // bug). Slot 0 gets real work only in the first few ticks, then the
+        // pair moves on for good.
+        const sweepTicks = opts.K - 1; // one tick per segment boundary — minimal dwell time per pair
+        for (let i = 0; i <= sweepTicks; i++) {
+          updateParam("t", { value: i / sweepTicks });
+          tickKeyframePump(1);
+          if (Date.now() - t0 > 25000) throw new Error("sweep itself timed out");
+          await new Promise((r) => setTimeout(r, 0));
+        }
+        const p = getKeyframeProgress("layer-continuous-play")!;
+        assert(
+          (p.displayDeg[0] ?? 0) >= 8,
+          `slot 0 (visited only at the very start of the sweep) should have kept making real progress instead of being abandoned once the playhead moved on — got displayDeg=${p.displayDeg[0]}:\n${JSON.stringify(diagnoseKeyframeCaches(), null, 2)}`,
+        );
+      },
+    },
+    {
+      name: "progressive: neighboring segment gets a head start before the playhead reaches it",
+      fn: async () => {
+        // Regression test: once the active pair (i0,i1) has nothing left to
+        // do, the scheduler should start warming the *next* segment the
+        // playhead is heading toward instead of sitting idle — otherwise
+        // crossing into that segment starts it from zero baked data, and the
+        // display visibly drops a rung right at the boundary ("rung
+        // hopping").
+        clearKeyframeCaches();
+        setupAnimParam("t");
+        updateParam("t", { value: 0.5, min: 0, max: 1 });
+        const opts = { ...keyframeOpts("layer-lookahead", "t"), deg: 16, K: 5 };
+        ensureLayerKeyframes(opts);
+        const blend = peekKeyframeBlend("layer-lookahead")!;
+        const t0 = Date.now();
+        while (true) {
+          tickKeyframePump(1);
+          const p = getKeyframeProgress("layer-lookahead")!;
+          if (p.frameDeg[blend.i0]! >= opts.deg && p.frameDeg[blend.i1]! >= opts.deg) break;
+          if (Date.now() - t0 > 25000) {
+            throw new Error(
+              `active pair never completed:\n${JSON.stringify(diagnoseKeyframeCaches(), null, 2)}`,
+            );
+          }
+          await new Promise((r) => setTimeout(r, 0));
+        }
+        // Give the scheduler a few more ticks to pick up lookahead work once
+        // the active pair is done.
+        for (let i = 0; i < 5; i++) tickKeyframePump(1);
+        const p = getKeyframeProgress("layer-lookahead")!;
+        const neighbor = blend.i1 + 1 < opts.K ? blend.i1 + 1 : blend.i0 - 1;
+        assert(
+          (p.frameDeg[neighbor] ?? 0) > 0,
+          `neighboring segment ${neighbor} should get a head start once the active pair finishes — got frameDeg=${p.frameDeg[neighbor]}:\n${JSON.stringify(diagnoseKeyframeCaches(), null, 2)}`,
+        );
+      },
+    },
+    {
+      name: "display resolution stays with the shown side while its neighbor is freshly (re)baking",
+      fn: async () => {
+        // Regression test: displayBlendForValue snaps t to exactly 0 or 1
+        // whenever degrees mismatch, meaning only ONE side is ever actually
+        // shown — isoBlendSceneM must follow that side's resolution rather
+        // than always falling back to the lower of the two, or the display
+        // visibly drops quality the instant an invisible neighbor gets any
+        // bake at all (a "rung hop") even though nothing is being blended.
+        //
+        // segmentForValue always returns an adjacent pair (i0, i0+1), never
+        // i0===i1, so a single value can't isolate one slot — instead, fully
+        // bake segment (0,1), then step into segment (1,2): slot 1 carries
+        // over fully baked, slot 2 starts completely fresh beside it.
+        clearKeyframeCaches();
+        setupAnimParam("t");
+        updateParam("t", { value: 0, min: 0, max: 1 });
+        const opts = { ...keyframeOpts("layer-blend-m", "t"), deg: 32, K: 3 };
+        ensureLayerKeyframes(opts);
+        const t0 = Date.now();
+        while (
+          (getKeyframeProgress("layer-blend-m")!.displayDeg[0] ?? 0) < opts.deg ||
+          (getKeyframeProgress("layer-blend-m")!.displayDeg[1] ?? 0) < opts.deg
+        ) {
+          tickKeyframePump(1);
+          if (Date.now() - t0 > 20000) throw new Error("segment (0,1) never reached target");
+          await new Promise((r) => setTimeout(r, 0));
+        }
+        // Step to the boundary between segments (0,1) and (1,2): slot 1 is
+        // now shown alone (t=0), slot 2 hasn't been touched yet.
+        updateParam("t", { value: 0.5 });
+        const mFull = getIsoBlendSceneM("layer-blend-m");
+        assert(mFull > 0, "slot 1 should have a real grid resolution once baked");
+        const t1 = Date.now();
+        while ((getKeyframeProgress("layer-blend-m")!.displayDeg[2] ?? 0) <= 0) {
+          tickKeyframePump(1);
+          if (Date.now() - t1 > 20000) throw new Error("slot 2 never got its first bake");
+          await new Promise((r) => setTimeout(r, 0));
+        }
+        const prog = getKeyframeProgress("layer-blend-m")!;
+        assert(prog.displayDeg[1] === opts.deg, "slot 1 should still be at full target degree");
+        assert(
+          prog.displayDeg[2]! > 0 && prog.displayDeg[2]! < opts.deg,
+          "slot 2 should be freshly, partially baked",
+        );
+        const mAfter = getIsoBlendSceneM("layer-blend-m");
+        assert(
+          mAfter === mFull,
+          `display is snapped to slot 1 alone here, so its resolution shouldn't drop just because slot 2 started baking at a coarser degree — got ${mAfter}, expected ${mFull}`,
+        );
       },
     },
     {

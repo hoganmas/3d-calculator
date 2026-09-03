@@ -286,6 +286,7 @@ export function setParamValue(
   name: string,
   value: number,
   { stopAnim = true, rewriteLatex = true }: { stopAnim?: boolean; rewriteLatex?: boolean } = {},
+  timeSec: number = performance.now() / 1000,
 ) {
   const cur = params.get(name);
   if (!cur) return null;
@@ -299,9 +300,7 @@ export function setParamValue(
     // Scrubbing to a new value while playback continues must rebase phase to
     // that value now, or the next tick recomputes value from the old phase
     // and instantly snaps back to wherever the untouched trajectory would be.
-    phase: stillAnimating
-      ? phaseForValue({ ...cur, value: v }, performance.now() / 1000)
-      : cur.phase,
+    phase: stillAnimating ? phaseForValue({ ...cur, value: v }, timeSec) : cur.phase,
     latex: rewriteLatex ? formatParamDefLatex(name, v) : cur.latex,
     driven: rewriteLatex ? false : cur.driven,
     freeParams: rewriteLatex ? [] : cur.freeParams,

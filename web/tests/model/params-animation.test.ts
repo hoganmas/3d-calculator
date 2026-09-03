@@ -295,6 +295,93 @@ export async function run() {
       },
     },
     {
+      name: "setParamValue with stopAnim:false keeps playing without snapping back",
+      fn: () => {
+        resetParams();
+        syncParamsFromDefinitions([
+          {
+            name: "a",
+            latex: "a=0",
+            exprId: "e1",
+            min: 0,
+            max: 10,
+            value: 0,
+            animating: true,
+            speed: 0.35,
+            phase: 0,
+            animMode: "pingpong",
+          },
+        ]);
+        // Scrub to an arbitrary value mid-playback, like dragging the slider
+        // while it's animating.
+        const t0 = 100;
+        const next = setParamValue("a", 7, { stopAnim: false, rewriteLatex: true }, t0);
+        assert(next?.animating === true, "stays animating after a scrub");
+        // The very next tick, at the same instant (0 elapsed), must not have
+        // moved — a stale (non-rebased) phase would immediately recompute the
+        // value from the old, untouched trajectory and snap away from 7.
+        tickParamAnimation(t0);
+        assertNear(getParamValues().a ?? NaN, 7, 1e-6, "no snap-back at the same instant");
+        // A tiny time step forward should move only slightly, continuing
+        // smoothly from the scrubbed value.
+        tickParamAnimation(t0 + 0.01);
+        const drifted = Math.abs((getParamValues().a ?? NaN) - 7);
+        assert(drifted < 0.5, `small time step should barely move the value, drifted ${drifted}`);
+      },
+    },
+    {
+      name: "setParamValue with stopAnim:true stops animating and holds the value",
+      fn: () => {
+        resetParams();
+        syncParamsFromDefinitions([
+          {
+            name: "a",
+            latex: "a=0",
+            exprId: "e1",
+            min: 0,
+            max: 10,
+            value: 0,
+            animating: true,
+            speed: 0.35,
+            phase: 0,
+            animMode: "pingpong",
+          },
+        ]);
+        const next = setParamValue("a", 7, { stopAnim: true, rewriteLatex: true }, 100);
+        assert(next?.animating === false, "stops animating");
+        tickParamAnimation(101);
+        assertNear(getParamValues().a ?? NaN, 7, 1e-9, "value held while stopped");
+      },
+    },
+    {
+      name: "scrubbed phase survives a compile resync when sliderPhase is synced alongside sliderAnimating",
+      fn: () => {
+        // Matches what ParamRail.svelte's onSliderInput must do: setParamValue
+        // rebases the live param's phase, but compileAllExprs rebuilds every
+        // param's phase from the expression's stored sliderPhase field — so a
+        // caller that persists sliderAnimating without sliderPhase gets the
+        // rebase silently undone on the next resync (regression: the
+        // animation appeared to ignore/override a mid-playback scrub).
+        resetParams();
+        setExpressions([{ id: "e1", latex: "a=0", enabled: true }]);
+        compileAllExprs({ rebuildUi: false });
+        toggleParamAnimate("a", 100);
+        assert(getParam("a")?.animating === true, "playing");
+
+        const next = setParamValue("a", 7, { stopAnim: false, rewriteLatex: true }, 100);
+        assert(!!next, "scrub applied");
+        updateExprSilent("e1", {
+          latex: next!.latex,
+          sliderAnimating: next!.animating,
+          sliderPhase: next!.phase,
+        });
+
+        compileAllExprs({ rebuildUi: false });
+        tickParamAnimation(100);
+        assertNear(getParamValues().a ?? NaN, 7, 1e-6, "resync must not undo the scrub");
+      },
+    },
+    {
       name: "collectValueDirtyParams detects static slider edits",
       fn: () => {
         const dirty = collectValueDirtyParams({ a: 1, b: 2 }, { a: 1.5, b: 2 });

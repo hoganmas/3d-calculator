@@ -54,7 +54,16 @@
     if (!next) return;
     updateExprSilent(item.id, { sliderAnimating: next.animating, sliderPhase: next.phase });
     syncAll();
-    onParamChange();
+    // Only forces an upload when starting to play (kicks off/ensures the
+    // keyframe cache). Pausing doesn't touch the value, so there's nothing to
+    // refit — calling onParamChange() here schedules uploadFit({fromAnim:
+    // false}), and fromAnim=false disables the keyframe-blend branch in
+    // pipeline.ts entirely, dropping straight to a from-scratch non-keyframe
+    // fit that starts at the bottom of the ladder. That discarded whatever
+    // high-quality keyframe data was already on screen the instant you
+    // paused, and the background pump (loop.ts) already keeps that keyframe
+    // data improving on its own without needing this call.
+    if (next.animating) onParamChange();
   }
 
   function onOptsClick(ev: MouseEvent) {

@@ -1037,7 +1037,18 @@ function isoBlendSceneM(
   const M0 = gridMFromFrame(cache.frames[i0] ?? {});
   const M1 = gridMFromFrame(cache.frames[i1] ?? {});
   if (d0 === d1 && M0 > 0 && M0 === M1) return M0;
-  if (d0 > 0 && d1 > 0 && d0 !== d1) return d0 < d1 ? M0 || M1 || 0 : M1 || M0 || 0;
+  // Mismatched degrees: displayBlendForValue always snaps t to exactly 0 or
+  // 1 here (shows one side alone, no interpolation), so the resolution
+  // should follow whichever side is actually on screen — not the lower of
+  // the two. Picking the lower one unconditionally downgraded the shown
+  // frame the moment its *invisible* neighbor got any bake at all, which
+  // read as a visible quality drop ("rung hop") for a frame that was never
+  // actually being blended with anything.
+  if (d0 > 0 && d1 > 0 && d0 !== d1) {
+    if (t <= 0) return M0 || M1 || 0;
+    if (t >= 1) return M1 || M0 || 0;
+    return d0 < d1 ? M0 || M1 || 0 : M1 || M0 || 0;
+  }
   if (d0 > d1 || (d0 > 0 && d1 <= 0)) return M0 || M1 || 0;
   if (d1 > d0 || (d1 > 0 && d0 <= 0)) return M1 || M0 || 0;
   if (M0 > 0 && M0 === M1) return M0;
@@ -1109,7 +1120,19 @@ function applyDisplayFrame(
   });
 }
 
-/** Commit a baked frame. Display stays on the complete rung; higher rungs stage until all slots catch up. */
+/**
+ * Commit a baked frame: display it as soon as it's ready.
+ *
+ * Used to hold higher rungs back in staging until every slot in the K^N
+ * grid reached the same rung (playingDisplayDeg/tryPromoteGlobalRung) —
+ * intended to avoid visible mismatch, but the only mismatch that's ever
+ * actually rendered is between the *currently blending* pair (i0, i1), and
+ * isoBlendSceneM() already handles that case on its own (falls back to the
+ * lower-degree side's M until both catch up). Gating on the whole grid
+ * instead meant any slot's completed bake sat invisible until distant,
+ * rarely-visited parts of the timeline finished too — jumping to a fresh
+ * point showed its first (coarse) rung, then stayed stuck there.
+ */
 function commitFrame(
   cache: LayerKeyframeCache,
   k: number,
@@ -1126,30 +1149,14 @@ function commitFrame(
     return [];
   }
   clearCoarseStaging(cache, k);
-  const playDeg = playingDisplayDeg(cache);
-  const displayDeg = cache.frameDeg[k] ?? 0;
-  const joiningPlay = displayDeg === 0 || playDeg === 0 || deg <= playDeg;
-  if (joiningPlay) {
-    applyDisplayFrame(cache, k, frame, deg);
-    tearLog("commit-join-play", {
-      layerId: cache.bakeOpts.layerId,
-      k,
-      deg,
-      playDeg,
-      M: gridMFromDens(frame.dens),
-    });
-    return [k];
-  }
-  cache.stagingFrames[k] = frame;
-  cache.stagingDeg[k] = deg;
-  tearLog("commit-staged", {
+  applyDisplayFrame(cache, k, frame, deg);
+  tearLog("commit-join-play", {
     layerId: cache.bakeOpts.layerId,
     k,
     deg,
-    playDeg,
-    slots: [slotSummary(cache, k)],
+    M: gridMFromDens(frame.dens),
   });
-  return tryPromoteGlobalRung(cache);
+  return [k];
 }
 
 /**
@@ -1276,7 +1283,95 @@ function pickWorkAtPhase(cache: LayerKeyframeCache, phaseDeg: number): KeyframeW
   return inFlightWorkAtPhase(cache, phaseDeg) ?? newWorkAtPhase(cache, phaseDeg);
 }
 
+/**
+ * Continue ANY slot that's already mid-chunk, anywhere in the grid —
+ * checked before starting new work for the active pair. t moves every
+ * frame during playback, so the active pair drifts continuously; without
+ * this, a job started for slot k when it was the pair got abandoned the
+ * instant t ticked past it, since only the (now different) current pair
+ * was ever checked for in-flight work — scattering partial progress across
+ * many slots and never reliably finishing any of them (visible as the
+ * quality jumping around / freezing instead of progressing smoothly).
+ */
+function anyInFlightWork(cache: LayerKeyframeCache): KeyframeWork | null {
+  const order = bakeOrderForCache(cache);
+  for (const k of order) {
+    if (cache.lobattoFinalizeByK.has(k)) {
+      const fin = cache.lobattoFinalizeByK.get(k)!;
+      return { kind: "refine", k, nextDeg: fin.lob.deg };
+    }
+    if (cache.lobattoJobByK.has(k)) {
+      const job = cache.lobattoJobByK.get(k)!;
+      return { kind: "refine", k, nextDeg: job.targetDeg };
+    }
+  }
+  return null;
+}
+
+/**
+ * Start new work for whichever of the actively-blended pair is behind,
+ * through its own ladder, independent of the rest of the K^N grid — keeps
+ * the two slots roughly in lockstep with each other (matches
+ * isoBlendSceneM's assumption that a mismatch is at most one rung), but
+ * doesn't wait on unrelated, rarely-visited parts of the timeline the way
+ * the old phase-first/whole-grid scan did. That scan tried every slot's
+ * rung N before any slot's rung N+1, so jumping to a fresh point meant the
+ * pair sat at whatever coarse rung the *slowest* corner of the grid had
+ * reached, even once its own bake finished. Assumes anyInFlightWork() has
+ * already been checked — it doesn't itself look at in-flight jobs.
+ *
+ * Once the pair itself has nothing left to do (both caught up, or both
+ * mid-chunk elsewhere), gives the immediately neighboring segments — the
+ * ones the playhead is about to enter — a head start as a secondary
+ * priority, below the pair but still ahead of the rest of the grid. Without
+ * this, crossing into a fresh segment starts it from zero baked data right
+ * as you reach it, which isoBlendSceneM has no choice but to show as a
+ * visible quality drop at every segment boundary (a "rung hop").
+ */
+function pickNewWorkForActivePair(
+  cache: LayerKeyframeCache,
+  i0: number,
+  i1: number,
+): KeyframeWork | null {
+  const target = cache.targetDeg;
+  const ladder = lobattoLadderDegrees(target);
+  const start = ladder[0] ?? startLadderDeg(target);
+  const tryAdvance = (k: number): KeyframeWork | null => {
+    if (cache.lobattoFinalizeByK.has(k) || cache.lobattoJobByK.has(k)) return null;
+    const d = schedDegAt(cache, k);
+    if (d >= target) return null;
+    if (d === 0) return { kind: "coarse", k };
+    const next = ladder[ladder.indexOf(d) + 1] ?? (d < start ? start : undefined);
+    return next != null ? { kind: "refine", k, nextDeg: next } : null;
+  };
+
+  const core = i0 === i1 ? [i0] : [i0, i1];
+  core.sort((a, b) => schedDegAt(cache, a) - schedDegAt(cache, b));
+  for (const k of core) {
+    const w = tryAdvance(k);
+    if (w) return w;
+  }
+
+  const K = cache.K;
+  const lookahead = [i0 - 1, i1 + 1].filter((k) => k >= 0 && k < K && k !== i0 && k !== i1);
+  lookahead.sort((a, b) => schedDegAt(cache, a) - schedDegAt(cache, b));
+  for (const k of lookahead) {
+    const w = tryAdvance(k);
+    if (w) return w;
+  }
+  return null;
+}
+
 function pickNextKeyframeWork(cache: LayerKeyframeCache): KeyframeWork[] {
+  // Finish anything already mid-chunk before starting something new, no
+  // matter where the active pair has drifted to since that job began.
+  const inFlight = anyInFlightWork(cache);
+  if (inFlight) return [inFlight];
+  if (cacheNDims(cache) === 1) {
+    const { i0, i1 } = segmentForValue(cache, currentParamValues(cache)[0]!);
+    const paired = pickNewWorkForActivePair(cache, i0, i1);
+    if (paired) return [paired];
+  }
   const ladder = lobattoLadderDegrees(cache.targetDeg);
   for (const phaseDeg of ladder) {
     const w = pickWorkAtPhase(cache, phaseDeg);
