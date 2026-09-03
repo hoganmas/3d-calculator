@@ -13,20 +13,7 @@ export const renderer = new THREE.WebGLRenderer({
 });
 renderer.setPixelRatio(1);
 renderer.setClearColor(0x000000, 0);
-
-/**
- * Untransformed proxy for OrbitControls' pointer target + rect math. The
- * canvas itself gets a CSS `transform` between throttled lava re-renders
- * (loop.ts pans the frozen frame to approximate the camera's rotation, so the
- * skybox doesn't visibly lag the every-rAF WebGPU foreground on mobile) — if
- * controls listened on the canvas directly, that transform would shift what
- * `getBoundingClientRect()` reports and desync touch deltas from the camera,
- * which is worse than the lag it's meant to fix.
- */
-export const rendererInputSurface = document.createElement("div");
-rendererInputSurface.style.cssText = "position:absolute;inset:0;overflow:hidden;";
-els.viewport.appendChild(rendererInputSurface);
-rendererInputSurface.appendChild(renderer.domElement);
+els.viewport.appendChild(renderer.domElement);
 
 /** Axis labels for the WebGL fallback (always-on-top). WebGPU draws them
  *  in the march pass with iso depth-test instead. */
@@ -55,12 +42,12 @@ camera.up.set(0, 0, 1);
 export const DEFAULT_CAMERA_POSITION = new THREE.Vector3(5.2, 6.8, 4.0);
 camera.position.copy(DEFAULT_CAMERA_POSITION);
 
-export const controls = new OrbitControls(camera, rendererInputSurface);
+export const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.enablePan = true;
 controls.screenSpacePanning = true;
 controls.target.set(0, 0, 0);
-rendererInputSurface.addEventListener("contextmenu", (e) => e.preventDefault());
+renderer.domElement.addEventListener("contextmenu", (e) => e.preventDefault());
 
 export const boxMat = new THREE.LineBasicMaterial({ color: themeColors.boxEdge });
 export const boxHelper = new THREE.LineSegments(

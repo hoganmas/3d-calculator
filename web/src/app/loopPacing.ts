@@ -2,12 +2,16 @@ import type { DeviceTier } from "./deviceTier.js";
 
 /**
  * Lava skybox on the GPU iso path — phones share one GPU with WebGPU.
- * Confirmed the throttle itself (background lagging the every-rAF WebGPU
- * foreground) was the source of "camera jitters as rotation slows" on
- * mobile. Kept throttled for the GPU-sharing win; loop.ts now reprojects the
- * frozen frame via CSS transform between real renders to close the gap.
+ * Mobile was throttled to 50ms, but the frozen background visibly lagged
+ * the every-rAF WebGPU foreground — most noticeable as rotation decelerates,
+ * read as the camera itself jittering. A CSS-transform reprojection between
+ * throttled renders was tried to keep the GPU-sharing win, but it's only a
+ * linear approximation of a nonlinear perspective rotation: during an active
+ * drag the per-interval angular delta gets large enough that the pan visibly
+ * diverges from the next real render, producing a smear-then-snap every 50ms
+ * — a worse artifact than the lag it replaced. Disabled outright instead.
  */
-export const GPU_PATH_LAVA_INTERVAL_MOBILE_MS = 50;
+export const GPU_PATH_LAVA_INTERVAL_MOBILE_MS = 0;
 export const GPU_PATH_LAVA_INTERVAL_TABLET_MS = 33;
 
 /**
