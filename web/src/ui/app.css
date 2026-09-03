@@ -1966,6 +1966,14 @@
       }
       .mobile-expr-track {
         display: flex;
+        /* Without an explicit width the track (a block-level flex container)
+           computes width:auto as "fill the viewport", not "sum of children" —
+           its non-shrinking slides (flex: 0 0 var(--mobile-expr-slide-w))
+           then overflow that too-narrow box instead of extending it, which
+           put the translateX(-index*slideWidth) JS math out of sync with
+           where slides actually land once the carousel had scrolled past
+           the first slide. max-content sizes the track to its real content. */
+        width: max-content;
         align-items: flex-start;
         will-change: transform;
         transition: transform 0.2s cubic-bezier(0.32, 0.72, 0, 1);

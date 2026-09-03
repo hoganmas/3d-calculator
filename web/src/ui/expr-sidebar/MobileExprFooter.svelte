@@ -297,6 +297,22 @@
   });
 
   $effect(() => {
+    if (!viewportEl) return;
+    // The viewport is overflow:hidden and positioned only via the track's
+    // translateX transform — it must never actually scroll. But it's still a
+    // valid scroll container, so focusing a control inside a slide (e.g. the
+    // param slider) makes the browser auto-scroll it into view natively,
+    // leaving scrollLeft stuck nonzero forever after (nothing else resets
+    // it), which then desyncs every subsequent index*viewportWidth transform
+    // from where content actually renders. Snap any such scroll back to 0.
+    const onScroll = () => {
+      if (viewportEl!.scrollLeft !== 0) viewportEl!.scrollLeft = 0;
+    };
+    viewportEl.addEventListener("scroll", onScroll, { passive: true });
+    return () => viewportEl?.removeEventListener("scroll", onScroll);
+  });
+
+  $effect(() => {
     if (!footerEl || typeof ResizeObserver === "undefined") return;
     syncFooterHeight();
     const ro = new ResizeObserver(() => syncFooterHeight());
