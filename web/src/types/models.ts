@@ -155,6 +155,8 @@ export interface FitTiming {
   kfChebMs?: number;
   kfIdctMs?: number;
   kfGradMs?: number;
+  /** performance.now() when this snapshot was captured — HUD uses it to tell a live reading from a frozen one. */
+  capturedAt: number;
 }
 
 export interface CompiledLayer {

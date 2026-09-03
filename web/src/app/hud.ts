@@ -128,7 +128,7 @@ export function hudText() {
     : `submit miss (last ${state.lastDensSubmitMs.toFixed(0)}ms)`;
   const p = getClipGpuProfile();
   const gpuSplit = p.timestamps
-    ? ` · idct ${p.idctMs.toFixed(2)}/march ${p.marchMs.toFixed(1)}`
+    ? ` · upload ${p.sceneUploadMs.toFixed(2)}/march ${p.marchMs.toFixed(1)}`
     : "";
   const present =
     p.presentIntervalMs > 0 && performance.now() - p.lastPresentAt < 1200
@@ -185,8 +185,19 @@ export function buildMetricsReport() {
     `march_submit_ms ${state.densSubmittedThisFrame ? state.bakeMsSmooth.toFixed(2) : "—"}`,
     `march_last_ms   ${state.lastDensSubmitMs.toFixed(2)}`,
     `gpu_timestamps  ${p.timestamps ? "yes" : "no"}`,
-    `idct_ms         ${p.idctMs ? p.idctMs.toFixed(3) : "n/a"}`,
+    `scene_upload_ms     ${p.sceneUploadMs ? p.sceneUploadMs.toFixed(3) : "n/a"}`,
+    `scene_upload_age_ms ${p.sceneUploadAt ? (performance.now() - p.sceneUploadAt).toFixed(0) : "n/a"}`,
+    // Per-stage GPU breakdown (iso/march → beer → flow → fxaa → grid), each a
+    // consecutive timestamp delta — see STAMP_END_* in gpuSubmit.ts. Grid was
+    // previously outside the timestamped window entirely (untimestamped).
     `gpu_march_ms    ${p.timestamps ? p.marchMs.toFixed(3) : "n/a"}`,
+    `gpu_beer_ms     ${p.timestamps ? p.beerMs.toFixed(3) : "n/a"}`,
+    `gpu_flow_ms     ${p.timestamps ? p.flowMs.toFixed(3) : "n/a"}`,
+    `gpu_fxaa_ms     ${p.timestamps ? p.fxaaMs.toFixed(3) : "n/a"}`,
+    `gpu_grid_ms     ${p.timestamps ? p.gridMs.toFixed(3) : "n/a"}`,
+    // Total measured GPU work (begin → end of grid). Compare against
+    // gpu_present_iv below — the gap is present/vsync/compositor overhead
+    // that happens outside any of these timestamps, not GPU compute.
     `gpu_present_ms  ${p.presentWallMs > 0 ? p.presentWallMs.toFixed(2) : "n/a"}`,
     `gpu_present_iv  ${p.presentIntervalMs > 0 ? p.presentIntervalMs.toFixed(2) : "n/a"}`,
     `gpu_present_fps ${
@@ -210,6 +221,10 @@ export function buildMetricsReport() {
   if (state.lastFitTiming) {
     const t = state.lastFitTiming;
     lines.push(
+      // Snapshot from the last uploadFit() call, not a live per-frame cost —
+      // steady keyframe playback can go a long time without calling it again,
+      // so a high age here means everything below is stale, not ongoing.
+      `fit_snapshot_age_ms ${(performance.now() - t.capturedAt).toFixed(0)}`,
       `fit_total_ms    ${t.totalMs.toFixed(2)}`,
       `fit_sample_ms   ${t.sampleMs.toFixed(2)}`,
       `fit_cheb_ms     ${t.chebMs.toFixed(2)}`,

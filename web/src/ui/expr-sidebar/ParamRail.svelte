@@ -89,13 +89,24 @@
 
   function onSliderInput() {
     if (!sliderEl) return;
+    // Scrubbing the slider retargets the value but must not interrupt
+    // playback — setParamValue rebases phase so animation continues forward
+    // from the new position instead of snapping back on the next tick.
     const next = setParamValue(paramName, Number(sliderEl.value), {
-      stopAnim: true,
+      stopAnim: false,
       rewriteLatex: true,
     });
     if (!next) return;
     const mf = getMathField();
-    updateExprSilent(item.id, { latex: next.latex, sliderAnimating: false });
+    // sliderPhase must travel with sliderAnimating — compileAllExprs() rebuilds
+    // every param's phase from this stored field, so leaving it stale here
+    // clobbers the just-rebased in-memory phase right back on the next
+    // onParamChange-triggered resync, undoing setParamValue's rebase.
+    updateExprSilent(item.id, {
+      latex: next.latex,
+      sliderAnimating: next.animating,
+      sliderPhase: next.phase,
+    });
     if (mf && !isMathFieldFocused(mf)) {
       if (typeof mf.setValue === "function") {
         mf.setValue(next.latex, { silenceNotifications: true });

@@ -136,9 +136,21 @@ export interface GpuState {
   /** At most one in-flight `onSubmittedWorkDone` sample (avoid per-frame GPU idle waits). */
   presentWorkSamplePending: boolean;
   profileBakeMs: number;
+  /** performance.now() when profileBakeMs was last updated — tells a live reading from a frozen one. */
+  profileBakeAt: number;
+  /** iso/march stage only (begin → end of the iso-refine-ladder / iso-constraints / clear branch). */
   profileMarchMs: number;
+  /** Beer/volume compositing stage (end of march → end of beer). */
+  profileBeerMs: number;
+  /** Flow particles stage (end of beer → end of flow). */
+  profileFlowMs: number;
+  /** FXAA stage (end of flow → end of fxaa). */
+  profileFxaaMs: number;
+  /** Grid overlay stage (end of fxaa → end of grid) — previously untimestamped entirely. */
+  profileGridMs: number;
   profileMarchFbW: number;
   profileMarchFbH: number;
+  /** Total measured GPU work this frame (begin → end of grid) — compare against gpu_present_iv; the gap is present/vsync/compositor overhead outside these timestamps. */
   profilePresentWallMs: number;
   profilePresentIntervalMs: number;
   lastPresentAt: number;
@@ -251,7 +263,12 @@ export const gpu: GpuState = {
   stampReadPending: false,
   presentWorkSamplePending: false,
   profileBakeMs: 0,
+  profileBakeAt: 0,
   profileMarchMs: 0,
+  profileBeerMs: 0,
+  profileFlowMs: 0,
+  profileFxaaMs: 0,
+  profileGridMs: 0,
   profileMarchFbW: 0,
   profileMarchFbH: 0,
   profilePresentWallMs: 0,

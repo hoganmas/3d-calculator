@@ -137,7 +137,13 @@
     const item = items[index];
     const mf = row?.getMathField();
     if (!mf || !item) return;
-    updateExpr(item.id, { latex: readFieldLatex(mf) });
+    const latex = readFieldLatex(mf);
+    // updateExpr() invalidates this layer's bake fingerprint whenever the
+    // patch touches `latex`, even to the same value — skip it on a plain
+    // navigation (every swipe calls this) so leaving a slide untouched
+    // doesn't mark it dirty for the next fit pass.
+    if (latex === item.latex) return;
+    updateExpr(item.id, { latex });
   }
 
   function scheduleCommitIfLeftExpr(fromExprId: string) {
@@ -199,6 +205,11 @@
     return dx;
   }
 
+  // Set only while a swipe gesture holds the suppress counter up (see below) —
+  // lets resetSwipe() release exactly the suppression this gesture acquired,
+  // regardless of how/when it fires (pointerup, cancel, or a vertical bail).
+  let suppressingForSwipe = false;
+
   function resetSwipe() {
     if (viewportEl && swipePointerId != null) {
       try {
@@ -211,6 +222,10 @@
     dragX = 0;
     swipeLocked = "none";
     swipePointerId = null;
+    if (suppressingForSwipe) {
+      suppressingForSwipe = false;
+      suppressCtrl.end();
+    }
   }
 
   function onSwipePointerDown(ev: PointerEvent) {
@@ -236,6 +251,13 @@
         dragging = true;
         const active = document.activeElement;
         if (active instanceof HTMLElement && active.closest(".mobile-expr-footer")) {
+          // This blur is a swipe-gesture technicality (stop the focused field
+          // from eating the drag), not the user leaving the field — without
+          // suppression it still trips ExprRow's onMfBlur -> scheduleCommitIfLeftExpr,
+          // which calls the real onExprChange (a full scheduleUploadFit rebuild)
+          // a couple of rAFs later on every swipe that happened to blur a field.
+          suppressCtrl.begin();
+          suppressingForSwipe = true;
           active.blur();
         }
         ev.preventDefault();
@@ -294,6 +316,22 @@
     return () => {
       mq.removeEventListener("change", onLayoutChange);
     };
+  });
+
+  $effect(() => {
+    if (!viewportEl) return;
+    // The viewport is overflow:hidden and positioned only via the track's
+    // translateX transform — it must never actually scroll. But it's still a
+    // valid scroll container, so focusing a control inside a slide (e.g. the
+    // param slider) makes the browser auto-scroll it into view natively,
+    // leaving scrollLeft stuck nonzero forever after (nothing else resets
+    // it), which then desyncs every subsequent index*viewportWidth transform
+    // from where content actually renders. Snap any such scroll back to 0.
+    const onScroll = () => {
+      if (viewportEl!.scrollLeft !== 0) viewportEl!.scrollLeft = 0;
+    };
+    viewportEl.addEventListener("scroll", onScroll, { passive: true });
+    return () => viewportEl?.removeEventListener("scroll", onScroll);
   });
 
   $effect(() => {
