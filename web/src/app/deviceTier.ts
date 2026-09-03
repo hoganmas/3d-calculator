@@ -9,6 +9,13 @@ export interface BootQualityPreset {
   scalarQuality: number;
   surfaceQuality: number;
   vectorQuality: number;
+  /**
+   * Force the raw downscale sliders after quality is applied, independent of
+   * scalarQuality/surfaceQuality (which also drive step counts). Omit to let
+   * the quality-derived downscale stand.
+   */
+  marchDownscaleOverride?: number;
+  isoMarchDownscaleOverride?: number;
 }
 
 export function isCoarsePointer(): boolean {
@@ -38,11 +45,27 @@ export function bootQualityForTier(tier: DeviceTier): BootQualityPreset {
     case "mobile":
       // Surface 100 → 1× Hermite compose. Occupancy stays 16× with a 4× mid;
       // silhouettes / intersections remarch at display res. ~40Hz vsync is fine.
-      return { precisionQuality: 25, scalarQuality: 25, surfaceQuality: 100, vectorQuality: 20 };
+      // Volume downscale forced to 8× below, independent of scalarQuality's
+      // step-count derivation.
+      return {
+        precisionQuality: 25,
+        scalarQuality: 25,
+        surfaceQuality: 100,
+        vectorQuality: 20,
+        marchDownscaleOverride: 8,
+        isoMarchDownscaleOverride: 1,
+      };
     case "tablet":
       return { precisionQuality: 40, scalarQuality: 40, surfaceQuality: 40, vectorQuality: 35 };
     default:
-      return { precisionQuality: 50, scalarQuality: 50, surfaceQuality: 50, vectorQuality: 50 };
+      return {
+        precisionQuality: 50,
+        scalarQuality: 50,
+        surfaceQuality: 50,
+        vectorQuality: 50,
+        marchDownscaleOverride: 8,
+        isoMarchDownscaleOverride: 1,
+      };
   }
 }
 
