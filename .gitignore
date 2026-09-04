@@ -230,3 +230,7 @@ web/coverage/
 
 # Cursor IDE — personal MCP config, rules, etc.
 .cursor/
+
+# Claude Code session-local artifacts (skills under .claude/skills/ are tracked).
+.claude/worktrees/
+.claude/scheduled_tasks.lock
