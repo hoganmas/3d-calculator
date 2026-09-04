@@ -9,7 +9,7 @@
     commitAutoParams,
   } from "../../model/expressions.js";
   import ExprRow from "./ExprRow.svelte";
-  import { readFieldLatex, neededParamForItem } from "./helpers.ts";
+  import { readFieldLatex, neededParamForItem, forceReflow } from "./helpers.ts";
   import { getParam } from "../../model/params.js";
   import {
     createSuppressAutoCommitCounter,
@@ -83,6 +83,7 @@
     const slide = viewportEl.querySelector('.mobile-expr-slide:not([aria-hidden="true"])');
     if (!(slide instanceof HTMLElement)) return;
     viewportEl.style.height = `${Math.ceil(slide.getBoundingClientRect().height)}px`;
+    forceReflow(viewportEl);
     syncFooterHeight();
   }
 

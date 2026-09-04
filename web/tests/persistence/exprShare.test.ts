@@ -1,9 +1,12 @@
 import { gzipSync } from "node:zlib";
 import {
+  applyExpressionsFromQuery,
+  buildExpressionShareUrl,
   decodeExpressionsFragment,
   encodeExpressionsFragment,
   EXPR_SHARE_VERSION,
 } from "../../src/app/persistence/exprShare.ts";
+import { listExpressions, setExpressions } from "../../src/model/expressions.ts";
 import type { ExprItem } from "../../src/types/models.ts";
 import { assert } from "../helpers/assert.ts";
 import { runSuite } from "../helpers/runner.ts";
@@ -155,6 +158,47 @@ export async function run() {
         const decoded = await decodeExpressionsFragment(fragment);
         assert(decoded?.length === 1, "blank row omitted");
         assert(decoded![0]?.latex === "x", "kept row");
+      },
+    },
+    {
+      name: "buildExpressionShareUrl puts the payload in the query string, not the hash",
+      fn: async () => {
+        // Chat/email clients commonly route links through their own
+        // redirect for link scanning — fragments never reach that hop and
+        // get silently dropped, while query params survive it.
+        setExpressions([sampleExpr({ id: "e1", latex: "x^2" })]);
+        const url = await buildExpressionShareUrl("https://laplaci.com/");
+        const parsed = new URL(url);
+        assert(parsed.hash === "", "no hash used");
+        assert(parsed.searchParams.get("e")?.startsWith(`${EXPR_SHARE_VERSION}.`), "e param set");
+      },
+    },
+    {
+      name: "buildExpressionShareUrl preserves other existing query params",
+      fn: async () => {
+        setExpressions([sampleExpr({ id: "e1", latex: "y" })]);
+        const url = await buildExpressionShareUrl("https://laplaci.com/?webmcp=1");
+        const parsed = new URL(url);
+        assert(parsed.searchParams.get("webmcp") === "1", "unrelated param survives");
+        assert(!!parsed.searchParams.get("e"), "e param still set");
+      },
+    },
+    {
+      name: "applyExpressionsFromQuery round-trips through a built share URL",
+      fn: async () => {
+        setExpressions([sampleExpr({ id: "e1", latex: "z" })]);
+        const url = await buildExpressionShareUrl("https://laplaci.com/");
+        setExpressions([sampleExpr({ id: "e1", latex: "unrelated-local-state" })]);
+        const applied = await applyExpressionsFromQuery(new URL(url).search);
+        assert(applied, "loaded from query");
+        assert(listExpressions()[0]?.latex === "z", "query content wins over prior local state");
+      },
+    },
+    {
+      name: "applyExpressionsFromQuery returns false when there's no e param",
+      fn: async () => {
+        assert((await applyExpressionsFromQuery("")) === false, "empty search");
+        assert((await applyExpressionsFromQuery("?webmcp=1")) === false, "unrelated param only");
       },
     },
   ]);

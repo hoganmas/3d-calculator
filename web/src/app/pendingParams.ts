@@ -86,10 +86,23 @@ export function collectDefinedParamNames(items = listNonemptyExprs()): Set<strin
   return defined;
 }
 
+/**
+ * Shared empty result — callers (ExprRow's `$derived.by`) re-invoke this on
+ * every `paramTick`, including every animation frame. Returning a fresh `[]`
+ * each time made the derived value referentially "change" every frame even
+ * when nothing was actually pending, which spuriously re-ran the dismissal
+ * effect that calls `forceReflow` (a synchronous display:none toggle) on
+ * every row, every frame — in Chrome that momentary all-rows-hidden layout
+ * collapse clamps the scrollable list's scrollTop to 0. Returning this same
+ * array instance for the empty case keeps the derived stable so downstream
+ * effects only re-run on a real change.
+ */
+const NO_PENDING_PARAMS: string[] = [];
+
 /** Free parameter symbols referenced by one row that lack a declaration. */
 export function collectPendingParamsForExpr(item: ExprItem): string[] {
   const latex = String(item.latex || "").trim();
-  if (!latex || !item.enabled) return [];
+  if (!latex || !item.enabled) return NO_PENDING_PARAMS;
 
   const allItems = listNonemptyExprs();
   const defined = collectDefinedParamNames(allItems);
@@ -115,9 +128,10 @@ export function collectPendingParamsForExpr(item: ExprItem): string[] {
       }
     }
   } catch {
-    return [];
+    return NO_PENDING_PARAMS;
   }
 
+  if (pending.size === 0) return NO_PENDING_PARAMS;
   return [...pending].sort();
 }
 

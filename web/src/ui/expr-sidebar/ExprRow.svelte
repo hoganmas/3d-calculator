@@ -30,6 +30,7 @@ import {
     isMathFieldFocused,
     ICON_EYE,
     ICON_EYE_OFF,
+    forceReflow,
   } from "./helpers.ts";
   import { openGradientEditor } from "./popovers.ts";
   import ParamRail from "./ParamRail.svelte";
@@ -109,6 +110,17 @@ import {
   );
   const pendingErr = $derived(pendingParamErrorMessage(pendingParams));
   const rowError = $derived(warn ?? paramErr ?? pendingErr);
+
+  // Confirmed live in Safari: this row is `display: grid; overflow:
+  // hidden`, and WebKit's auto grid-track height keeps its cached (taller)
+  // size after .expr-pending-params is removed — getComputedStyle still
+  // reports the stale height, so this is a real relayout bug, not a
+  // paint/compositing one (seen on both the desktop sidebar list and the
+  // mobile carousel, so the row itself is the actual source).
+  $effect(() => {
+    if (pendingParams.length > 0 || !rowEl) return;
+    forceReflow(rowEl);
+  });
   const isParamDef = $derived(isParameterRow(item.latex || ""));
   /** Bumped when the gradient editor commits; model mutates in place so `item` identity is stale. */
   let gradEpoch = $state(0);
