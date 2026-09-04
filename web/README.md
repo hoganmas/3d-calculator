@@ -30,6 +30,8 @@ npm test isosurface   # isosurface gradients
 
 See [`tests/README.md`](tests/README.md) for layout. Integration smoke tests (`test:integration`) need `npm run dev` running.
 
+`npm run test:memory` (or `test:memory:quick` for a 1-minute sanity check) spawns its own dev server and Playwright browser to track JS heap / DOM node / listener counts over a long animation-playing session — see [`docs/known-issues.md`](docs/known-issues.md) for the leak it's tracking.
+
 ## Build
 
 Production build uses `base: /` for deployment at [laplaci.com](https://laplaci.com/):

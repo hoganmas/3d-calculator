@@ -54,12 +54,15 @@ fn fsMain(in: VSOut) -> @location(0) vec4f {
   let tA = (-vec3f(half) - ro) * invRd;
   let tB = (vec3f(half) - ro) * invRd;
   let tmin = min(tA, tB); let tmax = max(tA, tB);
+  let tEnter = max(max(max(tmin.x, tmin.y), tmin.z), 0.0);
   let tExit = min(min(tmax.x, tmax.y), tmax.z);
-  let far = max(tExit, half * 4.0);
+  // Must match isoHermite.wgsl's normalization exactly — this is compared
+  // directly against occl.r below.
+  let far = max(tExit - tEnter, half * 4.0);
   let rd2 = max(dot(rd, rd), 1e-20);
   let t = dot(in.world - ro, rd) / rd2;
   if (!(t > 0.0)) { discard; }
-  let myD = clamp(t / far, 0.0, 0.999);
+  let myD = clamp((t - tEnter) / far, 0.0, 0.999);
   let dims = vec2f(textureDimensions(occlTex));
   let mx = i32(clamp(floor(in.clip.x * dims.x / fbW), 0.0, dims.x - 1.0));
   let my = i32(clamp(floor(in.clip.y * dims.y / fbH), 0.0, dims.y - 1.0));
