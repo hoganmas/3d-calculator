@@ -9,6 +9,7 @@ export interface MountExprListOpts {
   onExprChange: () => void;
   onStructuralChange: () => void;
   onColorChange?: () => void;
+  onVisibilityChange?: () => void;
   onParamChange?: () => void;
   onCollapsePanel?: () => void;
 }
@@ -43,6 +44,7 @@ export function mountExprList(opts: MountExprListOpts): ExprListApi {
         onExprChange: props.onExprChange,
         onStructuralChange: props.onStructuralChange,
         onColorChange: props.onColorChange,
+        onVisibilityChange: props.onVisibilityChange,
         onParamChange: props.onParamChange ?? props.onExprChange,
         onSelectionSync: () => inst.syncParamChrome(),
       },

@@ -15,6 +15,7 @@ import {
   initKeyframeHandler,
   wirePipelineDom,
   handleColorChange,
+  handleVisibilityChange,
   invalidateLayerBakeFingerprint,
 } from "./app/pipeline.js";
 import { clipUniforms, initWebglFallback, ensureSceneGpuUpload, warmClipGpuInit } from "./app/webglFallback.js";
@@ -101,6 +102,10 @@ state.exprListApi = mountExprList({
   },
   onColorChange: () => {
     handleColorChange();
+    scheduleAutosave();
+  },
+  onVisibilityChange: () => {
+    handleVisibilityChange();
     scheduleAutosave();
   },
   onStructuralChange: () => {

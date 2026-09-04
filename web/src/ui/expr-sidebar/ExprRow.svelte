@@ -54,6 +54,7 @@ import {
     onExprChange: () => void;
     onStructuralChange: () => void;
     onColorChange?: () => void;
+    onVisibilityChange?: () => void;
     onParamChange: () => void;
     onSelect: (id: string) => void;
     onFocusNav: (targetId: string, caret: number) => void;
@@ -73,6 +74,7 @@ import {
     onExprChange,
     onStructuralChange,
     onColorChange,
+    onVisibilityChange,
     onParamChange,
     onSelect,
     onFocusNav,
@@ -291,7 +293,11 @@ import {
   function onVisClick(ev: MouseEvent) {
     ev.stopPropagation();
     updateExpr(item.id, { enabled: !item.enabled });
-    onStructuralChange();
+    // Every layer's fit is unaffected by which are shown — skip the
+    // structural-change path (fresh progressive refit ladder) in favor of a
+    // single non-progressive repack that reuses cached layer data.
+    if (onVisibilityChange) onVisibilityChange();
+    else onStructuralChange();
   }
 
   function onDelClick(ev: MouseEvent) {

@@ -22,6 +22,7 @@
     onExprChange: () => void;
     onStructuralChange: () => void;
     onColorChange?: () => void;
+    onVisibilityChange?: () => void;
     onParamChange: () => void;
     onSelectionSync?: () => void;
   }
@@ -31,6 +32,7 @@
     onExprChange,
     onStructuralChange,
     onColorChange,
+    onVisibilityChange,
     onParamChange,
     onSelectionSync,
   }: Props = $props();
@@ -177,6 +179,16 @@
     onSelectionSync?.();
     localParamTick++;
     queueMicrotask(syncViewportHeight);
+  }
+
+  /** Item count/order is unaffected by a visibility toggle — skip the
+   * index/focus reconciliation refreshAfterStructural needs for add/remove. */
+  function refreshAfterVisibility() {
+    if (onVisibilityChange) onVisibilityChange();
+    else onStructuralChange();
+    items = listExpressions();
+    onSelectionSync?.();
+    localParamTick++;
   }
 
   function goTo(next: number) {
@@ -435,6 +447,7 @@
                     }}
                     onStructuralChange={() => refreshAfterStructural()}
                     {onColorChange}
+                    onVisibilityChange={refreshAfterVisibility}
                     onParamChange={() => {
                       localParamTick++;
                       (onParamChange ?? onExprChange)();
