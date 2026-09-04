@@ -47,7 +47,12 @@
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
       }
     </script>
+    <!-- Google Search's crawler does not reliably pick up SVG-only favicons,
+         so a PNG + classic .ico are declared alongside the SVG that browsers
+         actually render. See https://developers.google.com/search/docs/appearance/favicon-in-search -->
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon-48.png" sizes="48x48" type="image/png" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="stylesheet" href="/src/ui/theme.css" />
     <link rel="stylesheet" href="/src/ui/splash.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
