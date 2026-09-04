@@ -19,7 +19,9 @@
     "test:coverage:flow": "c8 tsx tests/run.mjs flow",
     "bench:lobatto": "tsx scripts/bench-lobatto-accuracy.mjs",
     "bench:lobatto:quick": "tsx scripts/bench-lobatto-accuracy.mjs --quick",
-    "test:bench:exprShare": "tsx tests/run.mjs exprShare.bench"
+    "test:bench:exprShare": "tsx tests/run.mjs exprShare.bench",
+    "test:memory": "tsx scripts/measure-memory.mjs",
+    "test:memory:quick": "tsx scripts/measure-memory.mjs --quick"
   },
   "dependencies": {
     "@cortex-js/compute-engine": "^0.119.0",
