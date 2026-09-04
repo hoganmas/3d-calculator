@@ -8,6 +8,7 @@ import {
   lobattoLadderDegrees,
 } from "../math/chebLobatto.js";
 import {
+  cancelProgressiveFit,
   clearLobattoLayerCache,
   getLobattoLayerCache,
   isProgressiveLobattoEnabled,
@@ -1190,4 +1191,21 @@ export function handleColorChange() {
     uploadSceneColors(allDensCols);
     state.clipDirty = true;
   }
+}
+
+/**
+ * Visibility toggle only — every layer's Chebyshev fit is already cached
+ * (its bake fingerprint hasn't changed), so nothing needs resampling. Skip
+ * scheduleUploadFit's progressive ladder (a fresh 4→8→16→…→target ramp meant
+ * for a newly-added or freshly-edited layer) and just repack + reupload the
+ * combined GPU buffer once at the current degree, reusing every layer's
+ * cached data — a single compile pass instead of one per ladder rung.
+ */
+export function handleVisibilityChange() {
+  cancelProgressiveFit();
+  if (state.fitTimer) {
+    clearTimeout(state.fitTimer);
+    state.fitTimer = 0;
+  }
+  uploadFit({ fromAnim: false });
 }

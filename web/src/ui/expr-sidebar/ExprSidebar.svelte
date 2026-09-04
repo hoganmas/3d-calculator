@@ -23,6 +23,7 @@
     onExprChange: () => void;
     onStructuralChange: () => void;
     onColorChange?: () => void;
+    onVisibilityChange?: () => void;
     onParamChange?: () => void;
   }
 
@@ -30,6 +31,7 @@
     onExprChange,
     onStructuralChange,
     onColorChange,
+    onVisibilityChange,
     onParamChange,
   }: Props = $props();
 
@@ -144,6 +146,12 @@
     requestRender();
   }
 
+  function handleVisibilityChange() {
+    if (onVisibilityChange) onVisibilityChange();
+    else onStructuralChange();
+    requestRender();
+  }
+
   function handleDragStart(row: HTMLElement, ev: PointerEvent) {
     const id = row.dataset.id;
     if (!id || !dragCtrl) return;
@@ -220,6 +228,7 @@
       }}
       onStructuralChange={handleStructuralChange}
       {onColorChange}
+      onVisibilityChange={handleVisibilityChange}
       onParamChange={() => {
         paramTick++;
         (onParamChange ?? onExprChange)();
