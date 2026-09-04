@@ -14,6 +14,7 @@ import {
 import { updateExprSilent } from "../model/expressions.js";
 import { els, viewportSize } from "./dom.js";
 import { state, ANIM_FIT_MIN_MS } from "./state.js";
+import { syncClipPresentation } from "./presentation.js";
 import {
   renderer,
   labelRenderer,
@@ -173,6 +174,12 @@ function frame(rafNow: number) {
   clipUniforms.uCameraPos.value.copy(camera.position);
 
   const gpuPath = useGpuClipPath();
+  // Re-derive the WebGL fallback's grid/label/box visibility from this exact
+  // per-frame value every frame, not just on scene-bake events — otherwise
+  // the cached flags can lag the live check `drawClipGpuFrame` uses below,
+  // and both paths draw the axes/grid at once (worse on mobile, where the
+  // pipeline-ready → resync events land less predictably).
+  syncClipPresentation(gpuPath);
   if (!gpuPath) {
     syncClipCpuVolume();
   }

@@ -30,6 +30,28 @@ export type CompactExprRow = {
   ap?: 1;
 };
 
+/**
+ * Box size (full edge length) travels as an optional leading array element,
+ * distinguished from a `CompactExprRow` by having no `l`. Kept out of
+ * `CompactExprRow` itself so omitting box size (the common case) produces
+ * byte-identical output to before this existed — no version bump needed,
+ * and every existing share link still decodes as-is.
+ */
+export type BoxSizeSentinel = { b: number };
+
+/** Matches the `boxSize` slider's HTML default (index.html) — omitted from the payload when equal. */
+export const DEFAULT_BOX_SIZE = 5;
+
+function isBoxSizeSentinel(row: unknown): row is BoxSizeSentinel {
+  return (
+    !!row &&
+    typeof row === "object" &&
+    !Array.isArray(row) &&
+    typeof (row as { b?: unknown }).b === "number" &&
+    !("l" in (row as object))
+  );
+}
+
 export type CompressMode = "none" | "gzip" | "deflate" | "auto";
 
 export const FRAGMENT_RE = /^e=(\d+)([zd]?)\.([A-Za-z0-9_-]+)$/;
@@ -114,6 +136,26 @@ export function compactExprRow(item: ExprItem, index: number): CompactExprRow {
 
 export function compactExprPayload(exprs: ExprItem[]): CompactExprRow[] {
   return stripTrailingBlank(exprs).map((item, index) => compactExprRow(item, index));
+}
+
+/** Full share payload: expression rows plus an optional leading box-size sentinel. */
+export function compactSharePayload(
+  exprs: ExprItem[],
+  boxSize?: number,
+): (CompactExprRow | BoxSizeSentinel)[] {
+  const rows: (CompactExprRow | BoxSizeSentinel)[] = compactExprPayload(exprs);
+  if (boxSize != null && Math.abs(boxSize - DEFAULT_BOX_SIZE) > 1e-9) {
+    rows.unshift({ b: Math.round(boxSize * 10) / 10 });
+  }
+  return rows;
+}
+
+/** Split a raw decoded array into an optional box size and the remaining expression rows. */
+function extractBoxSizeSentinel(payload: unknown[]): { boxSize?: number; rest: unknown[] } {
+  const first = payload[0];
+  if (!isBoxSizeSentinel(first)) return { rest: payload };
+  if (!Number.isFinite(first.b) || first.b <= 0) throw new Error("box size: invalid");
+  return { boxSize: first.b, rest: payload.slice(1) };
 }
 
 export function expandCompactRow(row: CompactExprRow, index = 0): Partial<ExprItem> {
@@ -226,15 +268,22 @@ export async function buildFragmentFromJsonBytes(
 export async function encodeCompactFragment(
   exprs: ExprItem[],
   mode: CompressMode = "auto",
+  boxSize?: number,
 ): Promise<string> {
-  const payload = compactExprPayload(exprs);
-  if (!payload.length) throw new Error("nothing to share");
+  const payload = compactSharePayload(exprs, boxSize);
+  const rowCount = payload.length - (isBoxSizeSentinel(payload[0]) ? 1 : 0);
+  if (!rowCount) throw new Error("nothing to share");
   const json = JSON.stringify(payload);
   if (json.length > MAX_JSON_BYTES) throw new Error("expression list too large to share");
   return buildFragmentFromJsonBytes(new TextEncoder().encode(json), mode);
 }
 
-export async function decodeCompactFragment(hash: string): Promise<Partial<ExprItem>[] | null> {
+export interface DecodedSharePayload {
+  rows: Partial<ExprItem>[];
+  boxSize?: number;
+}
+
+export async function decodeCompactFragment(hash: string): Promise<DecodedSharePayload | null> {
   const body = hash.startsWith("#") ? hash.slice(1) : hash;
   const match = FRAGMENT_RE.exec(body);
   if (!match) return null;
@@ -249,6 +298,10 @@ export async function decodeCompactFragment(hash: string): Promise<Partial<ExprI
   if (jsonBytes.length > MAX_JSON_BYTES) throw new Error("shared expression payload too large");
 
   const json = new TextDecoder().decode(jsonBytes);
-  const payload = validateCompactPayload(JSON.parse(json));
-  return payload.map((row, i) => expandCompactRow(row, i));
+  const parsed = JSON.parse(json);
+  if (!Array.isArray(parsed)) throw new Error("expected expression array");
+  const { boxSize, rest } = extractBoxSizeSentinel(parsed);
+  const payload = validateCompactPayload(rest);
+  const rows = payload.map((row, i) => expandCompactRow(row, i));
+  return { rows, boxSize };
 }

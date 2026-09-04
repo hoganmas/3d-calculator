@@ -19,10 +19,12 @@ export async function run() {
       },
     },
     {
-      name: "GPU iso path throttles lava on phones, not desktop",
+      name: "GPU iso path presents lava every rAF on every tier",
       fn: () => {
-        assert(threeJsPresentIntervalMs("mobile", true) === GPU_PATH_LAVA_INTERVAL_MOBILE_MS, "mobile");
-        assert(threeJsPresentIntervalMs("tablet", true) === GPU_PATH_LAVA_INTERVAL_TABLET_MS, "tablet");
+        assert(GPU_PATH_LAVA_INTERVAL_MOBILE_MS === 0, "mobile constant unthrottled");
+        assert(GPU_PATH_LAVA_INTERVAL_TABLET_MS === 0, "tablet constant unthrottled");
+        assert(threeJsPresentIntervalMs("mobile", true) === 0, "mobile");
+        assert(threeJsPresentIntervalMs("tablet", true) === 0, "tablet");
         assert(threeJsPresentIntervalMs("desktop", true) === 0, "desktop every rAF");
       },
     },

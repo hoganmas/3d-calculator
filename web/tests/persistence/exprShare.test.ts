@@ -43,7 +43,8 @@ export async function run() {
         assert(fragment.startsWith(`e=${EXPR_SHARE_VERSION}.`), "uses raw encoding for tiny payload");
         const decoded = await decodeExpressionsFragment(fragment);
         assert(decoded != null, "decoded");
-        assert(decoded![0]?.latex === sampleExpr().latex, "latex");
+        assert(decoded!.rows[0]?.latex === sampleExpr().latex, "latex");
+        assert(decoded!.boxSize === undefined, "no box size when not shared");
       },
     },
     {
@@ -68,11 +69,11 @@ export async function run() {
         ];
         const fragment = await encodeExpressionsFragment(exprs);
         const decoded = await decodeExpressionsFragment(fragment);
-        assert(decoded?.length === 2, "two rows");
-        assert(decoded![0]?.autoParam === true, "autoParam");
-        assert(decoded![0]?.sliderAnimating === true, "animating");
-        assert(decoded![0]?.sliderAnimMode === "loop", "loop mode");
-        assert(decoded![1]?.latex.includes("\\sin"), "field latex");
+        assert(decoded?.rows.length === 2, "two rows");
+        assert(decoded!.rows[0]?.autoParam === true, "autoParam");
+        assert(decoded!.rows[0]?.sliderAnimating === true, "animating");
+        assert(decoded!.rows[0]?.sliderAnimMode === "loop", "loop mode");
+        assert(decoded!.rows[1]?.latex.includes("\\sin"), "field latex");
       },
     },
     {
@@ -87,8 +88,8 @@ export async function run() {
         const fragment = await encodeExpressionsFragment(exprs);
         assert(fragment.startsWith(`e=${EXPR_SHARE_VERSION}d.`), "uses deflate encoding");
         const decoded = await decodeExpressionsFragment(fragment);
-        assert(decoded?.length === 8, "row count");
-        assert(decoded![1]?.latex.includes("(x-a)"), "latex preserved");
+        assert(decoded?.rows.length === 8, "row count");
+        assert(decoded!.rows[1]?.latex.includes("(x-a)"), "latex preserved");
       },
     },
     {
@@ -113,9 +114,9 @@ export async function run() {
         ];
         const fragment = await encodeExpressionsFragment(exprs);
         const decoded = await decodeExpressionsFragment(fragment);
-        assert(decoded?.length === 3, "three rows");
-        assert(decoded![2]?.color === "#ff1493", "palette colors restored");
-        assert(decoded![2]?.color2 === "#7b2fff", "palette colors restored");
+        assert(decoded?.rows.length === 3, "three rows");
+        assert(decoded!.rows[2]?.color === "#ff1493", "palette colors restored");
+        assert(decoded!.rows[2]?.color2 === "#7b2fff", "palette colors restored");
       },
     },
     {
@@ -125,7 +126,7 @@ export async function run() {
         const gz = gzipSync(JSON.stringify(payload));
         const fragment = `e=${EXPR_SHARE_VERSION}z.${bytesToBase64Url(gz)}`;
         const decoded = await decodeExpressionsFragment(fragment);
-        assert(decoded?.[0]?.latex === payload[0]!.l, "latex");
+        assert(decoded?.rows[0]?.latex === payload[0]!.l, "latex");
       },
     },
     {
@@ -156,8 +157,32 @@ export async function run() {
           sampleExpr({ latex: "" }),
         ]);
         const decoded = await decodeExpressionsFragment(fragment);
-        assert(decoded?.length === 1, "blank row omitted");
-        assert(decoded![0]?.latex === "x", "kept row");
+        assert(decoded?.rows.length === 1, "blank row omitted");
+        assert(decoded!.rows[0]?.latex === "x", "kept row");
+      },
+    },
+    {
+      name: "round-trips box size, omits it when default",
+      fn: async () => {
+        const withDefault = await encodeExpressionsFragment([sampleExpr()], 5);
+        const decodedDefault = await decodeExpressionsFragment(withDefault);
+        assert(decodedDefault?.boxSize === undefined, "default box size omitted from payload");
+
+        const withCustom = await encodeExpressionsFragment([sampleExpr()], 8.5);
+        const decodedCustom = await decodeExpressionsFragment(withCustom);
+        assert(decodedCustom?.boxSize === 8.5, "custom box size round-trips");
+        assert(decodedCustom?.rows.length === 1, "box size sentinel not counted as a row");
+        assert(decodedCustom!.rows[0]?.latex === sampleExpr().latex, "row content unaffected");
+      },
+    },
+    {
+      name: "legacy bare-array fragment (no box size) still decodes",
+      fn: async () => {
+        const payload = [{ l: "x+y+z=1" }];
+        const fragment = `e=${EXPR_SHARE_VERSION}.${bytesToBase64Url(new TextEncoder().encode(JSON.stringify(payload)))}`;
+        const decoded = await decodeExpressionsFragment(fragment);
+        assert(decoded?.boxSize === undefined, "no box size in legacy fragment");
+        assert(decoded?.rows[0]?.latex === "x+y+z=1", "latex");
       },
     },
     {
