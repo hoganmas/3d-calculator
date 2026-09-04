@@ -1,19 +1,30 @@
 /**
- * View-dependent lava-lamp skybox (interior sphere, solid-angle blob field).
+ * View-dependent lava-lamp skybox (fullscreen triangle, solid-angle blob field).
  */
 import * as THREE from "three";
 import type { Camera } from "three";
 
-const SKY_RADIUS = 80;
 const BLOB_COUNT = 10;
+/**
+ * Virtual FOV the blob pattern is rendered through — independent of the
+ * scene camera's actual `fov`. Isometric mode fakes an orthographic look by
+ * shrinking camera.fov to ~2° (scene.ts); reusing that for this shader would
+ * zoom into a tiny sliver of the pattern (angular blob size is tuned for a
+ * normal view). Reconstructing the ray from this fixed FOV instead of the
+ * live projection matrix keeps the skybox visually identical regardless of
+ * the toggle, in a single draw call — no extra render pass, no per-frame
+ * fov/projection-matrix save-and-restore.
+ */
+const REFERENCE_FOV_DEG = 50;
+const REFERENCE_TAN_HALF_FOV = Math.tan((REFERENCE_FOV_DEG * Math.PI) / 360);
 
 const vertexShader = /* glsl */ `
-varying vec3 vWorldDir;
+varying vec2 vNdc;
 
 void main() {
-  vec4 worldPos = modelMatrix * vec4(position, 1.0);
-  vWorldDir = normalize(worldPos.xyz - cameraPosition);
-  gl_Position = projectionMatrix * viewMatrix * worldPos;
+  // Oversized triangle covering NDC [-1,1]^2 without a real quad/index buffer.
+  vNdc = position.xy;
+  gl_Position = vec4(position.xy, 0.0, 1.0);
 }
 `;
 
@@ -22,8 +33,11 @@ uniform float uTime;
 uniform vec3 uColor1;
 uniform vec3 uColor2;
 uniform vec3 uColor3;
+uniform mat3 uCamRot;
+uniform float uAspect;
+uniform float uTanHalfFov;
 
-varying vec3 vWorldDir;
+varying vec2 vNdc;
 
 const float PI = 3.141592653589793;
 const float BLOB_COUNT = ${BLOB_COUNT}.0;
@@ -94,7 +108,11 @@ float blobField(vec3 dir, float t, float seed) {
 }
 
 void main() {
-  vec3 dir = normalize(vWorldDir);
+  // Ray direction through this pixel under the fixed virtual FOV, rotated
+  // into world space by the camera's actual orientation. Camera position and
+  // its real fov never enter this — a pure infinite skybox.
+  vec3 dirView = vec3(vNdc.x * uAspect * uTanHalfFov, vNdc.y * uTanHalfFov, -1.0);
+  vec3 dir = normalize(uCamRot * dirView);
   float t = uTime;
 
   float f = 0.0;
@@ -141,11 +159,16 @@ export interface LavaBackground {
 }
 
 export function createLavaBackground(colors: LavaColors): LavaBackground {
-  const geometry = new THREE.SphereGeometry(SKY_RADIUS, 24, 16);
+  // Oversized triangle covering the whole screen in clip space — cheaper
+  // than a quad (no diagonal seam) and needs no index buffer.
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3),
+  );
   const material = new THREE.ShaderMaterial({
     vertexShader,
     fragmentShader,
-    side: THREE.BackSide,
     depthWrite: false,
     depthTest: false,
     uniforms: {
@@ -153,17 +176,28 @@ export function createLavaBackground(colors: LavaColors): LavaBackground {
       uColor1: { value: hexToVec3(colors.lava1) },
       uColor2: { value: hexToVec3(colors.lava2) },
       uColor3: { value: hexToVec3(colors.lava3) },
+      uCamRot: { value: new THREE.Matrix3() },
+      uAspect: { value: 1 },
+      uTanHalfFov: { value: REFERENCE_TAN_HALF_FOV },
     },
   });
   const mesh = new THREE.Mesh(geometry, material);
   mesh.frustumCulled = false;
   mesh.renderOrder = -1000;
 
+  const camRot = new THREE.Matrix3();
+
   return {
     mesh,
     material,
     syncCamera(camera) {
-      mesh.position.copy(camera.position);
+      camera.updateMatrixWorld();
+      camRot.setFromMatrix4(camera.matrixWorld);
+      material.uniforms.uCamRot.value.copy(camRot);
+      const persp = camera as THREE.PerspectiveCamera;
+      if (typeof persp.aspect === "number") {
+        material.uniforms.uAspect.value = persp.aspect;
+      }
     },
     setTime(timeSec) {
       material.uniforms.uTime.value = timeSec;

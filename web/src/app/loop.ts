@@ -20,11 +20,9 @@ import {
   labelRenderer,
   labelScene,
   scene,
-  lavaScene,
   camera,
   controls,
   lavaBg,
-  DEFAULT_FOV,
 } from "./scene.js";
 import {
   clipUniforms,
@@ -138,30 +136,13 @@ function presentThreeJs(now: number, gpuPath: boolean) {
   if (!resized && !shouldPresentThreeJs(now, lastThreeJsPresentAt, interval)) return;
 
   lavaBg.setTime(now / 1000);
+  // Rotation + aspect only — the shader reconstructs its view ray from a
+  // fixed virtual FOV (background.ts), so it's already independent of
+  // camera.fov (real or isometric's near-zero fake-ortho value). No fov
+  // save/restore or extra render pass needed.
   lavaBg.syncCamera(camera);
-
-  // Lava's blob pattern is tuned for DEFAULT_FOV and has no notion of FOV
-  // itself — render it with that fixed FOV regardless of the isometric
-  // toggle's tiny camera.fov, or isometric mode zooms into a sliver of the
-  // pattern instead of showing it naturally. Restored before returning so
-  // the WebGPU raymarch pass right after this still sees the real FOV.
-  const realFov = camera.fov;
-  const isometric = Math.abs(realFov - DEFAULT_FOV) > 1e-6;
-  if (isometric) {
-    camera.fov = DEFAULT_FOV;
-    camera.updateProjectionMatrix();
-  }
   renderer.autoClear = true;
-  renderer.render(lavaScene, camera);
-
-  if (isometric) {
-    camera.fov = realFov;
-    camera.updateProjectionMatrix();
-  }
-  renderer.autoClear = false;
   renderer.render(scene, camera);
-  renderer.autoClear = true;
-
   lastThreeJsPresentAt = now;
   lastThreeJsFbW = w;
   lastThreeJsFbH = h;
