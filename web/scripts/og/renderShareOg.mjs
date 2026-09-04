@@ -84,6 +84,7 @@ export async function renderShareOgPng({ siteUrl, rows, logoSvg, ogDeg }) {
       rows,
       camera: SHARE_CAMERA,
       settleMs: 3500,
+      viewport: { width: COMPOSITE_W, height: COMPOSITE_H },
     });
     await page.close();
     const html = buildSingleShotHtml(png.toString("base64"), logoSvg);

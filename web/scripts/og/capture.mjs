@@ -112,7 +112,17 @@ export async function captureScene(page, scene) {
  * thumbnails, and cross-row dependencies (e.g. an animated parameter) just
  * work without needing to be carried along separately.
  */
-export async function captureFullScene(page, { rows, camera, settleMs, isometric = true } = {}) {
+export async function captureFullScene(page, { rows, camera, settleMs, isometric = true, viewport } = {}) {
+  if (viewport) {
+    // Capture at the composite's exact output size — otherwise the page
+    // stays at prepareCapturePage's default 1280×800 (aspect 1.6) while
+    // composite.mjs's single-shot layout is 1200×630 (aspect ~1.9), and its
+    // `.shot { width:100%; height:100% }` (default object-fit: fill)
+    // stretches the mismatch away, most visibly distorting anything
+    // circular into an ellipse.
+    await page.setViewportSize(viewport);
+    await page.evaluate(() => window.__laplacianOgCapture?.resetCamera());
+  }
   await page.evaluate(
     async ({ rows, camera, settleMs, isometric }) => {
       const api = window.__laplacianOgCapture;
