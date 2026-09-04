@@ -246,6 +246,24 @@ export function neededParamForItem(item: ExprItem, tick = 0): string | null {
   return null;
 }
 
+/**
+ * Confirmed live in real Safari: after a child is removed from a `display:
+ * grid; overflow: hidden` row (e.g. .expr-pending-params disappearing),
+ * WebKit's auto grid-track height caches the old, taller size —
+ * `getComputedStyle`/`getBoundingClientRect` keep reporting the stale
+ * height even though it's a genuine relayout (not a repaint/compositing
+ * issue — toggling `overflow` alone does not fix it). Only a full removal
+ * from the render tree forces WebKit to redo the grid track sizing; doing
+ * it synchronously (no yielding to the event loop in between) means the
+ * browser never actually paints the momentarily-hidden state.
+ */
+export function forceReflow(el: HTMLElement) {
+  const prevDisplay = el.style.display;
+  el.style.display = "none";
+  void el.offsetHeight;
+  el.style.display = prevDisplay;
+}
+
 export function itemsStructurallyEqual(a: ExprItem[], b: ExprItem[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
