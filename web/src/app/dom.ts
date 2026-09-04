@@ -30,6 +30,7 @@ export interface DomElements {
   marchDownscale: HTMLInputElement;
   isoMarchDownscale: HTMLInputElement | null;
   toggleGridAxes: HTMLButtonElement | null;
+  toggleIsometric: HTMLButtonElement | null;
   shareLink: HTMLButtonElement | null;
   marchScaleLabel: HTMLElement | null;
   isoMarchScaleLabel: HTMLElement | null;
@@ -77,6 +78,7 @@ export const els: DomElements = {
   marchDownscale: el("marchDownscale"),
   isoMarchDownscale: document.getElementById("isoMarchDownscale") as HTMLInputElement | null,
   toggleGridAxes: document.getElementById("toggleGridAxes") as HTMLButtonElement | null,
+  toggleIsometric: document.getElementById("toggleIsometric") as HTMLButtonElement | null,
   shareLink: document.getElementById("shareLink") as HTMLButtonElement | null,
   marchScaleLabel: document.getElementById("marchScaleLabel"),
   isoMarchScaleLabel: document.getElementById("isoMarchScaleLabel"),

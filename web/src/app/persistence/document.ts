@@ -8,9 +8,15 @@ import type { AnimMode, ExprItem, ParamState, PresetParamSeed } from "../../type
 import { els } from "../dom.js";
 import { syncExprCompileState } from "../hud.js";
 import { applyRenderHyperparams } from "../pipeline.js";
-import { syncMarchSlider, syncClipPresentation, syncShowGridAxesUi, syncBoundsSlider } from "../presentation.js";
+import {
+  syncMarchSlider,
+  syncClipPresentation,
+  syncShowGridAxesUi,
+  syncBoundsSlider,
+  syncIsometricUi,
+} from "../presentation.js";
 import { syncQualitySlidersFromSettings } from "../quality.js";
-import { camera, controls } from "../scene.js";
+import { camera, controls, DEFAULT_FOV } from "../scene.js";
 import { state } from "../state.js";
 import {
   bumpDocumentRevision,
@@ -128,6 +134,7 @@ function getCameraSnapshot(): LaplacianCameraSnapshot {
   return {
     position: [camera.position.x, camera.position.y, camera.position.z],
     target: [controls.target.x, controls.target.y, controls.target.z],
+    fov: camera.fov,
   };
 }
 
@@ -237,9 +244,12 @@ export async function applyDocument(doc: LaplacianDocument) {
     if (doc.camera) {
       camera.position.set(doc.camera.position[0], doc.camera.position[1], doc.camera.position[2]);
       controls.target.set(doc.camera.target[0], doc.camera.target[1], doc.camera.target[2]);
+      camera.fov = doc.camera.fov ?? DEFAULT_FOV;
+      camera.updateProjectionMatrix();
       controls.update();
       state.clipDirty = true;
     }
+    syncIsometricUi();
     syncExprCompileState();
   } finally {
     persistSuspended = false;

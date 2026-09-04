@@ -89,6 +89,12 @@ function stepDownAllQualitySliders() {
 /** Runtime FPS watchdog — call from the loop FPS window (~500ms). */
 export function tickPerfAdapt(now: number) {
   if (!isProdUi()) return;
+  // A step-down calls applyQualityFromState({ refit: true }), which
+  // re-bakes the whole animation. On mobile that refit itself is often
+  // the thing tanking the frame rate, so this watchdog can trigger a
+  // refit, see fps stay low from the refit's own cost, and step down
+  // again — making the perf problem it's meant to fix worse.
+  if (state.deviceTier === "mobile") return;
 
   if (perfAdaptBlockedByUserOverride(now, state.qualityUserOverrideAt)) {
     lowPerfStreak = 0;

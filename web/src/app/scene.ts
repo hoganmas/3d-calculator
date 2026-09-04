@@ -34,9 +34,24 @@ export let themeColors = readThemeColors();
 export const lavaBg = createLavaBackground(themeColors);
 applyClipGpuTheme(themeColors);
 
+/** Native vertical FOV (degrees) for the normal perspective view. */
+export const DEFAULT_FOV = 50;
+/**
+ * "Isometric" mode fakes an orthographic look by shrinking the FOV to near
+ * zero and pushing the camera back proportionally — real orthographic
+ * rendering would need a parallel-ray path through the raymarch shaders
+ * (ndcToDirMatrix assumes a single camera origin), so this reuses the
+ * existing perspective ray generation untouched.
+ */
+export const ISO_FOV = 2;
+
 export const scene = new THREE.Scene();
 scene.add(lavaBg.mesh);
-export const camera = new THREE.PerspectiveCamera(50, 1, 0.05, 100);
+// far pushed out well past the max isometric camera distance (narrow FOV
+// needs the camera much farther away to keep the same framing) — the volume
+// raymarch computes its own ray/box intersection and ignores near/far, so
+// this only affects the depth range for the grid/box/axis-label helpers.
+export const camera = new THREE.PerspectiveCamera(DEFAULT_FOV, 1, 0.05, 2000);
 /** World axes: +x right, +y forward, +z up. */
 camera.up.set(0, 0, 1);
 export const DEFAULT_CAMERA_POSITION = new THREE.Vector3(5.2, 6.8, 4.0);
@@ -128,6 +143,19 @@ function styleGrid(grid: THREE.GridHelper, opacity: number) {
   }
 }
 
+/** Grid a bit past the fit box; aim for ~1 world-unit cells. */
+function gridExtent(half: number): number {
+  return Math.ceil(Math.max(0.5, half) + 0.5);
+}
+
+/** Distance from origin to the axis label tips (grid extent + label offset). */
+function axisTipExtent(half: number): number {
+  return gridExtent(half) + 0.45;
+}
+
+/** Bounds half-extent DEFAULT_CAMERA_POSITION was tuned to frame (default "Bounds size" = 5). */
+const REFERENCE_HALF = 2.5;
+
 export function rebuildWorldGrid(half: number) {
   while (worldGrid.children.length) {
     const child = worldGrid.children.pop() as THREE.Mesh | undefined;
@@ -148,9 +176,7 @@ export function rebuildWorldGrid(half: number) {
     mat?.dispose?.();
   }
 
-  const h = Math.max(0.5, half);
-  // Grid a bit past the fit box; aim for ~1 world-unit cells.
-  const extent = Math.ceil(h + 0.5);
+  const extent = gridExtent(half);
   const size = extent * 2;
   const divisions = Math.max(2, size);
   const tc = readThemeColors();
@@ -196,18 +222,50 @@ export function rebuildWorldGrid(half: number) {
   );
   worldGrid.add(axes);
 
-  const tip = extent + 0.45;
+  const tip = axisTipExtent(half);
   worldLabels.add(makeAxisLabel("x", tc.axisX, new THREE.Vector3(tip, 0, 0), tc.labelStroke));
   worldLabels.add(makeAxisLabel("y", tc.axisY, new THREE.Vector3(0, tip, 0), tc.labelStroke));
   worldLabels.add(makeAxisLabel("z", tc.axisZ, new THREE.Vector3(0, 0, tip), tc.labelStroke));
 
   // WebGPU path draws the same grid against iso depth (no texture copy).
-  syncClipGpuWorldGrid(h);
+  syncClipGpuWorldGrid(Math.max(0.5, half));
+}
+
+/** Distance multiplier to keep the same apparent framing when the FOV changes. */
+function fovDistanceScale(fromFovDeg: number, toFovDeg: number): number {
+  const from = Math.tan((fromFovDeg * Math.PI) / 360);
+  const to = Math.tan((toFovDeg * Math.PI) / 360);
+  return from / to;
+}
+
+export function isIsometric(): boolean {
+  return Math.abs(camera.fov - ISO_FOV) < 1e-6;
+}
+
+/** Toggle the near-orthographic "isometric" look in place, preserving the current view direction. */
+export function setIsometric(on: boolean) {
+  const targetFov = on ? ISO_FOV : DEFAULT_FOV;
+  if (Math.abs(camera.fov - targetFov) < 1e-9) return;
+  const scale = fovDistanceScale(camera.fov, targetFov);
+  camera.position.sub(controls.target).multiplyScalar(scale).add(controls.target);
+  camera.fov = targetFov;
+  camera.updateProjectionMatrix();
+  controls.update();
+  state.clipDirty = true;
 }
 
 export function resetCameraView() {
   camera.up.set(0, 0, 1);
-  camera.position.copy(DEFAULT_CAMERA_POSITION);
+  // Scale the hand-tuned default framing by how much bigger/smaller the
+  // current bounds are than the size it was tuned for, so "reset view"
+  // always brings the whole box (and its axis labels) into frame instead
+  // of leaving a large box overflowing it or a small one adrift in empty
+  // space. Also re-applies the current FOV's distance scale so resetting
+  // while isometric mode is on doesn't snap back to the perspective framing.
+  const half = boundClipUniforms?.uHalf?.value ?? REFERENCE_HALF;
+  const scale = axisTipExtent(half) / axisTipExtent(REFERENCE_HALF);
+  const fovScale = fovDistanceScale(DEFAULT_FOV, camera.fov);
+  camera.position.copy(DEFAULT_CAMERA_POSITION).multiplyScalar(scale * fovScale);
   controls.target.set(0, 0, 0);
   controls.update();
   state.clipDirty = true;

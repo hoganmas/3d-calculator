@@ -47,7 +47,12 @@
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
       }
     </script>
+    <!-- Google Search's crawler does not reliably pick up SVG-only favicons,
+         so a PNG + classic .ico are declared alongside the SVG that browsers
+         actually render. See https://developers.google.com/search/docs/appearance/favicon-in-search -->
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon-48.png" sizes="48x48" type="image/png" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="stylesheet" href="/src/ui/theme.css" />
     <link rel="stylesheet" href="/src/ui/splash.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -220,6 +225,19 @@
             </svg>
           </button>
           <button
+            id="toggleIsometric"
+            class="icon-btn has-tooltip"
+            type="button"
+            aria-label="Switch to isometric view"
+            aria-pressed="false"
+            data-tooltip="Switch to isometric view"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round">
+              <path d="M12 3 20 7.5 20 16.5 12 21 4 16.5 4 7.5Z" />
+              <path stroke-linecap="round" d="M12 12V3M12 12 4 16.5M12 12l8 4.5" />
+            </svg>
+          </button>
+          <button
             id="toggleGridAxes"
             class="icon-btn has-tooltip"
             type="button"
@@ -231,7 +249,6 @@
               <path stroke-linecap="round" d="M4 8h16M4 16h16" />
               <path stroke-linecap="round" d="M8 4v16M16 4v16" />
             </svg>
-          </button>
           </button>
           <button
             id="shareLink"
