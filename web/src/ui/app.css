@@ -36,7 +36,7 @@
         width: var(--panel-w);
         max-width: calc(100vw - 2 * var(--panel-inset) - var(--safe-left) - var(--safe-right));
         padding: 14px 16px 18px;
-        overflow: auto;
+        overflow: hidden;
         display: flex;
         flex-direction: column;
         gap: 12px;
@@ -124,6 +124,10 @@
       #exprList {
         padding: 0;
         gap: 0;
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
       }
       .expr-sidebar {
         display: flex;
@@ -1370,8 +1374,15 @@
         gap: 12px;
         flex-shrink: 0;
         margin-top: auto;
-        padding-top: 8px;
-        border-top: 1px solid var(--stroke);
+        margin-left: -16px;
+        margin-right: -16px;
+        margin-bottom: -18px;
+        padding: 8px 16px 18px;
+        border-top: 1px solid var(--glass-stroke);
+        background: color-mix(in srgb, var(--glass-bg-strong) 88%, transparent);
+        backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
+        border-radius: 0 0 var(--panel-radius) var(--panel-radius);
       }
       .panel-status-row {
         display: contents;
