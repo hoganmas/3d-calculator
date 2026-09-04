@@ -25,9 +25,9 @@ export function validateSharePayload(payload: string): string {
 
 export async function decodeSharePayload(payload: string): Promise<Partial<ExprItem>[]> {
   const body = validateSharePayload(payload);
-  const rows = await decodeCompactFragment(`e=${body}`);
-  if (!rows?.length) throw new Error("Could not decode share payload");
-  return rows;
+  const decoded = await decodeCompactFragment(`e=${body}`);
+  if (!decoded?.rows?.length) throw new Error("Could not decode share payload");
+  return decoded.rows;
 }
 
 export function sharePanelsFromRows(rows: Partial<ExprItem>[], max = 3) {

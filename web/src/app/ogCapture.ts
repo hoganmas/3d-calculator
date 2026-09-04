@@ -117,9 +117,9 @@ export function installOgCapture() {
       await loadExpressions(rows);
     },
     async loadFromSharePayload(payload: string) {
-      const rows = await decodeCompactFragment(`e=${normalizeSharePayload(payload)}`);
-      if (!rows?.length) throw new Error("Invalid share payload");
-      await loadExpressions(rows);
+      const decoded = await decodeCompactFragment(`e=${normalizeSharePayload(payload)}`);
+      if (!decoded?.rows?.length) throw new Error("Invalid share payload");
+      await loadExpressions(decoded.rows);
     },
     setCamera(position: Vec3, target: Vec3 = [0, 0, 0]) {
       camera.up.set(0, 0, 1);
