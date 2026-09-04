@@ -9,6 +9,9 @@
     },
     "api/share.ts": {
       "maxDuration": 10
+    },
+    "api/upload-og.ts": {
+      "maxDuration": 10
     }
   },
   "rewrites": [

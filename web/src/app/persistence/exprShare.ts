@@ -133,6 +133,17 @@ export type ShareLinkResult = "shared" | "copied" | "failed";
 /** Share the current scene as a laplaci.com URL (native share sheet or clipboard). */
 export async function shareExpressionLink(): Promise<ShareLinkResult> {
   const url = await buildExpressionShareUrl();
+  // Best-effort client-side OG image capture, ahead of actually sharing the
+  // link — dynamic import (not a static one) keeps this file's own import
+  // graph Node-test-safe, since shareCapture.ts touches the live canvas/
+  // scene. A failure here never blocks sharing: api/og.ts falls back to a
+  // server-side render if no image was uploaded for this payload.
+  try {
+    const { captureAndUploadOgImage } = await import("../shareCapture.js");
+    await captureAndUploadOgImage(url);
+  } catch {
+    // ignored — server-side fallback covers this
+  }
   // No `text` field: some share targets (and the OS share sheet's own
   // "copy" action) concatenate title/text with the url, so anything here
   // ends up pasted alongside the link wherever it's shared.
