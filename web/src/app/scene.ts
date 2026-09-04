@@ -128,6 +128,19 @@ function styleGrid(grid: THREE.GridHelper, opacity: number) {
   }
 }
 
+/** Grid a bit past the fit box; aim for ~1 world-unit cells. */
+function gridExtent(half: number): number {
+  return Math.ceil(Math.max(0.5, half) + 0.5);
+}
+
+/** Distance from origin to the axis label tips (grid extent + label offset). */
+function axisTipExtent(half: number): number {
+  return gridExtent(half) + 0.45;
+}
+
+/** Bounds half-extent DEFAULT_CAMERA_POSITION was tuned to frame (default "Bounds size" = 5). */
+const REFERENCE_HALF = 2.5;
+
 export function rebuildWorldGrid(half: number) {
   while (worldGrid.children.length) {
     const child = worldGrid.children.pop() as THREE.Mesh | undefined;
@@ -148,9 +161,7 @@ export function rebuildWorldGrid(half: number) {
     mat?.dispose?.();
   }
 
-  const h = Math.max(0.5, half);
-  // Grid a bit past the fit box; aim for ~1 world-unit cells.
-  const extent = Math.ceil(h + 0.5);
+  const extent = gridExtent(half);
   const size = extent * 2;
   const divisions = Math.max(2, size);
   const tc = readThemeColors();
@@ -196,18 +207,25 @@ export function rebuildWorldGrid(half: number) {
   );
   worldGrid.add(axes);
 
-  const tip = extent + 0.45;
+  const tip = axisTipExtent(half);
   worldLabels.add(makeAxisLabel("x", tc.axisX, new THREE.Vector3(tip, 0, 0), tc.labelStroke));
   worldLabels.add(makeAxisLabel("y", tc.axisY, new THREE.Vector3(0, tip, 0), tc.labelStroke));
   worldLabels.add(makeAxisLabel("z", tc.axisZ, new THREE.Vector3(0, 0, tip), tc.labelStroke));
 
   // WebGPU path draws the same grid against iso depth (no texture copy).
-  syncClipGpuWorldGrid(h);
+  syncClipGpuWorldGrid(Math.max(0.5, half));
 }
 
 export function resetCameraView() {
   camera.up.set(0, 0, 1);
-  camera.position.copy(DEFAULT_CAMERA_POSITION);
+  // Scale the hand-tuned default framing by how much bigger/smaller the
+  // current bounds are than the size it was tuned for, so "reset view"
+  // always brings the whole box (and its axis labels) into frame instead
+  // of leaving a large box overflowing it or a small one adrift in empty
+  // space.
+  const half = boundClipUniforms?.uHalf?.value ?? REFERENCE_HALF;
+  const scale = axisTipExtent(half) / axisTipExtent(REFERENCE_HALF);
+  camera.position.copy(DEFAULT_CAMERA_POSITION).multiplyScalar(scale);
   controls.target.set(0, 0, 0);
   controls.update();
   state.clipDirty = true;
