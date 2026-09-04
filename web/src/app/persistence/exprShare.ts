@@ -3,44 +3,69 @@
  */
 import { listExpressions, setExpressions } from "../../model/expressions.js";
 import type { ExprItem } from "../../types/models.js";
+import { els } from "../dom.js";
+import { BOUNDS_SIZE_MIN, BOUNDS_SIZE_MAX } from "../state.js";
 import {
   decodeCompactFragment,
   encodeCompactFragment,
+  type DecodedSharePayload,
 } from "./exprShareCodec.js";
+
+/**
+ * Mirrors presentation.ts's `readBoundsSize()` without importing it — that
+ * module pulls in the WebGPU/device-tier chain, which isn't Node-safe and
+ * would break this file's test coverage (exprShare.test.ts / exprShareBench).
+ */
+function currentBoxSize(): number {
+  const n = Number(els.boxSize.value) || 5;
+  return Math.min(BOUNDS_SIZE_MAX, Math.max(BOUNDS_SIZE_MIN, Math.round(n * 10) / 10));
+}
 
 export {
   EXPR_SHARE_VERSION,
   COMPRESS_THRESHOLD,
   GZIP_THRESHOLD,
   compactExprPayload,
+  DEFAULT_BOX_SIZE,
   type CompactExprRow,
   type CompressMode,
+  type DecodedSharePayload,
 } from "./exprShareCodec.js";
 
-/** Encode expression rows to a fragment body (`e=1…` / `e=1d…` / legacy `e=1z…`). */
-export async function encodeExpressionsFragment(exprs: ExprItem[]): Promise<string> {
-  return encodeCompactFragment(exprs, "auto");
+/** Encode expression rows (+ box size, if given) to a fragment body (`e=1…` / `e=1d…`). */
+export async function encodeExpressionsFragment(exprs: ExprItem[], boxSize?: number): Promise<string> {
+  return encodeCompactFragment(exprs, "auto", boxSize);
 }
 
-/** Decode a fragment body or `#…` hash into expression patches. */
-export async function decodeExpressionsFragment(hash: string): Promise<Partial<ExprItem>[] | null> {
+/** Decode a fragment body or `#…` hash into expression patches (+ box size, if present). */
+export async function decodeExpressionsFragment(hash: string): Promise<DecodedSharePayload | null> {
   return decodeCompactFragment(hash);
 }
 
-/** Build a full share URL for the current expression list. */
+/** Build a full share URL for the current expression list and box size. */
 export async function buildExpressionShareUrl(baseUrl = location.href): Promise<string> {
-  const fragment = await encodeExpressionsFragment(listExpressions());
+  const fragment = await encodeExpressionsFragment(listExpressions(), currentBoxSize());
   const url = new URL(baseUrl);
   url.hash = fragment;
   return url.toString();
 }
 
-/** Apply `#e=…` when present; returns true when expressions were loaded. */
+/**
+ * Apply `#e=…` when present; returns true when expressions were loaded.
+ * Sets `els.boxSize.value` directly when the fragment carries a box size, but
+ * doesn't refresh its label/liquid-thumb UI (that's presentation.ts, kept
+ * out of this file's import graph — see `currentBoxSize`). Callers should
+ * follow a successful restore with `syncBoundsSlider()`.
+ */
 export async function applyExpressionsFromFragment(hash = location.hash): Promise<boolean> {
   if (!hash || hash === "#") return false;
-  const rows = await decodeExpressionsFragment(hash);
-  if (!rows) return false;
-  setExpressions(rows);
+  const decoded = await decodeExpressionsFragment(hash);
+  if (!decoded) return false;
+  setExpressions(decoded.rows);
+  if (decoded.boxSize != null) {
+    const clamped = Math.min(BOUNDS_SIZE_MAX, Math.max(BOUNDS_SIZE_MIN, decoded.boxSize));
+    els.boxSize.value = String(clamped);
+  }
   return true;
 }
 

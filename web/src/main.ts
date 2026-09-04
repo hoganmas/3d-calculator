@@ -18,7 +18,7 @@ import {
   invalidateLayerBakeFingerprint,
 } from "./app/pipeline.js";
 import { clipUniforms, initWebglFallback, ensureSceneGpuUpload, warmClipGpuInit } from "./app/webglFallback.js";
-import { initPresentation, resize, bindHudText } from "./app/presentation.js";
+import { initPresentation, resize, bindHudText, syncBoundsSlider } from "./app/presentation.js";
 import { hudText, copyMetricsToClipboard } from "./app/hud.js";
 import { initProdSettingsUi } from "./app/quality.js";
 import { applyBootPerfTier } from "./app/perfAdapt.js";
@@ -158,6 +158,7 @@ async function bootstrap() {
   try {
     restored = await applyExpressionsFromFragment(location.hash);
     if (restored) {
+      syncBoundsSlider();
       syncExprCompileState();
       await persistNow();
     }
