@@ -22,7 +22,7 @@ import { clipUniforms, initWebglFallback, ensureSceneGpuUpload, warmClipGpuInit 
 import { initPresentation, resize, bindHudText, syncBoundsSlider } from "./app/presentation.js";
 import { hudText, copyMetricsToClipboard } from "./app/hud.js";
 import { initProdSettingsUi } from "./app/quality.js";
-import { applyBootPerfTier } from "./app/perfAdapt.js";
+import { applyBootPerfTier, initAutoQualityAdaptUi } from "./app/perfAdapt.js";
 import { detectDeviceTier } from "./app/deviceTier.js";
 import { cancelProgressiveFit } from "./app/progressiveFit.js";
 import { startRenderLoop } from "./app/loop.js";
@@ -183,6 +183,7 @@ async function bootstrap() {
     startupEnd("boot.init-compile");
   }
   applyBootPerfTier(restored);
+  initAutoQualityAdaptUi();
   refreshPanelToggleChrome();
   ensureParamAnimationFromExprs();
   state.exprListApi?.render();
