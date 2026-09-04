@@ -9,12 +9,12 @@ import {
 
 const DEFAULT_CAMERA = { position: [6.8, 6.2, 4.8], target: [0, 0, 0] };
 
-// Same view direction/distance as DEFAULT_CAMERA, panned right so the scene
-// sits clear of the logo overlay (top-left) instead of centered under it.
-// Position and target are shifted by the same world-space delta (the
-// camera's local "left" direction) — a pure lateral pan, not a rotation —
-// so the framing/angle is otherwise identical to DEFAULT_CAMERA.
-const SHARE_CAMERA = { position: [8.0, 4.9, 4.8], target: [1.2, -1.3, 0] };
+// Same view direction as DEFAULT_CAMERA, but closer (bigger subject in
+// frame — overflow past the edges is fine) and panned right so the scene
+// sits clear of the now-large, vertically-centered logo overlay. Position
+// and target are shifted by the same world-space delta (the camera's local
+// "left" direction) — a pure lateral pan, not a rotation.
+const SHARE_CAMERA = { position: [6.65, 2.54, 3.46], target: [1.75, -1.92, 0] };
 
 // Must match composite.mjs's canvas size — the single-shot capture renders
 // at exactly this size natively, no client-side scaling/cropping.

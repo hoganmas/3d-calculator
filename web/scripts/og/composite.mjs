@@ -15,16 +15,17 @@ export function buildSingleShotHtml(pngBase64, logoSvg) {
   .shot { display: block; width: 100%; height: 100%; }
   .brand {
     position: absolute;
-    top: 22px; left: 26px;
+    top: 50%; left: 84px;
+    transform: translateY(-50%);
     display: flex;
     align-items: center;
-    gap: 14px;
-    filter: drop-shadow(0 1px 6px rgba(0,0,0,0.55));
+    gap: 22px;
+    filter: drop-shadow(0 2px 10px rgba(0,0,0,0.55));
   }
-  .brand img { width: 52px; height: 52px; flex: 0 0 auto; }
+  .brand img { width: 130px; height: 130px; flex: 0 0 auto; }
   .brand span {
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-    font-size: 32px;
+    font-size: 76px;
     font-weight: 700;
     letter-spacing: -0.03em;
     color: #fff;

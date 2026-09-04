@@ -134,6 +134,33 @@ export async function run() {
       },
     },
     {
+      // renderShareOgPng loads decodeSharePayload's full row set together in
+      // one call to loadExpressions() — not one isolated captureScene() per
+      // row — so a multi-expression share only actually renders as one
+      // composed scene if every visual row survives the decode intact. This
+      // can't exercise the WebGPU compositing itself (no browser here), but
+      // it's the unit-testable half of that guarantee; see
+      // scripts/og/generate-samples.mjs's "multi-expression-scene" sample
+      // for a real rendered check.
+      name: "decodeSharePayload preserves every visual row for a multi-expression scene",
+      fn: async () => {
+        const rows0 = [
+          sampleExpr({ id: "e1", latex: "z=x^2-y^2" }),
+          sampleExpr({ id: "e2", latex: "x^2+y^2+z^2=4" }),
+        ];
+        const fragment = await encodeExpressionsFragment(rows0);
+        const payload = normalizeSharePayload(fragment);
+
+        const rows = await decodeSharePayload(payload);
+        assert(rows.length === 2, "both rows decoded, not just the first");
+        assert(rows[0]?.latex === "z=x^2-y^2", "first row round-trips");
+        assert(rows[1]?.latex === "x^2+y^2+z^2=4", "second row round-trips");
+
+        const panels = sharePanelsFromRows(rows);
+        assert(panels.length === 2, "both rows are visual (neither is a parameter)");
+      },
+    },
+    {
       name: "fragmentFromSharePayload round-trips through decodeExpressionsFragment shape",
       fn: () => {
         assert(fragmentFromSharePayload("1.abc") === "e=1.abc", "wraps payload as e=…");
