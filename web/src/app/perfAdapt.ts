@@ -57,12 +57,12 @@ export function applyBootPerfTier(restoredDocument: boolean) {
   state.deviceTier = tier;
   if (tier === "mobile") maybeAutoCollapsePanel();
   // A step-down calls applyQualityFromState({ refit: true }), which re-bakes
-  // the whole animation. On mobile that refit itself is often the thing
-  // tanking the frame rate, so the watchdog can trigger a refit, see fps
-  // stay low from the refit's own cost, and step down again — making the
-  // perf problem it's meant to fix worse. Default it off there, but still
-  // let a user with an explicit saved preference override that.
-  state.autoQualityAdapt = readAutoQualityAdaptPref() ?? tier !== "mobile";
+  // the whole animation — on a loaded scene that refit itself can be the
+  // thing tanking the frame rate, so the watchdog can trigger a refit, see
+  // fps stay low from the refit's own cost, and step down again, making the
+  // perf problem it's meant to fix worse. Default off on every tier; a user
+  // can opt in via the Settings toggle, which is what sets the saved pref.
+  state.autoQualityAdapt = readAutoQualityAdaptPref() ?? false;
   if (restoredDocument) return;
   if (!isProdUi()) return;
 

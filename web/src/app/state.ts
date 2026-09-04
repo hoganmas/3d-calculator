@@ -81,7 +81,7 @@ export const state = {
   qualityUserOverrideAt: 0,
   perfAdaptStepDownCount: 0,
   /** Runtime FPS watchdog that auto-lowers quality sliders on sustained low frame rate. */
-  autoQualityAdapt: true,
+  autoQualityAdapt: false,
 };
 
 export const FIT_DEBOUNCE_MS = 320;
