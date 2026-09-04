@@ -45,8 +45,17 @@ export const DEFAULT_FOV = 50;
  */
 export const ISO_FOV = 2;
 
+/**
+ * Own scene, rendered in its own pass (loop.ts:presentThreeJs) with the FOV
+ * forced back to DEFAULT_FOV. The blob pattern's angular size (background.ts)
+ * is tuned for a normal ~50° view; isometric's 2° FOV would otherwise zoom
+ * into a sliver of that pattern — magnified, nearly static, "broken" —
+ * since the shader has no notion of FOV and just samples by view direction.
+ */
+export const lavaScene = new THREE.Scene();
+lavaScene.add(lavaBg.mesh);
+
 export const scene = new THREE.Scene();
-scene.add(lavaBg.mesh);
 // far pushed out well past the max isometric camera distance (narrow FOV
 // needs the camera much farther away to keep the same framing) — the volume
 // raymarch computes its own ray/box intersection and ignores near/far, so
