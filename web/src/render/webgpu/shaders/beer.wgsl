@@ -255,10 +255,12 @@ fn marchBeer(pos: vec2f) -> FSOut {
     return out;
   }
 
-  let far = max(tExit, half * 4.0);
+  // Must match isoHermite.wgsl's normalization exactly — isoD below is read
+  // straight out of that pass's occl.r.
+  let far = max(tExit - tEnter, half * 4.0);
   // Same-res: clip beer to iso. Finer iso: leave tExit alone (isoD == 1).
   let isoD = isoOcclusionForVolumePixel(pos, fbW, fbH);
-  if (isoD < 0.999) { tExit = min(tExit, isoD * far); }
+  if (isoD < 0.999) { tExit = min(tExit, tEnter + isoD * far); }
   if (!(tExit > tEnter + 1e-6)) {
     out.color = vec4f(0.0);
     out.occl = vec4f(isoD, 0.0, 0.0, 1.0);
@@ -322,7 +324,7 @@ fn marchBeer(pos: vec2f) -> FSOut {
       T *= absorb;
       let alpha = 1.0 - T;
       if (densD >= 0.999 && alpha >= OCCL_ALPHA) {
-        densD = clamp(s / far, 0.0, 0.999);
+        densD = clamp((s - tEnter) / far, 0.0, 0.999);
       }
     }
     s += dt;

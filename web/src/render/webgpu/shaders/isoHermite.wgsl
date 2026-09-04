@@ -430,7 +430,12 @@ fn marchIso(ro: vec3f, rd: vec3f, tEnter: f32, tExit: f32) -> FSOut {
   let dt = (tExit - tEnter) / f32(steps);
   var s0 = tEnter;
   var f0 = fieldAt(ro + rd * s0);
-  let far = max(tExit, draw.half * 4.0);
+  // Normalized relative to the ray's in-box span (tExit - tEnter), not the
+  // camera's absolute distance to the box: isometric mode pushes the camera
+  // far back to fake orthographic (see scene.ts ISO_FOV), which balloons
+  // tExit and would otherwise crush this into a sliver near 1.0, wiping out
+  // the depth-crease precision isoRefine.ts needs to place cascade tiles.
+  let far = max(tExit - tEnter, draw.half * 4.0);
   var dfdT = 0.0;
   var hasDfdT = false;
 
@@ -467,7 +472,7 @@ fn marchIso(ro: vec3f, rd: vec3f, tEnter: f32, tExit: f32) -> FSOut {
     if (hit >= 0.0) {
       let p = ro + rd * hit;
       if (cellBracketsIso(p)) {
-        let d = clamp(hit / far, 0.0, 0.999);
+        let d = clamp((hit - tEnter) / far, 0.0, 0.999);
         let n = isoNormal(p, rd);
         out.color = shadeIso(p, rd, n);
         out.occl = vec4f(d, draw.layerIndex, isoNearBoxFace(p), 1.0);
