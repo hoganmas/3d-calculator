@@ -30,13 +30,15 @@ export async function decodeSharePayload(payload: string): Promise<Partial<ExprI
   return decoded.rows;
 }
 
+/**
+ * Graphed (non-parameter) rows from a decoded payload, for the OG pipeline's
+ * "is there anything to show" check (api/og.ts) and title/description text
+ * (api/share.ts) — not for rendering in isolation. The actual OG capture
+ * loads the full row set together in one scene (renderShareOgPng), so a
+ * visual row's parameter dependencies (e.g. an animated `t`) are resolved
+ * naturally rather than needing to be carried along here.
+ */
 export function sharePanelsFromRows(rows: Partial<ExprItem>[], max = 3) {
-  // Parameter rows (e.g. `t=0.35`) aren't graphed themselves, but a visual
-  // row can reference them (animated/parametric expressions are common) —
-  // each panel is rendered as an isolated single-expression scene, so it
-  // needs these carried along or the compiler sees `t` as undefined.
-  const paramRows = rows.filter((row) => row.autoParam && String(row.latex ?? "").trim());
-
   return rows
     .filter((row) => {
       const latex = String(row.latex ?? "").trim();
@@ -49,11 +51,9 @@ export function sharePanelsFromRows(rows: Partial<ExprItem>[], max = 3) {
       return true;
     })
     .slice(0, max)
-    .map((row, index) => ({
+    .map((row) => ({
       latex: String(row.latex ?? ""),
-      palette: index,
       label: latexToPlainLabel(String(row.latex ?? "")),
-      paramRows,
     }));
 }
 

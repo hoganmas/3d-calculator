@@ -77,34 +77,6 @@ export async function run() {
       },
     },
     {
-      // Regression: each panel is rendered as an isolated single-expression
-      // scene, so a visual row referencing a parameter (very common for
-      // animated expressions) needs that parameter row carried along or it
-      // fails to compile with "Undefined parameter: t".
-      name: "sharePanelsFromRows attaches autoParam rows as paramRows on every panel",
-      fn: () => {
-        const paramRow = sampleExpr({ id: "e1", latex: "t=0.4", autoParam: true });
-        const panels = sharePanelsFromRows([
-          paramRow,
-          sampleExpr({ id: "e2", latex: String.raw`y=\sin\left(x+2\pi t\right)` }),
-          sampleExpr({ id: "e3", latex: "z=x-t" }),
-        ]);
-        assert(panels.length === 2, "two graphed panels");
-        for (const panel of panels) {
-          assert(Array.isArray(panel.paramRows), "paramRows present");
-          assert(panel.paramRows.length === 1, "one param row carried");
-          assert(panel.paramRows[0]!.latex === "t=0.4", "param row content preserved");
-        }
-      },
-    },
-    {
-      name: "sharePanelsFromRows omits paramRows when there are none",
-      fn: () => {
-        const panels = sharePanelsFromRows([sampleExpr({ id: "e1", latex: "z=x" })]);
-        assert(panels[0]!.paramRows.length === 0, "no param rows to carry");
-      },
-    },
-    {
       name: "sharePanelsFromRows respects the max panel count",
       fn: () => {
         const rows = Array.from({ length: 5 }, (_, i) =>
@@ -112,17 +84,6 @@ export async function run() {
         );
         const panels = sharePanelsFromRows(rows, 3);
         assert(panels.length === 3, "truncated to max");
-      },
-    },
-    {
-      name: "sharePanelsFromRows assigns sequential palette indices",
-      fn: () => {
-        const panels = sharePanelsFromRows([
-          sampleExpr({ id: "e1", latex: "z=x" }),
-          sampleExpr({ id: "e2", latex: "z=y" }),
-        ]);
-        assert(panels[0]!.palette === 0, "first panel palette 0");
-        assert(panels[1]!.palette === 1, "second panel palette 1");
       },
     },
     {
@@ -150,7 +111,12 @@ export async function run() {
       },
     },
     {
-      name: "decodeSharePayload -> sharePanelsFromRows round-trips a shared scene end to end",
+      // The OG capture loads decodeSharePayload's full row set together in
+      // one scene (renderShareOgPng) rather than isolating panels, so an
+      // animated expression's parameter row just needs to survive the
+      // encode/decode round-trip alongside its visual row — no separate
+      // "carry the param to its panel" step to regress.
+      name: "decodeSharePayload round-trips a param row alongside its dependent visual row",
       fn: async () => {
         const paramRow = sampleExpr({ id: "e1", latex: "t=0", autoParam: true });
         const visualRow = sampleExpr({ id: "e2", latex: String.raw`y=\sin\left(x+t\right)` });
@@ -158,11 +124,13 @@ export async function run() {
         const payload = normalizeSharePayload(fragment);
 
         const rows = await decodeSharePayload(payload);
+        assert(rows.length === 2, "both rows decoded");
+        assert(rows[0]?.latex === "t=0" && rows[0]?.autoParam === true, "param row round-trips");
+        assert(rows[1]?.latex?.includes("\\sin"), "visual row round-trips");
+
         const panels = sharePanelsFromRows(rows);
-        assert(panels.length === 1, "one graphed panel");
-        assert(panels[0]!.latex.includes("\\sin"), "visual row decoded");
-        assert(panels[0]!.paramRows.length === 1, "param row decoded and carried");
-        assert(panels[0]!.paramRows[0]!.latex === "t=0", "param row latex round-trips");
+        assert(panels.length === 1, "only the visual row becomes a panel");
+        assert(panels[0]!.latex.includes("\\sin"), "panel latex is the visual row");
       },
     },
     {

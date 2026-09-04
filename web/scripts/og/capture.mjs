@@ -104,6 +104,32 @@ export async function captureScene(page, scene) {
   return target.screenshot({ type: "png" });
 }
 
+/**
+ * Capture the whole scene (every row loaded together, exactly as a viewer
+ * would see it) in one shot — used for real per-share OG images instead of
+ * isolating each expression into its own panel (see captureScene), so
+ * multi-expression scenes render as the actual composition, not N unrelated
+ * thumbnails, and cross-row dependencies (e.g. an animated parameter) just
+ * work without needing to be carried along separately.
+ */
+export async function captureFullScene(page, { rows, camera, settleMs, isometric = true } = {}) {
+  await page.evaluate(
+    async ({ rows, camera, settleMs, isometric }) => {
+      const api = window.__laplacianOgCapture;
+      if (!api) throw new Error("ogCapture API missing");
+      await api.loadExpressions(rows);
+      if (camera?.position) api.setCamera(camera.position, camera.target ?? [0, 0, 0]);
+      else api.resetCamera();
+      api.setIsometric(isometric);
+      await api.waitFrame(settleMs ?? 2500);
+    },
+    { rows, camera, settleMs, isometric },
+  );
+  const canvas = page.locator("#viewport canvas.clip-gpu").first();
+  const target = (await canvas.count()) > 0 ? canvas : page.locator("#viewport canvas").first();
+  return target.screenshot({ type: "png" });
+}
+
 export async function screenshotComposite(browser, html) {
   const page = await browser.newPage({ viewport: { width: 1200, height: 630 } });
   await page.setContent(html, { waitUntil: "load" });

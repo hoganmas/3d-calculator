@@ -1,3 +1,45 @@
+/**
+ * Single full-bleed scene shot + logo overlay — used for real per-share OG
+ * images (captureFullScene already renders every row together at the exact
+ * 1200×630 output size, so this just adds the brand mark on top; no grid of
+ * panels, no per-expression caption — see buildCompositeHtml for that,
+ * still used by the curated multi-example marketing gallery).
+ */
+export function buildSingleShotHtml(pngBase64, logoSvg) {
+  const logoData = `data:image/svg+xml;base64,${Buffer.from(logoSvg).toString("base64")}`;
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { width: 1200px; height: 630px; overflow: hidden; background: #1a1228; }
+  .shot { display: block; width: 100%; height: 100%; }
+  .brand {
+    position: absolute;
+    top: 22px; left: 26px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    filter: drop-shadow(0 1px 6px rgba(0,0,0,0.55));
+  }
+  .brand img { width: 52px; height: 52px; flex: 0 0 auto; }
+  .brand span {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: #fff;
+  }
+</style>
+</head>
+<body>
+  <img class="shot" src="data:image/png;base64,${pngBase64}" alt="" />
+  <div class="brand">
+    <img src="${logoData}" alt="" />
+    <span>laplaci</span>
+  </div>
+</body></html>`;
+}
+
 export function buildCompositeHtml(scenes, logoSvg) {
   const logoData = `data:image/svg+xml;base64,${Buffer.from(logoSvg).toString("base64")}`;
   const cols = Math.min(3, Math.max(1, scenes.length));

@@ -7,7 +7,7 @@ import { decodeCompactFragment } from "./persistence/exprShareCodec.js";
 import { normalizeSharePayload } from "./persistence/exprShare.js";
 import { compileAllExprs } from "./compile.js";
 import { uploadFit } from "./pipeline.js";
-import { camera, controls, resetCameraView } from "./scene.js";
+import { camera, controls, resetCameraView, setIsometric as setSceneIsometric } from "./scene.js";
 import { resize } from "./presentation.js";
 import { applyQualityFromState, markQualityUserOverride } from "./quality.js";
 import { els } from "./dom.js";
@@ -20,9 +20,11 @@ type LoadOpts = {
   palette?: number;
   /**
    * Parameter rows (e.g. `t=0.35`) the loaded expression may reference.
-   * Needed when loading a single row in isolation (as og.ts's per-panel
-   * capture does) — otherwise an animated/parametric expression fails to
-   * compile with an "Undefined parameter" error.
+   * Needed when loading a single row in isolation — otherwise an
+   * animated/parametric expression fails to compile with an "Undefined
+   * parameter" error. (The dynamic per-share OG capture loads every row
+   * together via loadExpressions() instead, so this only matters for
+   * single-expression captures — e.g. the static marketing gallery.)
    */
   paramRows?: Partial<ExprItem>[];
 };
@@ -127,6 +129,10 @@ export function installOgCapture() {
       controls.target.set(target[0], target[1], target[2]);
       controls.update();
       state.clipDirty = true;
+    },
+    /** Near-orthographic "isometric" look, preserving the current view direction (see scene.ts's own toolbar toggle). */
+    setIsometric(on = true) {
+      setSceneIsometric(on);
     },
     resetCamera() {
       prepareViewport();

@@ -51,7 +51,7 @@ async function main() {
   const logoSvg = readFileSync(join(root, "web/public/logo.svg"), "utf8");
   const png = await renderShareOgPng({
     siteUrl: url.origin,
-    panels,
+    rows,
     logoSvg,
     // Omit unless OG_CAPTURE_DEG is set: ogCapture.ts forces max quality by
     // default; this is only an escape hatch for fast local iteration.
@@ -61,7 +61,7 @@ async function main() {
   const outPath = outArg ?? join(root, "web/scripts/og/out", `og-${Date.now()}.png`);
   mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(outPath, png);
-  console.log(`Wrote ${outPath} (${panels.length} panel${panels.length === 1 ? "" : "s"}: ${panels.map((p) => p.label).join(", ")})`);
+  console.log(`Wrote ${outPath} (${panels.length} expression${panels.length === 1 ? "" : "s"}: ${panels.map((p) => p.label).join(", ")})`);
 }
 
 main().catch((err) => {

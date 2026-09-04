@@ -32,15 +32,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const rows = await decodeSharePayload(payload);
-    const panels = sharePanelsFromRows(rows);
-    if (!panels.length) {
+    if (!sharePanelsFromRows(rows).length) {
       res.status(400).send("No visual expressions in payload");
       return;
     }
 
     const png = await renderShareOgPng({
       siteUrl: siteUrl(),
-      panels,
+      rows,
       logoSvg: readFileSync(logoSvg, "utf8"),
       // Omit unless OG_CAPTURE_DEG is explicitly set: ogCapture.ts forces
       // max quality by default, this is only an escape hatch to deliberately

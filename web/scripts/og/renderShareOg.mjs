@@ -1,5 +1,6 @@
-import { buildCompositeHtml } from "./composite.mjs";
+import { buildCompositeHtml, buildSingleShotHtml } from "./composite.mjs";
 import {
+  captureFullScene,
   captureScene,
   launchOgBrowser,
   prepareCapturePage,
@@ -8,9 +9,15 @@ import {
 
 const DEFAULT_CAMERA = { position: [6.8, 6.2, 4.8], target: [0, 0, 0] };
 
-// Must match composite.mjs's canvas size and grid gap — panels are captured
-// at their exact on-composite pixel size so they fill their cell natively,
-// no client-side scaling/cropping.
+// Same view direction/distance as DEFAULT_CAMERA, panned right so the scene
+// sits clear of the logo overlay (top-left) instead of centered under it.
+// Position and target are shifted by the same world-space delta (the
+// camera's local "left" direction) — a pure lateral pan, not a rotation —
+// so the framing/angle is otherwise identical to DEFAULT_CAMERA.
+const SHARE_CAMERA = { position: [8.0, 4.9, 4.8], target: [1.2, -1.3, 0] };
+
+// Must match composite.mjs's canvas size — the single-shot capture renders
+// at exactly this size natively, no client-side scaling/cropping.
 const COMPOSITE_W = 1200;
 const COMPOSITE_H = 630;
 const PANEL_GAP = 3;
@@ -60,9 +67,28 @@ export async function renderOgComposite({ siteUrl, scenes, logoSvg, ogDeg }) {
 }
 
 /**
- * Render a share OG PNG for the given expression panels.
- * @param {{ siteUrl: string, panels: { latex: string, palette?: number, label: string, paramRows?: object[] }[], logoSvg: string, ogDeg?: number }} opts
+ * Render a share OG PNG for a decoded share payload's full row set — every
+ * row loaded together in one scene, exactly as a viewer opening the link
+ * would see it (not split into isolated per-expression panels; see
+ * renderOgComposite for that, used only by the static marketing gallery).
+ * `ogDeg` is an explicit fit-degree override for local testing/fast
+ * iteration — omit it (the default) to render at forced max quality, which
+ * is what ogCapture.ts's installOgCapture() does regardless.
+ * @param {{ siteUrl: string, rows: object[], logoSvg: string, ogDeg?: number }} opts
  */
-export async function renderShareOgPng({ siteUrl, panels, logoSvg, ogDeg }) {
-  return renderOgComposite({ siteUrl, scenes: panels, logoSvg, ogDeg });
+export async function renderShareOgPng({ siteUrl, rows, logoSvg, ogDeg }) {
+  const browser = await launchOgBrowser();
+  try {
+    const page = await prepareCapturePage(browser, siteUrl, ogDeg);
+    const png = await captureFullScene(page, {
+      rows,
+      camera: SHARE_CAMERA,
+      settleMs: 3500,
+    });
+    await page.close();
+    const html = buildSingleShotHtml(png.toString("base64"), logoSvg);
+    return await screenshotComposite(browser, html);
+  } finally {
+    await browser.close();
+  }
 }

@@ -4,11 +4,9 @@
  *
  * Each sample is routed through the *exact* same pipeline production uses
  * (api/og.ts): encode -> share payload -> decodeSharePayload ->
- * sharePanelsFromRows -> renderOgComposite. This isn't a shortcut — it also
- * exercises the panel-selection logic (sharePanelsFromRows), so a regression
- * there (e.g. a graphed expression getting silently dropped, or a parameter
- * dependency not carrying over to its panel) shows up here too, not just
- * rendering bugs.
+ * sharePanelsFromRows (validation only) -> renderShareOgPng, which loads
+ * every row together in one scene (not split into isolated panels), so this
+ * also exercises the same "is there anything to show" check production does.
  *
  * Usage: tsx scripts/og/generate-samples.mjs [siteUrl] [outDir]
  *   siteUrl defaults to https://localhost:5173
@@ -27,7 +25,7 @@ import {
   normalizeSharePayload,
   sharePanelsFromRows,
 } from "../../../api/_lib/sharePayload.ts";
-import { renderOgComposite } from "./renderShareOg.mjs";
+import { renderShareOgPng } from "./renderShareOg.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -52,8 +50,8 @@ function row(overrides) {
 
 // Deliberately covers the cases that have broken before: a plain surface, a
 // vector field, a volumetric/abs expression, a single-letter alias (the
-// sharePanelsFromRows regex regression), an animated/parametric expression
-// (the paramRows regression), and a multi-panel share.
+// sharePanelsFromRows regex regression), and an animated/parametric
+// expression (the parameter-dependency regression).
 const SAMPLES = {
   "static-wave": [row({ latex: String.raw`z=-\cos\left(x\right)\sin\left(2y\right)` })],
   "vector-field": [row({ latex: String.raw`\left(0,z,-y\right)` })],
@@ -62,11 +60,6 @@ const SAMPLES = {
   "animated-param": [
     row({ id: "e1", latex: "t=0.4", autoParam: true, sliderAnimating: true, sliderMin: 0, sliderMax: 1 }),
     row({ id: "e2", latex: String.raw`y=\sin\left(x+2\pi t\right)\cos\left(z\right)` }),
-  ],
-  "multi-panel-scene": [
-    row({ id: "e1", latex: "z=x^2-y^2" }),
-    row({ id: "e2", latex: String.raw`z=\sin\left(x\right)\cos\left(y\right)` }),
-    row({ id: "e3", latex: "x^2+y^2+z^2=4" }),
   ],
 };
 
@@ -85,11 +78,10 @@ async function main() {
       const fragment = await encodeCompactFragment(SAMPLES[name], "auto");
       const payload = normalizeSharePayload(fragment);
       const rows = await decodeSharePayload(payload);
-      const panels = sharePanelsFromRows(rows);
-      if (!panels.length) throw new Error("sharePanelsFromRows returned no panels");
+      if (!sharePanelsFromRows(rows).length) throw new Error("no visual expressions in payload");
 
-      console.log(`Rendering ${name} (${panels.length} panel${panels.length === 1 ? "" : "s"})...`);
-      const png = await renderOgComposite({ siteUrl, scenes: panels, logoSvg });
+      console.log(`Rendering ${name}...`);
+      const png = await renderShareOgPng({ siteUrl, rows, logoSvg });
       const outPath = join(outDir, `${name}.png`);
       writeFileSync(outPath, png);
       console.log(`  -> ${outPath}`);
