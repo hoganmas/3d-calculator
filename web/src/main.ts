@@ -167,7 +167,16 @@ async function bootstrap() {
   }
   if (!restored) {
     startupBegin("boot.restore-autosave");
-    restored = await restoreAutosave();
+    try {
+      restored = await restoreAutosave();
+    } catch (e) {
+      // Safari/WebKit's IndexedDB backing store can transiently fail to open
+      // right after a full reload ("Unable to open database file on disk").
+      // Don't let that abort the rest of boot — fall through to a fresh
+      // document instead of leaving the app half-initialized.
+      const msg = e instanceof Error ? e.message : String(e);
+      setAutosaveError(`Could not restore autosave: ${msg}`);
+    }
     startupEnd("boot.restore-autosave", { restored });
   }
 
