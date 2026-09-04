@@ -227,6 +227,7 @@ __marimo__/
 node_modules/
 web/dist/
 web/coverage/
+web/scripts/og/out/
 
 # Cursor IDE — personal MCP config, rules, etc.
 .cursor/

@@ -5,7 +5,7 @@ export function buildCompositeHtml(scenes, logoSvg) {
     .map(
       (scene) => `
     <figure class="card">
-      <div class="shot"><img src="data:image/png;base64,${scene.png}" alt="" /></div>
+      <img class="shot" src="data:image/png;base64,${scene.png}" alt="" />
       <figcaption>${escapeHtml(scene.label)}</figcaption>
     </figure>`,
     )
@@ -22,91 +22,64 @@ export function buildCompositeHtml(scenes, logoSvg) {
     color: #f5eef8;
   }
   .wrap {
+    position: relative;
     width: 100%; height: 100%;
-    display: flex;
-    flex-direction: column;
-    gap: 28px;
-    padding: 36px 44px 32px;
-  }
-  .brand {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-    text-align: center;
-  }
-  .logo-row {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 22px;
-  }
-  .logo-row img { width: 88px; height: 88px; flex: 0 0 auto; }
-  .logo-row h1 {
-    font-size: 72px;
-    font-weight: 700;
-    letter-spacing: -0.04em;
-    line-height: 1;
-  }
-  .tagline {
-    font-size: 30px;
-    color: #c9b8d9;
-    line-height: 1.2;
-    letter-spacing: -0.01em;
   }
   .shots {
-    flex: 1;
-    min-height: 0;
+    width: 100%; height: 100%;
     display: grid;
     grid-template-columns: repeat(${cols}, 1fr);
-    gap: 18px;
-    align-items: stretch;
+    gap: 3px;
   }
   .card {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+    position: relative;
     min-width: 0;
     min-height: 0;
-  }
-  .shot {
-    flex: 1;
-    min-height: 0;
-    border-radius: 18px;
     overflow: hidden;
-    border: 2px solid #3d2d52;
-    background: #0f0a18;
-    display: flex;
-    align-items: center;
-    justify-content: center;
   }
-  .shot img {
+  /* Each panel is captured at its exact on-composite pixel size (see
+     renderShareOg.mjs), so the shot fills its cell with no scaling/cropping. */
+  .shot {
+    display: block;
     width: 100%;
     height: 100%;
-    object-fit: contain;
-    object-position: center;
-    display: block;
   }
   figcaption {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    padding: 8px 12px 7px;
+    background: linear-gradient(to top, rgba(15,10,24,0.72), rgba(15,10,24,0));
     font-family: "IBM Plex Mono", ui-monospace, monospace;
     font-size: 12px;
-    color: #9a86b0;
+    color: #f0e8f7;
     text-align: center;
     line-height: 1.3;
-    flex: 0 0 auto;
+  }
+  .brand {
+    position: absolute;
+    top: 18px; left: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    z-index: 1;
+    filter: drop-shadow(0 1px 6px rgba(0,0,0,0.55));
+  }
+  .brand img { width: 34px; height: 34px; flex: 0 0 auto; }
+  .brand span {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: #fff;
   }
 </style>
 </head>
 <body>
   <div class="wrap">
-    <header class="brand">
-      <div class="logo-row">
-        <img src="${logoData}" alt="" />
-        <h1>laplaci</h1>
-      </div>
-      <p class="tagline">3D Graphing Calculator</p>
-    </header>
     <div class="shots">${cards}</div>
+    <div class="brand">
+      <img src="${logoData}" alt="" />
+      <span>laplaci</span>
+    </div>
   </div>
 </body></html>`;
 }

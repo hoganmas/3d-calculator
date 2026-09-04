@@ -31,12 +31,21 @@ export async function decodeSharePayload(payload: string): Promise<Partial<ExprI
 }
 
 export function sharePanelsFromRows(rows: Partial<ExprItem>[], max = 3) {
+  // Parameter rows (e.g. `t=0.35`) aren't graphed themselves, but a visual
+  // row can reference them (animated/parametric expressions are common) —
+  // each panel is rendered as an isolated single-expression scene, so it
+  // needs these carried along or the compiler sees `t` as undefined.
+  const paramRows = rows.filter((row) => row.autoParam && String(row.latex ?? "").trim());
+
   return rows
     .filter((row) => {
       const latex = String(row.latex ?? "").trim();
       if (!latex) return false;
+      // autoParam is the classifier-driven signal for "this is a slider
+      // parameter, not a graphed surface" (e.g. `a=1`). A plain name=…
+      // regex here would also catch legitimate graphed expressions like
+      // `z=f(x,y)` or aliases (`T=x^2+y^2`) that still render a layer.
       if (row.autoParam) return false;
-      if (/^[a-zA-Z][a-zA-Z0-9]*\s*=/.test(latex)) return false;
       return true;
     })
     .slice(0, max)
@@ -44,6 +53,7 @@ export function sharePanelsFromRows(rows: Partial<ExprItem>[], max = 3) {
       latex: String(row.latex ?? ""),
       palette: index,
       label: latexToPlainLabel(String(row.latex ?? "")),
+      paramRows,
     }));
 }
 

@@ -15,18 +15,27 @@ export async function launchOgBrowser() {
     });
   }
 
+  // --no-sandbox/--disable-dev-shm-usage: headless Chromium's sandboxed
+  // renderer process commonly can't spawn inside a container/CI sandbox
+  // (surfaces as "Failed to create browser context" on the second newPage).
+  const sandboxArgs = ["--no-sandbox", "--disable-dev-shm-usage"];
   try {
     const { chromium: local } = await import("playwright");
     return local.launch({
-      args: ["--enable-unsafe-webgpu", "--use-gl=angle", "--use-angle=metal"],
+      args: [...sandboxArgs, "--enable-unsafe-webgpu", "--use-gl=angle", "--use-angle=metal"],
     });
   } catch {
-    return playwright.launch({ headless: true });
+    return playwright.launch({ headless: true, args: sandboxArgs });
   }
 }
 
 const HIDE_CHROME_CSS = `
-  #panel, #panelResize, .viewport-toolbar, #hud, #kfLoadBar, #splash { display: none !important; }
+  /* .mobile-expr-footer: multi-panel captures use per-cell viewports as
+     narrow as ~400px (see renderShareOg.mjs), which trips the app's own
+     (max-width: 800px) responsive breakpoint (panelLayout.ts) into showing
+     its mobile expression carousel instead of the desktop #panel sidebar. */
+  #panel, #panelResize, .viewport-toolbar, #hud, #kfLoadBar, #splash,
+  .mobile-expr-footer { display: none !important; }
   html { --panel-progress: 1 !important; }
   #app { display: block !important; }
   #viewport {
@@ -38,9 +47,26 @@ const HIDE_CHROME_CSS = `
   html, body { overflow: hidden !important; }
 `;
 
-export async function prepareCapturePage(browser, siteUrl, ogDeg = 16) {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-  const q = new URLSearchParams({ ogCapture: "1", ogDeg: String(ogDeg) });
+// A random per-capture phase offset for the lava background's uTime
+// (see web/src/render/background.ts), so repeated/similar shares don't get
+// an identical-looking background. Injected here, not in app code, since
+// it's purely a capture-tool concern — real interactive sessions should
+// never see a jumped clock.
+function randomTimeOffsetMs() {
+  return Math.random() * 300_000;
+}
+
+export async function prepareCapturePage(browser, siteUrl, ogDeg) {
+  // ignoreHTTPSErrors: local dev serves over HTTPS with a self-signed cert
+  // (@vitejs/plugin-basic-ssl, so LAN/device testing works); a real deploy
+  // has a valid cert, so this is a no-op there.
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true });
+  await page.addInitScript((offsetMs) => {
+    const realNow = performance.now.bind(performance);
+    performance.now = () => realNow() + offsetMs;
+  }, randomTimeOffsetMs());
+  const q = new URLSearchParams({ ogCapture: "1" });
+  if (ogDeg != null) q.set("ogDeg", String(ogDeg));
   await page.goto(`${siteUrl.replace(/\/$/, "")}/?${q}`, {
     waitUntil: "domcontentloaded",
     timeout: 90_000,
@@ -57,10 +83,18 @@ export async function prepareCapturePage(browser, siteUrl, ogDeg = 16) {
 }
 
 export async function captureScene(page, scene) {
-  await page.evaluate(async ({ latex, palette, camera, settleMs }) => {
+  // Capture at the panel's exact on-composite pixel size (see
+  // renderShareOg.mjs) so composite.mjs can lay it in edge-to-edge with no
+  // scaling/cropping — also lets the WebGPU canvas render at native res
+  // for that slot instead of a fixed size that gets downscaled/cropped.
+  if (scene.viewport) {
+    await page.setViewportSize(scene.viewport);
+    await page.evaluate(() => window.__laplacianOgCapture?.resetCamera());
+  }
+  await page.evaluate(async ({ latex, palette, paramRows, camera, settleMs }) => {
     const api = window.__laplacianOgCapture;
     if (!api) throw new Error("ogCapture API missing");
-    await api.load(latex, { palette });
+    await api.load(latex, { palette, paramRows });
     if (camera?.position) api.setCamera(camera.position, camera.target ?? [0, 0, 0]);
     else api.resetCamera();
     await api.waitFrame(settleMs ?? 2500);

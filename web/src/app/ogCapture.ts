@@ -9,6 +9,7 @@ import { compileAllExprs } from "./compile.js";
 import { uploadFit } from "./pipeline.js";
 import { camera, controls, resetCameraView } from "./scene.js";
 import { resize } from "./presentation.js";
+import { applyQualityFromState, markQualityUserOverride } from "./quality.js";
 import { els } from "./dom.js";
 import { state } from "./state.js";
 
@@ -17,6 +18,13 @@ type Vec3 = [number, number, number];
 type LoadOpts = {
   /** Built-in palette index (0–4). */
   palette?: number;
+  /**
+   * Parameter rows (e.g. `t=0.35`) the loaded expression may reference.
+   * Needed when loading a single row in isolation (as og.ts's per-panel
+   * capture does) — otherwise an animated/parametric expression fails to
+   * compile with an "Undefined parameter" error.
+   */
+  paramRows?: Partial<ExprItem>[];
 };
 
 function paletteAt(index: number) {
@@ -28,12 +36,32 @@ function prepareViewport() {
   resize();
 }
 
-function applyOgFastModeFromUrl() {
+/**
+ * A capture is a one-shot server render, not an interactive session — there's
+ * no reason to settle for the tier-adaptive boot defaults (the desktop boot
+ * preset caps volume march at 8× downscale, see deviceTier.ts) or let
+ * perf-adapt step quality back down mid-capture if a slow/software-rendered
+ * headless GPU dips below its FPS threshold. Push every quality axis to its
+ * ceiling and hide the grid/axes overlay (share images should show just the
+ * surface, not editor chrome). `?ogDeg=` remains as an explicit override for
+ * local testing/fast iteration when max quality isn't wanted.
+ */
+function prepareOgCaptureDefaults() {
+  state.precisionQuality = 100;
+  state.scalarQuality = 100;
+  state.surfaceQuality = 100;
+  state.vectorQuality = 100;
+  applyQualityFromState({ force: true, refit: false, reseedFlow: false });
+  markQualityUserOverride();
+
   const params = new URLSearchParams(location.search);
   const ogDeg = Number(params.get("ogDeg"));
-  if (!Number.isFinite(ogDeg) || ogDeg < 2) return;
-  state.fitDeg = Math.round(ogDeg);
-  if (els.deg) els.deg.value = String(state.fitDeg);
+  if (Number.isFinite(ogDeg) && ogDeg >= 2) {
+    state.fitDeg = Math.round(ogDeg);
+    if (els.deg) els.deg.value = String(state.fitDeg);
+  }
+
+  state.showGridAxes = false;
 }
 
 function wait(ms: number) {
@@ -70,12 +98,13 @@ async function loadExpressions(rows: Partial<ExprItem>[]) {
 }
 
 export function installOgCapture() {
-  applyOgFastModeFromUrl();
+  prepareOgCaptureDefaults();
 
   const api = {
     async load(latex: string, opts: LoadOpts = {}) {
       const grad = paletteAt(opts.palette ?? 0);
       await loadExpressions([
+        ...(opts.paramRows ?? []),
         {
           latex,
           color: grad.color,

@@ -42,7 +42,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       siteUrl: siteUrl(),
       panels,
       logoSvg: readFileSync(logoSvg, "utf8"),
-      ogDeg: Number(process.env.OG_CAPTURE_DEG ?? 16),
+      // Omit unless OG_CAPTURE_DEG is explicitly set: ogCapture.ts forces
+      // max quality by default, this is only an escape hatch to deliberately
+      // trade quality for speed/cost.
+      ogDeg: process.env.OG_CAPTURE_DEG ? Number(process.env.OG_CAPTURE_DEG) : undefined,
     });
 
     res.setHeader("Content-Type", "image/png");

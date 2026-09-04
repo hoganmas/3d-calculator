@@ -8,13 +8,7 @@ import { createConnection } from "node:net";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildCompositeHtml } from "./og/composite.mjs";
-import {
-  captureScene,
-  launchOgBrowser,
-  prepareCapturePage,
-  screenshotComposite,
-} from "./og/capture.mjs";
+import { renderOgComposite } from "./og/renderShareOg.mjs";
 import { DEFAULT_OG_SCENES } from "./og/defaultScenes.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -75,22 +69,9 @@ const preview = startPreview(port);
 try {
   await waitForServer(previewUrl);
   const logoSvg = readFileSync(join(root, "public/logo.svg"), "utf8");
-  const browser = await launchOgBrowser();
-  try {
-    const page = await prepareCapturePage(browser, previewUrl, 16);
-    const captured = [];
-    for (const scene of DEFAULT_OG_SCENES) {
-      const png = await captureScene(page, scene);
-      captured.push({ ...scene, png: png.toString("base64") });
-      console.log(`Captured: ${scene.label}`);
-    }
-    const html = buildCompositeHtml(captured, logoSvg);
-    const png = await screenshotComposite(browser, html);
-    writeFileSync(outPath, png);
-    console.log("Wrote public/og-image.png");
-  } finally {
-    await browser.close();
-  }
+  const png = await renderOgComposite({ siteUrl: previewUrl, scenes: DEFAULT_OG_SCENES, logoSvg });
+  writeFileSync(outPath, png);
+  console.log("Wrote public/og-image.png");
 } catch (err) {
   if (preview.logs?.length) console.error(preview.logs.join(""));
   throw err;
