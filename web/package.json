@@ -9,6 +9,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "og:render": "tsx scripts/og/render-from-url.mjs",
+    "og:samples": "tsx scripts/og/generate-samples.mjs",
     "typecheck": "tsc --noEmit",
     "test": "tsx tests/run.mjs",
     "test:flow": "tsx tests/run.mjs flow",
