@@ -80,6 +80,8 @@ export const state = {
   /** Timestamp of last manual quality slider move (blocks auto step-down). */
   qualityUserOverrideAt: 0,
   perfAdaptStepDownCount: 0,
+  /** Runtime FPS watchdog that auto-lowers quality sliders on sustained low frame rate. */
+  autoQualityAdapt: false,
 };
 
 export const FIT_DEBOUNCE_MS = 320;

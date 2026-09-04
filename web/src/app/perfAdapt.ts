@@ -23,6 +23,7 @@ export {
 } from "./perfAdaptLogic.js";
 
 export const MOBILE_INIT_KEY = "poly-cloud-mobile-init";
+export const AUTO_QUALITY_ADAPT_KEY = "poly-cloud-auto-quality-adapt";
 
 let lowPerfStreak = 0;
 let perfHintUntil = 0;
@@ -31,11 +32,37 @@ export function getDeviceTier(): DeviceTier {
   return state.deviceTier;
 }
 
+/** Explicit user preference, or null if never set (so a device-tier default applies). */
+function readAutoQualityAdaptPref(): boolean | null {
+  try {
+    const raw = localStorage.getItem(AUTO_QUALITY_ADAPT_KEY);
+    return raw == null ? null : raw === "1";
+  } catch {
+    return null;
+  }
+}
+
+export function setAutoQualityAdapt(on: boolean) {
+  state.autoQualityAdapt = on;
+  try {
+    localStorage.setItem(AUTO_QUALITY_ADAPT_KEY, on ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Apply boot-time quality defaults for touch / low-end devices (fresh sessions only). */
 export function applyBootPerfTier(restoredDocument: boolean) {
   const tier = detectDeviceTier({ webGpuFailed: state.webGpuFailed });
   state.deviceTier = tier;
   if (tier === "mobile") maybeAutoCollapsePanel();
+  // A step-down calls applyQualityFromState({ refit: true }), which re-bakes
+  // the whole animation — on a loaded scene that refit itself can be the
+  // thing tanking the frame rate, so the watchdog can trigger a refit, see
+  // fps stay low from the refit's own cost, and step down again, making the
+  // perf problem it's meant to fix worse. Default off on every tier; a user
+  // can opt in via the Settings toggle, which is what sets the saved pref.
+  state.autoQualityAdapt = readAutoQualityAdaptPref() ?? false;
   if (restoredDocument) return;
   if (!isProdUi()) return;
 
@@ -89,12 +116,7 @@ function stepDownAllQualitySliders() {
 /** Runtime FPS watchdog — call from the loop FPS window (~500ms). */
 export function tickPerfAdapt(now: number) {
   if (!isProdUi()) return;
-  // A step-down calls applyQualityFromState({ refit: true }), which
-  // re-bakes the whole animation. On mobile that refit itself is often
-  // the thing tanking the frame rate, so this watchdog can trigger a
-  // refit, see fps stay low from the refit's own cost, and step down
-  // again — making the perf problem it's meant to fix worse.
-  if (state.deviceTier === "mobile") return;
+  if (!state.autoQualityAdapt) return;
 
   if (perfAdaptBlockedByUserOverride(now, state.qualityUserOverrideAt)) {
     lowPerfStreak = 0;
@@ -114,4 +136,19 @@ export function tickPerfAdapt(now: number) {
 export function perfAdaptHudSuffix(now: number): string {
   if (now < perfHintUntil) return " · quality adjusted";
   return "";
+}
+
+export function syncAutoQualityAdaptUi() {
+  if (els.autoQualityAdapt) els.autoQualityAdapt.checked = state.autoQualityAdapt;
+}
+
+export function initAutoQualityAdaptUi() {
+  syncAutoQualityAdaptUi();
+  els.autoQualityAdapt?.addEventListener("change", () => {
+    setAutoQualityAdapt(!!els.autoQualityAdapt?.checked);
+    if (!state.autoQualityAdapt) {
+      lowPerfStreak = 0;
+      perfHintUntil = 0;
+    }
+  });
 }
