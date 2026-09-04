@@ -122,7 +122,7 @@
         flex: 1;
       }
       #exprList {
-        padding: 0;
+        padding: 0 0 calc(var(--panel-status-h) + 8px);
         gap: 0;
         flex: 1 1 auto;
         min-height: 0;
@@ -1189,6 +1189,66 @@
         height: 18px;
         display: block;
       }
+      .icon-btn svg.icon-check {
+        display: none;
+      }
+      .icon-btn.is-busy,
+      .icon-btn.is-done {
+        position: relative;
+        cursor: default;
+      }
+      .icon-btn.is-busy svg {
+        visibility: hidden;
+      }
+      .icon-btn.is-busy::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        margin: auto;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        border: 2px solid var(--stroke);
+        border-top-color: var(--accent);
+        animation: icon-btn-spin 0.7s linear infinite;
+      }
+      .icon-btn.is-done svg.icon-share {
+        display: none;
+      }
+      .icon-btn.is-done svg.icon-check {
+        display: block;
+        color: var(--accent);
+        animation: icon-btn-pop 0.25s cubic-bezier(0.3, 1.4, 0.5, 1);
+      }
+      /* Overrides the plain `content: attr(data-tooltip)` below (higher
+         specificity via the extra class) so the "Shared"/"Copied to
+         clipboard" popup carries the same checkmark as the button icon. */
+      .icon-btn.is-done.has-tooltip::after {
+        content: "\2713  " attr(data-tooltip);
+      }
+      @keyframes icon-btn-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @keyframes icon-btn-pop {
+        from {
+          transform: scale(0.5);
+          opacity: 0;
+        }
+        to {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .icon-btn.is-busy::before {
+          animation: none;
+        }
+        .icon-btn.is-done svg.icon-check {
+          animation: none;
+        }
+      }
       .has-tooltip {
         position: relative;
       }
@@ -1321,25 +1381,14 @@
         text-transform: none;
         letter-spacing: 0;
       }
-      .settings-toggle-label {
+      .settings-dialog .settings-toggle-label {
         display: flex;
+        flex-direction: row;
         align-items: center;
         justify-content: space-between;
         gap: 12px;
-        font-size: 13px;
-      }
-      .settings-toggle-hint {
-        display: block;
-        margin-top: 2px;
         font-size: 11px;
-        color: var(--muted);
-      }
-      .settings-toggle-label input[type="checkbox"] {
-        flex-shrink: 0;
-        width: 18px;
-        height: 18px;
-        accent-color: var(--accent);
-        cursor: pointer;
+        text-align: left;
       }
       .settings-liquid-track {
         position: relative;
@@ -1351,6 +1400,48 @@
         display: block;
         width: 100%;
       }
+      .settings-toggle-track {
+        flex: 0 0 auto;
+        width: 34px;
+      }
+      /* No pointer-follow drag on the toggle (see mountStaticLiquidThumb) —
+         animate the snap between its two fixed positions instead. */
+      .settings-toggle-track .liquid-thumb {
+        transition: left 0.15s ease, transform 0.08s linear, translate 0.08s linear;
+      }
+      .settings-toggle-track .toggle-switch::-webkit-slider-runnable-track {
+        height: 20px;
+        border-radius: 999px;
+        background: var(--glass-bg-elevated);
+        transition: background 0.15s ease;
+      }
+      .settings-toggle-track .toggle-switch::-moz-range-track {
+        height: 20px;
+        border-radius: 999px;
+        background: var(--glass-bg-elevated);
+        transition: background 0.15s ease;
+      }
+      .settings-toggle-track .toggle-switch.is-on::-webkit-slider-runnable-track {
+        background: var(--accent);
+      }
+      .settings-toggle-track .toggle-switch.is-on::-moz-range-track {
+        background: var(--accent);
+      }
+      .info-menu {
+        position: fixed;
+        z-index: 20000;
+        max-width: 220px;
+        padding: 8px 10px;
+        border-radius: 10px;
+        border: 1px solid var(--glass-stroke);
+        background: var(--glass-bg-strong);
+        backdrop-filter: blur(18px) saturate(1.2);
+        -webkit-backdrop-filter: blur(18px) saturate(1.2);
+        box-shadow: var(--glass-shadow-dialog);
+        color: var(--text);
+        font-size: 11px;
+        line-height: 1.4;
+      }
       .project-section .project-actions {
         display: flex;
         flex-wrap: wrap;
@@ -1361,6 +1452,7 @@
         min-width: 5.5rem;
       }
       .panel-body {
+        position: relative;
         display: flex;
         flex-direction: column;
         flex: 1 1 auto;
@@ -1393,15 +1485,18 @@
         align-items: flex-start;
         gap: 12px;
         flex-shrink: 0;
-        margin-top: auto;
-        margin-left: -16px;
-        margin-right: -16px;
-        margin-bottom: -18px;
+        position: absolute;
+        left: -16px;
+        right: -16px;
+        bottom: -18px;
         padding: 8px 16px 18px;
         border-top: 1px solid var(--glass-stroke);
-        background: color-mix(in srgb, var(--glass-bg-strong) 88%, transparent);
-        backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
-        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
+        background: var(--glass-bg);
+        /* Blurs the expression list directly behind it, not just the scene
+           (what the panel's own --glass-blur is tuned for) — needs a heavier
+           radius so rows are actually illegible, not just softened. */
+        backdrop-filter: blur(calc(var(--glass-blur) * 1.6)) saturate(1.35);
+        -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 1.6)) saturate(1.35);
         border-radius: 0 0 var(--panel-radius) var(--panel-radius);
       }
       .panel-status-row {
@@ -1706,6 +1801,9 @@
       }
       #viewport canvas.axis-labels {
         pointer-events: none;
+        z-index: 2;
+      }
+      #viewport canvas.og-capture-freeze {
         z-index: 2;
       }
       .viewport-toolbar {

@@ -21,6 +21,7 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
   --mobile-expr-footer-h: 72px;
+  --panel-status-h: 56px;
   --mobile-chrome-pad: 12px;
   --vv-top: 0px;
   --vv-bottom: 0px;

@@ -117,7 +117,7 @@ export async function applyExpressionsFromFragment(hash = location.hash): Promis
 
 export async function copyExpressionShareLink(btn?: HTMLButtonElement): Promise<boolean> {
   const result = await shareExpressionLink();
-  if (result === "failed") return false;
+  if (result === "failed" || result === "cancelled") return false;
   if (btn) {
     const prev = btn.textContent;
     btn.textContent = result === "shared" ? "Shared" : "Copied";
@@ -128,10 +128,19 @@ export async function copyExpressionShareLink(btn?: HTMLButtonElement): Promise<
   return true;
 }
 
-export type ShareLinkResult = "shared" | "copied" | "failed";
+/** "cancelled": the user dismissed the native share sheet — not an error, just a no-op. */
+export type ShareLinkResult = "shared" | "copied" | "failed" | "cancelled";
 
-/** Share the current scene as a laplaci.com URL (native share sheet or clipboard). */
-export async function shareExpressionLink(): Promise<ShareLinkResult> {
+/**
+ * Share the current scene as a laplaci.com URL (native share sheet or clipboard).
+ *
+ * `onRendered`, if given, fires once the OG capture/upload settles (success
+ * or failure — it's best-effort either way) and before the native share
+ * sheet / clipboard write is attempted. That sheet can block on user input
+ * for an arbitrary amount of time, so callers wanting to confirm "the link
+ * is ready" shouldn't wait on the sheet's own outcome for that.
+ */
+export async function shareExpressionLink(onRendered?: () => void): Promise<ShareLinkResult> {
   const url = await buildExpressionShareUrl();
   // Best-effort client-side OG image capture, ahead of actually sharing the
   // link — dynamic import (not a static one) keeps this file's own import
@@ -144,6 +153,7 @@ export async function shareExpressionLink(): Promise<ShareLinkResult> {
   } catch {
     // ignored — server-side fallback covers this
   }
+  onRendered?.();
   // No `text` field: some share targets (and the OS share sheet's own
   // "copy" action) concatenate title/text with the url, so anything here
   // ends up pasted alongside the link wherever it's shared.
@@ -158,7 +168,10 @@ export async function shareExpressionLink(): Promise<ShareLinkResult> {
         return "shared";
       }
     } catch (e) {
-      if (e instanceof DOMException && e.name === "AbortError") return "failed";
+      // The user dismissed the native share sheet without picking a target —
+      // a deliberate cancel, not a failure, so don't fall through to
+      // clipboard copy or surface an error for it.
+      if (e instanceof DOMException && e.name === "AbortError") return "cancelled";
     }
   }
   try {

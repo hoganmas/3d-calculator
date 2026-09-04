@@ -257,10 +257,13 @@
             aria-label="Share link"
             data-tooltip="Share link"
           >
-            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75">
+            <svg class="icon-share" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v9" />
               <path stroke-linecap="round" stroke-linejoin="round" d="m8 8 4-4 4 4" />
               <path stroke-linecap="round" stroke-linejoin="round" d="M5 14v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" />
+            </svg>
+            <svg class="icon-check" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M5 12.5 10 17l9-10" />
             </svg>
           </button>
           </div>
@@ -378,11 +381,10 @@
               </div>
             </label>
             <label class="settings-toggle-label">
-              <span>
-                Auto-adjust quality
-                <span class="settings-toggle-hint">Lowers quality automatically if frame rate drops</span>
-              </span>
-              <input id="autoQualityAdapt" type="checkbox" />
+              <span>Adaptive quality</span>
+              <div class="settings-liquid-track settings-toggle-track">
+                <input id="autoQualityAdapt" class="ui-slider toggle-switch" type="range" min="0" max="1" step="1" value="0" />
+              </div>
             </label>
           </section>
 
