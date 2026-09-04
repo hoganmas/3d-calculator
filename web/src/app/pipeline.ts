@@ -65,7 +65,7 @@ import type {
   KeyframeBlend,
   KeyframeFrame,
 } from "../types/models.js";
-import { setBoxSize } from "./scene.js";
+import { setBoxSize, setIsometric, isIsometric } from "./scene.js";
 import { compileAllExprs, layerRgbFromItem } from "./compile.js";
 import {
   clipUniforms,
@@ -76,7 +76,13 @@ import {
   ensureSceneGpuUpload,
   presentSceneAfterGpuReady,
 } from "./webglFallback.js";
-import { resize, syncClipPresentation, syncShowGridAxesUi, syncBoundsSlider } from "./presentation.js";
+import {
+  resize,
+  syncClipPresentation,
+  syncShowGridAxesUi,
+  syncBoundsSlider,
+  syncIsometricUi,
+} from "./presentation.js";
 import { clearClipGpuFrame } from "../render/webgpu/march.js";
 import {
   refreshExpressionErrorBanner,
@@ -1076,6 +1082,12 @@ export function wirePipelineDom() {
     state.showGridAxes = !state.showGridAxes;
     syncShowGridAxesUi();
     syncClipPresentation();
+    autosave();
+  });
+  syncIsometricUi();
+  els.toggleIsometric?.addEventListener("click", () => {
+    setIsometric(!isIsometric());
+    syncIsometricUi();
     autosave();
   });
   els.flowParticleCount?.addEventListener("change", () => {

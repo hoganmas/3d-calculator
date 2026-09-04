@@ -23,6 +23,7 @@ import {
   worldGrid,
   worldLabels,
   boxHelper,
+  isIsometric,
 } from "./scene.js";
 import { clipQuad, useGpuClipPath } from "./webglFallback.js";
 import { initKeyboardInsets, VIEWPORT_SYNC_EVENT } from "./keyboardInsets.js";
@@ -124,6 +125,16 @@ export function syncShowGridAxesUi() {
   if (!btn) return;
   const on = state.showGridAxes;
   const label = on ? "Hide grid & axes" : "Show grid & axes";
+  btn.setAttribute("aria-pressed", on ? "true" : "false");
+  btn.setAttribute("aria-label", label);
+  btn.dataset.tooltip = label;
+}
+
+export function syncIsometricUi() {
+  const btn = els.toggleIsometric;
+  if (!btn) return;
+  const on = isIsometric();
+  const label = on ? "Switch to perspective view" : "Switch to isometric view";
   btn.setAttribute("aria-pressed", on ? "true" : "false");
   btn.setAttribute("aria-label", label);
   btn.dataset.tooltip = label;

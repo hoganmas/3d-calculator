@@ -39,6 +39,8 @@ export interface LaplacianFlowSnapshot {
 export interface LaplacianCameraSnapshot {
   position: [number, number, number];
   target: [number, number, number];
+  /** Vertical FOV in degrees; omitted (legacy docs) means the default perspective view. */
+  fov?: number;
 }
 
 export interface LaplacianDocument {
@@ -197,9 +199,13 @@ function validateCamera(v: unknown): LaplacianCameraSnapshot | undefined {
   if (!Array.isArray(tgt) || tgt.length !== 3 || !tgt.every(isFiniteNum)) {
     throw new Error("camera.target: expected [x,y,z]");
   }
+  if (v.fov != null && !isFiniteNum(v.fov)) {
+    throw new Error("camera.fov: expected number");
+  }
   return {
     position: [pos[0]!, pos[1]!, pos[2]!],
     target: [tgt[0]!, tgt[1]!, tgt[2]!],
+    ...(v.fov != null ? { fov: v.fov as number } : {}),
   };
 }
 
