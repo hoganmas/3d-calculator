@@ -1,5 +1,5 @@
 /**
- * Compact expression-list encoding for URL fragments (#e=…).
+ * Compact expression-list encoding for the URL query string (?e=…).
  */
 import { listExpressions, setExpressions } from "../../model/expressions.js";
 import type { ExprItem } from "../../types/models.js";
@@ -37,29 +37,41 @@ export async function encodeExpressionsFragment(exprs: ExprItem[], boxSize?: num
   return encodeCompactFragment(exprs, "auto", boxSize);
 }
 
-/** Decode a fragment body or `#…` hash into expression patches (+ box size, if present). */
+/** Decode a fragment body into expression patches (+ box size, if present). */
 export async function decodeExpressionsFragment(hash: string): Promise<DecodedSharePayload | null> {
   return decodeCompactFragment(hash);
 }
 
-/** Build a full share URL for the current expression list and box size. */
+/**
+ * Build a full share URL for the current expression list and box size.
+ *
+ * Uses a query param (not a URL hash) because chat/email clients commonly
+ * route links through their own redirect for link scanning/unfurling —
+ * fragments never reach that server hop and get silently dropped, while
+ * query params are part of the request and survive it.
+ */
 export async function buildExpressionShareUrl(baseUrl = location.href): Promise<string> {
-  const fragment = await encodeExpressionsFragment(listExpressions(), currentBoxSize());
+  const body = await encodeExpressionsFragment(listExpressions(), currentBoxSize());
+  const eq = body.indexOf("=");
   const url = new URL(baseUrl);
-  url.hash = fragment;
+  const params = new URLSearchParams(url.search);
+  params.set(body.slice(0, eq), body.slice(eq + 1));
+  url.search = params.toString();
+  url.hash = "";
   return url.toString();
 }
 
 /**
- * Apply `#e=…` when present; returns true when expressions were loaded.
- * Sets `els.boxSize.value` directly when the fragment carries a box size, but
+ * Apply `?e=…` when present; returns true when expressions were loaded.
+ * Sets `els.boxSize.value` directly when the payload carries a box size, but
  * doesn't refresh its label/liquid-thumb UI (that's presentation.ts, kept
  * out of this file's import graph — see `currentBoxSize`). Callers should
  * follow a successful restore with `syncBoundsSlider()`.
  */
-export async function applyExpressionsFromFragment(hash = location.hash): Promise<boolean> {
-  if (!hash || hash === "#") return false;
-  const decoded = await decodeExpressionsFragment(hash);
+export async function applyExpressionsFromQuery(search = location.search): Promise<boolean> {
+  const value = new URLSearchParams(search).get("e");
+  if (!value) return false;
+  const decoded = await decodeExpressionsFragment(`e=${value}`);
   if (!decoded) return false;
   setExpressions(decoded.rows);
   if (decoded.boxSize != null) {
@@ -87,9 +99,11 @@ export type ShareLinkResult = "shared" | "copied" | "failed";
 /** Share the current scene as a laplaci.com URL (native share sheet or clipboard). */
 export async function shareExpressionLink(): Promise<ShareLinkResult> {
   const url = await buildExpressionShareUrl();
+  // No `text` field: some share targets (and the OS share sheet's own
+  // "copy" action) concatenate title/text with the url, so anything here
+  // ends up pasted alongside the link wherever it's shared.
   const shareData: ShareData = {
     title: "laplaci",
-    text: "Open this link to view the graph",
     url,
   };
   if (typeof navigator.share === "function") {

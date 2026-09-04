@@ -42,7 +42,7 @@ import {
   setAutosaveError,
 } from "./app/persistence/autosave.js";
 import {
-  applyExpressionsFromFragment,
+  applyExpressionsFromQuery,
   shareExpressionLink,
 } from "./app/persistence/exprShare.js";
 import { installOgCapture } from "./app/ogCapture.js";
@@ -156,7 +156,7 @@ async function bootstrap() {
 
   let restored = false;
   try {
-    restored = await applyExpressionsFromFragment(location.hash);
+    restored = await applyExpressionsFromQuery(location.search);
     if (restored) {
       syncBoundsSlider();
       syncExprCompileState();
