@@ -134,7 +134,25 @@ export async function captureAndUploadOgImage(shareUrl: string): Promise<void> {
     ctx.restore();
 
     const finalBlob = await canvasToBlob(out);
-    await fetch(`/api/upload-og?e=${encodeURIComponent(payload)}`, {
+
+    // Best effort: an unsigned upload still has a chance if the server is
+    // running fail-open (no OG_SIGNING_SECRET configured); if signing is
+    // enforced, upload-og rejects a missing/invalid token on its own.
+    let token = "";
+    try {
+      const signRes = await fetch(`/api/og-sign?e=${encodeURIComponent(payload)}`);
+      if (signRes.ok) {
+        const signed = (await signRes.json()) as { token?: string | null };
+        if (signed.token) token = signed.token;
+      }
+    } catch {
+      // ignore — fall through with no token.
+    }
+
+    const uploadUrl = `/api/upload-og?e=${encodeURIComponent(payload)}${
+      token ? `&token=${encodeURIComponent(token)}` : ""
+    }`;
+    await fetch(uploadUrl, {
       method: "POST",
       headers: { "Content-Type": "image/png" },
       body: finalBlob,

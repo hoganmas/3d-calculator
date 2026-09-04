@@ -11,13 +11,33 @@ import {
   validateSharePayload,
 } from "./_lib/sharePayload.js";
 import { ogBlobKey } from "./_lib/ogBlob.js";
+import { isDynamicOgEnabled } from "./_lib/ogFeatureFlag.js";
 import { renderShareOgPng } from "../web/scripts/og/renderShareOg.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const fallbackPng = join(root, "web/dist/og-image.png");
 const logoSvg = join(root, "web/public/logo.svg");
 
+function sendStaticFallback(res: VercelResponse, cacheControl: string) {
+  try {
+    const fallback = readFileSync(fallbackPng);
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Cache-Control", cacheControl);
+    res.status(200).send(fallback);
+  } catch {
+    res.status(500).send("OG render failed");
+  }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Dynamic per-share OG images are off until there's an auth system to gate
+  // the upload/render surface by identity — every share gets the static
+  // build-time image instead.
+  if (!isDynamicOgEnabled()) {
+    sendStaticFallback(res, "public, s-maxage=86400, stale-while-revalidate=604800");
+    return;
+  }
+
   const raw = String(req.query.e ?? "");
   if (!raw) {
     res.status(400).send("Missing e parameter");
@@ -77,13 +97,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(200).send(png);
   } catch (err) {
     console.error("[api/og]", err);
-    try {
-      const fallback = readFileSync(fallbackPng);
-      res.setHeader("Content-Type", "image/png");
-      res.setHeader("Cache-Control", "public, s-maxage=300");
-      res.status(200).send(fallback);
-    } catch {
-      res.status(500).send("OG render failed");
-    }
+    sendStaticFallback(res, "public, s-maxage=300");
   }
 }

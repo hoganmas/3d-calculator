@@ -10,6 +10,9 @@
     "api/share.ts": {
       "maxDuration": 10
     },
+    "api/og-sign.ts": {
+      "maxDuration": 10
+    },
     "api/upload-og.ts": {
       "maxDuration": 10
     }
