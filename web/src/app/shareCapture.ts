@@ -5,11 +5,12 @@
  * fallback), capture the scene the sharer's own browser already rendered:
  * switch to the same branded framing the server capture uses (isometric,
  * grid hidden, camera panned for the logo), grab a screenshot, composite
- * the logo on top, and upload it. Best effort — any failure here just means
- * api/og.ts falls back to rendering it server-side on first request, so
- * this never blocks the actual share.
+ * the logo on top. Uploading it (`uploadShareOgImage`) is a separate, best
+ * -effort step — any failure there just means api/og.ts falls back to
+ * rendering it server-side on first request, so it never blocks the share
+ * dialog from showing the locally-rendered preview (`renderShareOgImage`).
  *
- * Two ways to get that screenshot, tried in order:
+ * Two ways to get that screenshot, tried in order inside `renderShareOgImage`:
  *
  * - `captureShareShotOffscreenGpu` (EXPERIMENTAL): when the WebGPU clip path
  *   is active, render the OG framing straight into a private, never-shown
@@ -24,7 +25,7 @@
  *   real camera is back and repainted underneath it.
  *
  * Not imported statically by exprShare.ts (which stays Node-test-safe) —
- * loaded via dynamic import from shareExpressionLink() instead.
+ * loaded via dynamic import from the share dialog (sharePopup.ts) instead.
  */
 import * as THREE from "three";
 import { camera, controls, setIsometric, DEFAULT_FOV, ISO_FOV, fovDistanceScale } from "./scene.js";
@@ -380,9 +381,15 @@ async function captureShareShotOffscreenGpu(): Promise<Blob | null> {
   }
 }
 
-export async function captureAndUploadOgImage(shareUrl: string): Promise<void> {
+/**
+ * Render the branded OG image locally and return the finished PNG blob —
+ * doesn't upload it. Split out from the upload step so a caller (the share
+ * dialog) can show this as a preview immediately, without waiting on a
+ * network round trip first.
+ */
+export async function renderShareOgImage(shareUrl: string): Promise<Blob | null> {
   const payload = payloadFromShareUrl(shareUrl);
-  if (!payload) return;
+  if (!payload) return null;
 
   const shotBlob = (await captureShareShotOffscreenGpu()) ?? (await captureShareShot());
   const shotUrl = URL.createObjectURL(shotBlob);
@@ -418,7 +425,13 @@ export async function captureAndUploadOgImage(shareUrl: string): Promise<void> {
   ctx.fillText("laplaci", iconX + iconSize + 22, OUTPUT_H / 2);
   ctx.restore();
 
-  const finalBlob = await canvasToBlob(out);
+  return await canvasToBlob(out);
+}
+
+/** Upload an already-rendered OG image (from `renderShareOgImage`) for a share URL. Best effort. */
+export async function uploadShareOgImage(shareUrl: string, image: Blob): Promise<void> {
+  const payload = payloadFromShareUrl(shareUrl);
+  if (!payload) return;
 
   // Best effort: an unsigned upload still has a chance if the server is
   // running fail-open (no OG_SIGNING_SECRET configured); if signing is
@@ -442,7 +455,7 @@ export async function captureAndUploadOgImage(shareUrl: string): Promise<void> {
   await fetch(uploadUrl, {
     method: "POST",
     headers: { "Content-Type": "image/png" },
-    body: finalBlob,
+    body: image,
     signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
 }

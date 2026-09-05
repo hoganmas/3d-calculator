@@ -42,12 +42,9 @@ import {
   scheduleAutosave,
   setAutosaveError,
 } from "./app/persistence/autosave.js";
-import {
-  applyExpressionsFromFragment,
-  applyExpressionsFromQuery,
-  shareExpressionLink,
-} from "./app/persistence/exprShare.js";
+import { applyExpressionsFromFragment, applyExpressionsFromQuery } from "./app/persistence/exprShare.js";
 import { installOgCapture } from "./app/ogCapture.js";
+import { initSharePopup, openSharePopup } from "./app/sharePopup.js";
 
 initSplash();
 initKeyframeLoadBar();
@@ -152,6 +149,7 @@ async function bootstrap() {
   });
 
   initWebmcpSetupDialog();
+  initSharePopup();
   void initWebMCP();
 
   if (els.hud) els.hud.textContent = "clip-grid · idct volume";
@@ -232,63 +230,8 @@ async function bootstrap() {
   }
 }
 
-const SHARE_LINK_LABEL = "Share link";
-
-function flashShareFeedback(btn: HTMLButtonElement, message: string) {
-  btn.classList.add("is-done");
-  btn.dataset.tooltip = message;
-  btn.setAttribute("aria-label", message);
-  window.setTimeout(() => {
-    btn.classList.remove("is-done");
-    btn.dataset.tooltip = SHARE_LINK_LABEL;
-    btn.setAttribute("aria-label", SHARE_LINK_LABEL);
-  }, 1600);
-}
-
-function setShareBusy(btn: HTMLButtonElement, busy: boolean) {
-  btn.classList.toggle("is-busy", busy);
-  btn.disabled = busy;
-  const label = busy ? "Sharing…" : SHARE_LINK_LABEL;
-  btn.dataset.tooltip = label;
-  btn.setAttribute("aria-label", label);
-}
-
-/** Drop an optimistic checkmark that never got confirmed by a real result (cancel/failure). */
-function clearShareDone(btn: HTMLButtonElement) {
-  btn.classList.remove("is-done");
-  btn.dataset.tooltip = SHARE_LINK_LABEL;
-  btn.setAttribute("aria-label", SHARE_LINK_LABEL);
-}
-
 function initProjectActions() {
-  els.shareLink?.addEventListener("click", () => {
-    const btn = els.shareLink;
-    if (!btn || btn.classList.contains("is-busy")) return;
-    setShareBusy(btn, true);
-    // The checkmark shows the moment rendering settles — it doesn't wait on
-    // the native share sheet, which can block on user input for an
-    // arbitrary amount of time afterward. But its *label* stays generic
-    // until the actual copy/share result comes in, since we don't yet know
-    // which (or whether it'll fail/get cancelled) at render time.
-    void shareExpressionLink(() => {
-      setShareBusy(btn, false);
-      btn.classList.add("is-done");
-    })
-      .then((result) => {
-        if (result === "shared") flashShareFeedback(btn, "Shared");
-        else if (result === "copied") flashShareFeedback(btn, "Copied to clipboard");
-        else {
-          // "cancelled": user dismissed the share sheet — no error.
-          // "failed": a real failure — drop the premature checkmark too.
-          clearShareDone(btn);
-          if (result === "failed") setAutosaveError("Could not share link");
-        }
-      })
-      .catch(() => {
-        setShareBusy(btn, false);
-        setAutosaveError("Could not share link");
-      });
-  });
+  els.shareLink?.addEventListener("click", () => openSharePopup());
 }
 
 void bootstrap();

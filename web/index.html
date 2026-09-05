@@ -257,13 +257,10 @@
             aria-label="Share link"
             data-tooltip="Share link"
           >
-            <svg class="icon-share" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v9" />
               <path stroke-linecap="round" stroke-linejoin="round" d="m8 8 4-4 4 4" />
               <path stroke-linecap="round" stroke-linejoin="round" d="M5 14v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" />
-            </svg>
-            <svg class="icon-check" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M5 12.5 10 17l9-10" />
             </svg>
           </button>
           </div>
@@ -457,6 +454,38 @@
               <textarea id="metricsDump" readonly spellcheck="false"></textarea>
             </details>
           </section>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="shareDialog" class="settings-dialog share-dialog" aria-labelledby="shareDialogTitle">
+      <div class="settings-sheet">
+        <header class="settings-head">
+          <h2 id="shareDialogTitle">Share</h2>
+          <button id="closeShareDialog" class="icon-btn" type="button" aria-label="Close" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75">
+              <path stroke-linecap="round" d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </header>
+        <div class="settings-body share-dialog-body">
+          <div class="share-preview">
+            <div id="sharePreviewLoading" class="share-preview-loading" aria-hidden="true"></div>
+            <img id="sharePreviewImg" class="share-preview-img" alt="Preview of the shared scene" hidden />
+          </div>
+          <div class="share-url-row">
+            <input
+              id="shareUrlInput"
+              class="share-url-input"
+              type="text"
+              readonly
+              spellcheck="false"
+              aria-label="Share link"
+              placeholder="Building link…"
+            />
+            <button id="shareCopyBtn" class="secondary" type="button" disabled>Copy link</button>
+          </div>
+          <button id="shareNativeBtn" class="secondary share-native-btn" type="button">Share via…</button>
         </div>
       </div>
     </dialog>
