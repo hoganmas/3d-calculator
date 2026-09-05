@@ -1252,7 +1252,7 @@
         max-width: min(440px, calc(100vw - 28px - var(--safe-left) - var(--safe-right)));
         width: 100%;
         max-height: min(88vh, 720px);
-        margin: max(14px, var(--safe-top)) auto max(14px, var(--safe-bottom));
+        margin: auto;
         overflow: hidden;
         box-shadow: var(--glass-shadow-dialog), var(--glass-fresnel);
       }
@@ -1771,6 +1771,16 @@
         height: 100%;
         object-fit: cover;
         display: block;
+      }
+      .share-preview-copy {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        z-index: 1;
+        background: var(--glass-bg-strong);
+        backdrop-filter: blur(var(--glass-blur));
+        -webkit-backdrop-filter: blur(var(--glass-blur));
+        box-shadow: var(--glass-shadow-dialog);
       }
       .share-url-row {
         display: flex;

@@ -15,16 +15,23 @@ const DIALOG_ID = "shareDialog";
 const CLOSE_ID = "closeShareDialog";
 const PREVIEW_IMG_ID = "sharePreviewImg";
 const PREVIEW_LOADING_ID = "sharePreviewLoading";
+const COPY_IMAGE_BTN_ID = "shareCopyImageBtn";
 const URL_INPUT_ID = "shareUrlInput";
 const COPY_BTN_ID = "shareCopyBtn";
 const NATIVE_BTN_ID = "shareNativeBtn";
 
 let wired = false;
 let previewObjectUrl: string | null = null;
+let lastRenderedImage: Blob | null = null;
 // Bumped on every open; an in-flight render checks it before touching the
 // DOM so a stale result from a closed/reopened dialog can't write over
 // whatever the current one is showing.
 let openToken = 0;
+
+/** Writing an image (not just text) to the clipboard isn't universally supported. */
+function supportsImageClipboard(): boolean {
+  return typeof ClipboardItem === "function" && typeof navigator.clipboard?.write === "function";
+}
 
 function dialogEl() {
   return document.getElementById(DIALOG_ID) as HTMLDialogElement | null;
@@ -44,6 +51,9 @@ function copyBtnEl() {
 function nativeBtnEl() {
   return document.getElementById(NATIVE_BTN_ID) as HTMLButtonElement | null;
 }
+function copyImageBtnEl() {
+  return document.getElementById(COPY_IMAGE_BTN_ID) as HTMLButtonElement | null;
+}
 
 function revokePreview() {
   if (previewObjectUrl) {
@@ -54,6 +64,7 @@ function revokePreview() {
 
 function resetDialogState() {
   revokePreview();
+  lastRenderedImage = null;
   const img = previewImgEl();
   if (img) {
     img.hidden = true;
@@ -61,6 +72,8 @@ function resetDialogState() {
   }
   const loading = previewLoadingEl();
   if (loading) loading.hidden = false;
+  const copyImageBtn = copyImageBtnEl();
+  if (copyImageBtn) copyImageBtn.hidden = true;
   const urlInput = urlInputEl();
   if (urlInput) urlInput.value = "";
   const copyBtn = copyBtnEl();
@@ -105,12 +118,15 @@ async function runShareCapture(token: number) {
     if (blob) {
       revokePreview();
       previewObjectUrl = URL.createObjectURL(blob);
+      lastRenderedImage = blob;
       const img = previewImgEl();
       if (img) {
         img.src = previewObjectUrl;
         img.hidden = false;
       }
       if (loading) loading.hidden = true;
+      const copyImageBtn = copyImageBtnEl();
+      if (copyImageBtn && supportsImageClipboard()) copyImageBtn.hidden = false;
       // Fire-and-forget: api/og.ts falls back to a server-side render if
       // this never lands, so it doesn't need to block anything here.
       void uploadShareOgImage(url, blob).catch(() => {});
@@ -139,6 +155,23 @@ async function onCopyClick(btn: HTMLButtonElement) {
   }
 }
 
+async function onCopyImageClick(btn: HTMLButtonElement) {
+  if (!lastRenderedImage) return;
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ [lastRenderedImage.type]: lastRenderedImage })]);
+    const prevTip = btn.dataset.tooltip ?? "Copy image";
+    const prevLabel = btn.getAttribute("aria-label") ?? "Copy image";
+    btn.dataset.tooltip = "Copied!";
+    btn.setAttribute("aria-label", "Copied!");
+    window.setTimeout(() => {
+      btn.dataset.tooltip = prevTip;
+      btn.setAttribute("aria-label", prevLabel);
+    }, 1600);
+  } catch {
+    setAutosaveError("Could not copy image");
+  }
+}
+
 async function onNativeShareClick() {
   const url = urlInputEl()?.value;
   if (!url || typeof navigator.share !== "function") return;
@@ -160,15 +193,22 @@ export function initSharePopup() {
   const dialog = dialogEl();
   const closeBtn = document.getElementById(CLOSE_ID) as HTMLButtonElement | null;
   const copyBtn = copyBtnEl();
+  const copyImageBtn = copyImageBtnEl();
   const nativeBtn = nativeBtnEl();
 
   closeBtn?.addEventListener("click", () => closeShareDialog());
   dialog?.addEventListener("click", (ev) => {
     if (ev.target === dialog) closeShareDialog();
   });
-  dialog?.addEventListener("close", () => revokePreview());
+  dialog?.addEventListener("close", () => {
+    revokePreview();
+    lastRenderedImage = null;
+  });
   copyBtn?.addEventListener("click", () => {
     if (copyBtn) void onCopyClick(copyBtn);
+  });
+  copyImageBtn?.addEventListener("click", () => {
+    if (copyImageBtn) void onCopyImageClick(copyImageBtn);
   });
 
   if (typeof navigator.share === "function") {

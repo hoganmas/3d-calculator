@@ -472,6 +472,19 @@
           <div class="share-preview">
             <div id="sharePreviewLoading" class="share-preview-loading" aria-hidden="true"></div>
             <img id="sharePreviewImg" class="share-preview-img" alt="Preview of the shared scene" hidden />
+            <button
+              id="shareCopyImageBtn"
+              class="icon-btn share-preview-copy has-tooltip"
+              type="button"
+              aria-label="Copy image"
+              data-tooltip="Copy image"
+              hidden
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75">
+                <rect x="8" y="8" width="12" height="12" rx="2" />
+                <path stroke-linecap="round" d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+              </svg>
+            </button>
           </div>
           <div class="share-url-row">
             <input
