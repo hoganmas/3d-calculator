@@ -6,6 +6,7 @@ import {
   isClipGpuUploadReady,
   isClipBakeGpuReady,
   isClipMarchReady,
+  isClipGpuInitPending,
   scheduleMarchPipelines,
   setMarchPipelinesReadyHandler,
   renderClipFrameGpu,
@@ -135,6 +136,15 @@ export function isVolumePresented() {
     (bake.flowLayers?.length ?? 0) > 0;
   if (!hasLayers) return true;
   if (useGpuClipPath()) return hasUploadedVolume() && state.densSubmittedThisFrame;
+  // WebGPU is still requesting its adapter/device or compiling pipelines —
+  // don't let the cheap WebGL fallback quad's mere visibility count as
+  // "presented" here. It'll be swapped for the GPU-composited frame within
+  // moments (see presentSceneAfterGpuReady's own "wrong-box first paint"
+  // guard for the GPU path); this closes the same gap for splash gating so
+  // the splash doesn't dismiss onto a frame that's about to visibly jump.
+  // Once init fails for good, the fallback becomes the permanent path and
+  // this stops blocking it.
+  if (isClipGpuInitPending()) return false;
   return clipQuad.visible;
 }
 

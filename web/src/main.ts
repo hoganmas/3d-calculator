@@ -188,10 +188,12 @@ async function bootstrap() {
       setAutosaveError(`Could not load shared expressions: ${msg}`);
     }
   }
+  let restoredFromAutosave = false;
   if (!restored) {
     startupBegin("boot.restore-autosave");
     try {
       restored = await restoreAutosave();
+      restoredFromAutosave = restored;
     } catch (e) {
       // Safari/WebKit's IndexedDB backing store can transiently fail to open
       // right after a full reload ("Unable to open database file on disk").
@@ -208,7 +210,12 @@ async function bootstrap() {
     initCompile();
     startupEnd("boot.init-compile");
   }
-  applyBootPerfTier(restored);
+  // Only an actual autosave restore carries the viewer's own persisted
+  // quality/downscale settings — a share link or #e= fragment only encodes
+  // expressions, so it still needs the tier-appropriate boot quality preset
+  // (skipping it here left isoMarchDownscale etc. at raw HTML defaults
+  // instead of the preset's values, e.g. far blurrier isosurfaces).
+  applyBootPerfTier(restoredFromAutosave);
   initAutoQualityAdaptUi();
   refreshPanelToggleChrome();
   ensureParamAnimationFromExprs();

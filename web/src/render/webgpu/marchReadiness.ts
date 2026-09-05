@@ -20,3 +20,14 @@ export function isClipMarchReady(): boolean {
     (gpu.densLayerCount > 0 || gpu.sceneConstraints.length > 0 || hasFlowGpuLayers()),
   );
 }
+
+/**
+ * WebGPU init is in flight (adapter/device requested, or pipelines still
+ * compiling) but hasn't yet resolved either way. `gpu.initPromise` is set the
+ * instant `initClipBakeGpu` is called and never cleared on success, so this
+ * only reads true during the actual gap — false before init is ever attempted
+ * (nothing to wait for) and false once it succeeds or fails for good.
+ */
+export function isClipGpuInitPending(): boolean {
+  return Boolean(gpu.initPromise) && !gpu.initFailed && !isClipBakeGpuReady();
+}
