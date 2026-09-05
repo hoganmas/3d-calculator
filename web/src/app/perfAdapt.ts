@@ -52,8 +52,17 @@ export function setAutoQualityAdapt(on: boolean) {
   }
 }
 
-/** Apply boot-time quality defaults for touch / low-end devices (fresh sessions only). */
-export function applyBootPerfTier(restoredDocument: boolean) {
+/**
+ * Apply boot-time quality defaults for touch / low-end devices (fresh
+ * sessions only). `restoredFromAutosave` should be true only for an actual
+ * autosave restore (which persists the viewer's own quality/downscale
+ * slider choices) — NOT for a share link or #e= fragment load, which only
+ * ever encodes expressions. Passing true for those would skip the tier
+ * preset below and leave the raw HTML slider defaults in effect instead
+ * (e.g. isoMarchDownscale stuck at its unset default of 4 rather than the
+ * preset's 1, a visibly blurrier isosurface than intended).
+ */
+export function applyBootPerfTier(restoredFromAutosave: boolean) {
   const tier = detectDeviceTier({ webGpuFailed: state.webGpuFailed });
   state.deviceTier = tier;
   if (tier === "mobile") maybeAutoCollapsePanel();
@@ -64,7 +73,7 @@ export function applyBootPerfTier(restoredDocument: boolean) {
   // perf problem it's meant to fix worse. Default off on every tier; a user
   // can opt in via the Settings toggle, which is what sets the saved pref.
   state.autoQualityAdapt = readAutoQualityAdaptPref() ?? false;
-  if (restoredDocument) return;
+  if (restoredFromAutosave) return;
   if (!isProdUi()) return;
 
   const preset = bootQualityForTier(tier);
