@@ -3,27 +3,41 @@
  *
  * Rather than spinning up headless Chromium per request (api/og.ts's
  * fallback), capture the scene the sharer's own browser already rendered:
- * temporarily switch to the same branded framing the server capture uses
- * (isometric, grid hidden, camera panned for the logo), grab the canvas,
- * composite the logo on top, upload it, then restore the live view. Best
- * effort — any failure here just means api/og.ts falls back to rendering
- * it server-side on first request, so this never blocks the actual share.
+ * switch to the same branded framing the server capture uses (isometric,
+ * grid hidden, camera panned for the logo), grab a screenshot, composite
+ * the logo on top, and upload it. Best effort — any failure here just means
+ * api/og.ts falls back to rendering it server-side on first request, so
+ * this never blocks the actual share.
  *
- * The live camera/canvas are the only ones this app has, so the branded
- * framing genuinely is drawn into the on-screen viewport for a beat — but a
- * frozen snapshot of the *previous* frame (`buildFreezeOverlay`) sits on top
- * of the canvases for that whole window, so the sharer never actually sees
- * the swap: their own view is what's on screen throughout, and it's lifted
- * only once the real camera is back and repainted underneath it. The camera
- * hijack itself is also scoped to just the screenshot (`captureShareShot`),
- * not the slower compositing/sign/upload work after it.
+ * Two ways to get that screenshot, tried in order:
+ *
+ * - `captureShareShotOffscreenGpu` (EXPERIMENTAL): when the WebGPU clip path
+ *   is active, render the OG framing straight into a private, never-shown
+ *   canvas on the same GPU device — the live camera/controls/canvas are
+ *   never touched at all, so there's nothing to freeze or restore. See its
+ *   own doc comment for how it borrows the live render pipeline safely.
+ * - `captureShareShot` (fallback): this app has only one on-screen camera
+ *   and canvas, so the branded framing is genuinely drawn into the visible
+ *   viewport for a beat — a frozen snapshot of the *previous* frame
+ *   (`buildFreezeOverlay`) sits on top of the canvases for that whole
+ *   window so the sharer never actually sees the swap, lifted only once the
+ *   real camera is back and repainted underneath it.
  *
  * Not imported statically by exprShare.ts (which stays Node-test-safe) —
  * loaded via dynamic import from shareExpressionLink() instead.
  */
-import { camera, controls, setIsometric } from "./scene.js";
+import * as THREE from "three";
+import { camera, controls, setIsometric, DEFAULT_FOV, ISO_FOV, fovDistanceScale } from "./scene.js";
 import { state } from "./state.js";
 import { els } from "./dom.js";
+import { gpu } from "../render/webgpu/gpuState.js";
+import {
+  renderClipFrameGpu,
+  resizeClipGpuCanvas,
+  isClipBakeGpuReady,
+  hasUploadedVolume,
+} from "../render/webgpu/march.js";
+import { useGpuClipPath, clipUniforms } from "./webglFallback.js";
 
 // Keep in sync with scripts/og/renderShareOg.mjs's SHARE_CAMERA — same
 // view direction as the default framing, closer in (overflow past the
@@ -233,11 +247,144 @@ async function captureShareShot(): Promise<Blob> {
   }
 }
 
+let offscreenCanvas: HTMLCanvasElement | null = null;
+
+function getOffscreenCanvas(): HTMLCanvasElement {
+  if (!offscreenCanvas) {
+    offscreenCanvas = document.createElement("canvas");
+    offscreenCanvas.width = OUTPUT_W;
+    offscreenCanvas.height = OUTPUT_H;
+  }
+  return offscreenCanvas;
+}
+
+/**
+ * EXPERIMENTAL: render the OG framing into a private, never-displayed
+ * canvas using the same WebGPU device the live view already uses — so the
+ * live camera/controls/on-screen canvas are never touched.
+ *
+ * `renderClipFrameGpu` already takes a `camera` argument rather than
+ * reading a shared one, so a throwaway camera is all that's needed there.
+ * The actual obstacle is that everything else it touches — the WebGPU
+ * context/canvas and every intermediate render-target texture — lives as
+ * flat fields on the `gpu` module singleton (gpuState.ts), not as
+ * parameters. Rather than refactor that pipeline to accept a target
+ * struct (real surgery on rendering code this session can't visually
+ * verify), this snapshots the singleton, temporarily points its
+ * canvas/context/texture fields at a private target, renders once, and
+ * restores the snapshot — the same save/mutate/restore shape already used
+ * for the camera in `captureShareShot`, just applied to `gpu`'s fields.
+ * The device, pipelines, and uploaded scene buffers (`volumeBuf`/
+ * `colorBuf`) are left untouched throughout: they're safely shareable
+ * across render targets, only the per-canvas textures need swapping.
+ *
+ * Everything from the swap to the restore is synchronous (no `await`) —
+ * that's what guarantees this can never interleave with the live render
+ * loop's own per-frame call to the same function, since JS won't yield to
+ * that rAF-driven call in between. Reading the rendered pixels back out
+ * (`canvasToBlob`, unavoidably async) happens only *after* `gpu` is fully
+ * restored, since the offscreen canvas keeps its rendered bitmap
+ * regardless of whether `gpu` still points at it.
+ *
+ * Returns null (falls back to `captureShareShot`) when the GPU path isn't
+ * active, or anything here throws.
+ */
+async function captureShareShotOffscreenGpu(): Promise<Blob | null> {
+  if (!useGpuClipPath() || !hasUploadedVolume() || !isClipBakeGpuReady()) return null;
+
+  const canvas = getOffscreenCanvas();
+  const prevGridAxes = state.showGridAxes;
+  const prev = { ...gpu };
+  let ok = false;
+
+  try {
+    // Grid/axis overlays are driven by this flag directly inside
+    // renderClipFrameGpu (not a param) — same toggle captureShareShot uses.
+    state.showGridAxes = false;
+
+    // The only `gpu` fields sized to a specific canvas. Nulling the
+    // textures (rather than just leaving stale live-sized ones in place)
+    // forces the pipeline's own `ensure*Targets` allocators to size them
+    // for this canvas instead — those allocators are the existing,
+    // untouched machinery that already does this on every live resize.
+    gpu.canvas = canvas;
+    gpu.ctx = null;
+    // acquireMarchGpuHandles() (inside renderClipFrameGpu, before it ever
+    // gets to its own resizeClipGpuCanvas call) requires gpu.ctx to already
+    // be non-null — it won't lazily create one. Configure it up front.
+    resizeClipGpuCanvas(OUTPUT_W, OUTPUT_H);
+    if (!gpu.ctx) return null;
+    gpu.occlIsoTex = null;
+    gpu.occlSurfTex = null;
+    gpu.isoCoarseColorTex = null;
+    gpu.isoCoarseOcclTex = null;
+    gpu.isoCoarseNormalTex = null;
+    gpu.isoCoarseDepthTex = null;
+    gpu.isoMidColorTex = null;
+    gpu.isoMidOcclTex = null;
+    gpu.isoMidNormalTex = null;
+    gpu.isoMidDepthTex = null;
+    gpu.depthTex = null;
+    gpu.normalTex = null;
+    gpu.sceneColorTex = null;
+    gpu.volColorTex = null;
+    gpu.volMidColorTex = null;
+
+    // A private camera, never the shared live one — same branded framing
+    // math captureShareShot uses (SHARE_CAMERA_POSITION/TARGET, scaled for
+    // the isometric FOV), just computed directly instead of animated from
+    // whatever the live camera currently happens to be at.
+    const ogCamera = new THREE.PerspectiveCamera(ISO_FOV, OUTPUT_W / OUTPUT_H, 0.05, 2000);
+    ogCamera.up.set(0, 0, 1);
+    const target = new THREE.Vector3(...SHARE_CAMERA_TARGET);
+    const isoScale = fovDistanceScale(DEFAULT_FOV, ISO_FOV);
+    ogCamera.position.set(...SHARE_CAMERA_POSITION).sub(target).multiplyScalar(isoScale).add(target);
+    ogCamera.lookAt(target);
+    ogCamera.updateProjectionMatrix();
+    ogCamera.updateMatrixWorld(true);
+
+    // The iso-refine ladder (coarse → mid → fine) draws all three tiers
+    // fresh within a single call — no multi-frame warm-up needed, and no
+    // reason to respect the interactive-performance downscale slider for a
+    // one-off shot, so isoFineDownscale is forced to 1 (finest) here.
+    // ndcOffsetX/Y stay 0: that's for framing around a floating side panel,
+    // which doesn't exist for this fixed, panel-free output.
+    ok = renderClipFrameGpu({
+      camera: ogCamera,
+      half: clipUniforms.uHalf.value,
+      fbW: OUTPUT_W,
+      fbH: OUTPUT_H,
+      volFbW: OUTPUT_W,
+      volFbH: OUTPUT_H,
+      displayW: OUTPUT_W,
+      displayH: OUTPUT_H,
+      isoFineDownscale: 1,
+      scale: clipUniforms.uScale.value,
+      steps: clipUniforms.uSteps.value | 0,
+      isoSteps: clipUniforms.uIsoSteps.value | 0,
+      ndcOffsetX: 0,
+      ndcOffsetY: 0,
+    });
+  } catch {
+    ok = false;
+  } finally {
+    Object.assign(gpu, prev);
+    state.showGridAxes = prevGridAxes;
+  }
+
+  if (!ok) return null;
+  try {
+    return await canvasToBlob(canvas);
+  } catch {
+    return null;
+  }
+}
+
 export async function captureAndUploadOgImage(shareUrl: string): Promise<void> {
   const payload = payloadFromShareUrl(shareUrl);
   if (!payload) return;
 
-  const shotBlob = await captureShareShot();
+  const shotBlob = (await captureShareShotOffscreenGpu()) ?? (await captureShareShot());
   const shotUrl = URL.createObjectURL(shotBlob);
   let shotImg: HTMLImageElement;
   try {
