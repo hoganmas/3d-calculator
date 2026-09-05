@@ -1772,6 +1772,9 @@
         object-fit: cover;
         display: block;
       }
+      .share-preview-img[hidden] {
+        display: none;
+      }
       .share-preview-copy {
         position: absolute;
         top: 8px;
