@@ -27,6 +27,7 @@ let lastRenderedImage: Blob | null = null;
 // DOM so a stale result from a closed/reopened dialog can't write over
 // whatever the current one is showing.
 let openToken = 0;
+let copyImageResetTimer = 0;
 
 /** Writing an image (not just text) to the clipboard isn't universally supported. */
 function supportsImageClipboard(): boolean {
@@ -73,7 +74,11 @@ function resetDialogState() {
   const loading = previewLoadingEl();
   if (loading) loading.hidden = false;
   const copyImageBtn = copyImageBtnEl();
-  if (copyImageBtn) copyImageBtn.hidden = true;
+  if (copyImageBtn) {
+    copyImageBtn.hidden = true;
+    copyImageBtn.classList.remove("is-copied");
+  }
+  window.clearTimeout(copyImageResetTimer);
   const urlInput = urlInputEl();
   if (urlInput) urlInput.value = "";
   const copyBtn = copyBtnEl();
@@ -163,9 +168,17 @@ async function onCopyImageClick(btn: HTMLButtonElement) {
     const prevLabel = btn.getAttribute("aria-label") ?? "Copy image";
     btn.dataset.tooltip = "Copied!";
     btn.setAttribute("aria-label", "Copied!");
-    window.setTimeout(() => {
+    // The tooltip swap above only shows on hover, which touch devices never
+    // trigger — the icon swap is the only feedback a mobile tap actually
+    // sees, so it needs to carry the confirmation on its own.
+    window.clearTimeout(copyImageResetTimer);
+    btn.classList.remove("is-copied");
+    void btn.offsetWidth; // restart the pop animation on a rapid re-click
+    btn.classList.add("is-copied");
+    copyImageResetTimer = window.setTimeout(() => {
       btn.dataset.tooltip = prevTip;
       btn.setAttribute("aria-label", prevLabel);
+      btn.classList.remove("is-copied");
     }, 1600);
   } catch {
     setAutosaveError("Could not copy image");

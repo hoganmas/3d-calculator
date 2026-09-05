@@ -1784,6 +1784,50 @@
         backdrop-filter: blur(var(--glass-blur));
         -webkit-backdrop-filter: blur(var(--glass-blur));
         box-shadow: var(--glass-shadow-dialog);
+        transition: border-color 0.18s ease, background 0.18s ease;
+      }
+      /* Stack copy/check icons in the same cell so they can cross-fade —
+         a hover tooltip alone gives no feedback on touch devices. */
+      .share-preview-copy svg {
+        grid-area: 1 / 1;
+        transition: opacity 0.16s ease, transform 0.16s ease;
+      }
+      .share-preview-copy .check-icon {
+        opacity: 0;
+        transform: scale(0.4);
+        color: var(--ok);
+      }
+      .share-preview-copy.is-copied {
+        border-color: color-mix(in srgb, var(--ok) 55%, var(--stroke));
+        background: color-mix(in srgb, var(--ok) 16%, var(--glass-bg-strong));
+      }
+      .share-preview-copy.is-copied .copy-icon {
+        opacity: 0;
+        transform: scale(0.4);
+      }
+      .share-preview-copy.is-copied .check-icon {
+        opacity: 1;
+        transform: scale(1);
+        animation: share-copy-check-pop 0.32s cubic-bezier(0.32, 1.6, 0.5, 1);
+      }
+      @keyframes share-copy-check-pop {
+        0% {
+          opacity: 0;
+          transform: scale(0.3);
+        }
+        60% {
+          opacity: 1;
+          transform: scale(1.18);
+        }
+        100% {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .share-preview-copy.is-copied .check-icon {
+          animation: none;
+        }
       }
       .share-url-row {
         display: flex;
