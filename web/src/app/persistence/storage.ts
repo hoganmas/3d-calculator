@@ -101,7 +101,23 @@ function idbBackend(db: IDBDatabase): StorageBackend {
 async function getBackend(): Promise<StorageBackend> {
   if (backend) return backend;
   const db = await openIndexedDb();
-  backend = idbBackend(db);
+  const opened = idbBackend(db);
+  // The browser can close this connection out from under us at any time —
+  // Safari in particular does this aggressively once a tab backgrounds or
+  // suspends — and IDBDatabase has no "reopen" once that happens; every
+  // future call would otherwise throw "Failed to execute 'transaction' on
+  // 'IDBDatabase'" forever. Clearing the cache here just means the next
+  // getBackend() call opens a fresh connection instead of reusing a dead
+  // one; the in-flight operation at the moment of closing still rejects,
+  // same as any other IndexedDB error, and is handled by existing callers.
+  db.onclose = () => {
+    if (backend === opened) backend = null;
+  };
+  // Another tab/window upgrading the schema blocks on this connection
+  // until it closes — release it proactively rather than stalling that
+  // upgrade indefinitely. Triggers onclose above, which clears the cache.
+  db.onversionchange = () => db.close();
+  backend = opened;
   return backend;
 }
 
