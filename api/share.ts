@@ -75,6 +75,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ? `Shared scene with ${panels.length} expressions on laplaci.`
       : `Shared expression: ${primary}`;
     res.setHeader("Content-Type", "text/html; charset=utf-8");
+    // Vary: without this, a shared/CDN cache keys purely by URL — a crawler
+    // fetching this exact link first would let the edge serve this same
+    // bot-targeted HTML to every human visitor for the next hour instead of
+    // redirecting them into the app.
+    res.setHeader("Vary", "User-Agent");
     res.setHeader("Cache-Control", "public, s-maxage=3600, stale-while-revalidate=86400");
     res.status(200).send(buildBotHtml(normalizeSharePayload(payload), title, description));
   } catch {
