@@ -1,7 +1,8 @@
 import { bootQualityForTier, detectDeviceTier, type DeviceTier } from "./deviceTier.js";
 import { els } from "./dom.js";
 import { setPanelCollapsed } from "./panelLayout.js";
-import { markMarchDirty } from "./presentation.js";
+import { markMarchDirty, syncToggleSwitchColor } from "./presentation.js";
+import { syncLiquidThumb } from "../ui/liquidSlider.js";
 import { applyQualityFromState, isProdUi, syncQualitySliderDom } from "./quality.js";
 import { state } from "./state.js";
 import {
@@ -139,13 +140,16 @@ export function perfAdaptHudSuffix(now: number): string {
 }
 
 export function syncAutoQualityAdaptUi() {
-  if (els.autoQualityAdapt) els.autoQualityAdapt.checked = state.autoQualityAdapt;
+  if (!els.autoQualityAdapt) return;
+  els.autoQualityAdapt.value = state.autoQualityAdapt ? "1" : "0";
+  syncToggleSwitchColor(els.autoQualityAdapt);
+  syncLiquidThumb(els.autoQualityAdapt);
 }
 
 export function initAutoQualityAdaptUi() {
   syncAutoQualityAdaptUi();
   els.autoQualityAdapt?.addEventListener("change", () => {
-    setAutoQualityAdapt(!!els.autoQualityAdapt?.checked);
+    setAutoQualityAdapt(els.autoQualityAdapt?.value === "1");
     if (!state.autoQualityAdapt) {
       lowPerfStreak = 0;
       perfHintUntil = 0;

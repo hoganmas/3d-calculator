@@ -42,12 +42,7 @@ export function syncLiquidThumb(input: HTMLInputElement | null | undefined) {
   applyThumb(thumb, valueT(input));
 }
 
-export function mountLiquidThumb(track: HTMLElement, input: HTMLInputElement) {
-  if (!(track instanceof HTMLElement) || !(input instanceof HTMLInputElement)) return;
-  track.classList.add("liquid-track");
-  input.classList.add("liquid-range");
-  track.style.setProperty("--thumb-size", `${THUMB_PX}px`);
-
+function ensureThumb(track: HTMLElement): HTMLElement {
   let thumb = track.querySelector(".liquid-thumb") as HTMLElement | null;
   if (!(thumb instanceof HTMLElement)) {
     thumb = document.createElement("span");
@@ -57,6 +52,37 @@ export function mountLiquidThumb(track: HTMLElement, input: HTMLInputElement) {
       '<span class="liquid-thumb-halo"></span><span class="liquid-thumb-core"></span><span class="liquid-thumb-sheen"></span>';
     track.appendChild(thumb);
   }
+  return thumb;
+}
+
+/**
+ * Same glass-thumb visuals as `mountLiquidThumb`, but with no pointer-follow
+ * dragging — the thumb only ever snaps to reflect `input.value`. For binary
+ * toggles driven entirely by a click handler, where the goop-toward-pointer
+ * drag animation doesn't make sense (there's nowhere in between to drag to).
+ */
+export function mountStaticLiquidThumb(track: HTMLElement, input: HTMLInputElement) {
+  if (!(track instanceof HTMLElement) || !(input instanceof HTMLInputElement)) return;
+  track.classList.add("liquid-track");
+  input.classList.add("liquid-range");
+  track.style.setProperty("--thumb-size", `${THUMB_PX}px`);
+  ensureThumb(track);
+
+  if (track.dataset.liquidBound === "1") {
+    syncLiquidThumb(input);
+    return;
+  }
+  track.dataset.liquidBound = "1";
+  input.addEventListener("input", () => syncLiquidThumb(input));
+  syncLiquidThumb(input);
+}
+
+export function mountLiquidThumb(track: HTMLElement, input: HTMLInputElement) {
+  if (!(track instanceof HTMLElement) || !(input instanceof HTMLInputElement)) return;
+  track.classList.add("liquid-track");
+  input.classList.add("liquid-range");
+  track.style.setProperty("--thumb-size", `${THUMB_PX}px`);
+  const thumb = ensureThumb(track);
 
   if (track.dataset.liquidBound === "1") {
     syncLiquidThumb(input);
@@ -86,7 +112,7 @@ export function mountLiquidThumb(track: HTMLElement, input: HTMLInputElement) {
    */
   const morphTowardPointer = () => {
     const t = valueT(input);
-    thumb!.style.setProperty("--t", String(t));
+    thumb.style.setProperty("--t", String(t));
 
     if (!pointer) {
       return { skewX: 0, skewY: 0, dx: 0, dy: 0 };
@@ -176,7 +202,7 @@ export function mountLiquidThumb(track: HTMLElement, input: HTMLInputElement) {
   };
 
   const onInput = () => {
-    if (dragging) thumb!.style.setProperty("--t", String(valueT(input)));
+    if (dragging) thumb.style.setProperty("--t", String(valueT(input)));
     else syncLiquidThumb(input);
   };
 
@@ -184,7 +210,7 @@ export function mountLiquidThumb(track: HTMLElement, input: HTMLInputElement) {
     stopSettle();
     dragging = true;
     pointer = { x: ev.clientX, y: ev.clientY };
-    thumb!.classList.add("is-dragging");
+    thumb.classList.add("is-dragging");
     try {
       input.setPointerCapture(ev.pointerId);
     } catch (_) {

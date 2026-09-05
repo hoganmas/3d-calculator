@@ -122,7 +122,7 @@
         flex: 1;
       }
       #exprList {
-        padding: 0;
+        padding: 0 0 calc(var(--panel-status-h) + 8px);
         gap: 0;
         flex: 1 1 auto;
         min-height: 0;
@@ -1189,6 +1189,11 @@
         height: 18px;
         display: block;
       }
+      @keyframes icon-btn-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
       .has-tooltip {
         position: relative;
       }
@@ -1247,7 +1252,7 @@
         max-width: min(440px, calc(100vw - 28px - var(--safe-left) - var(--safe-right)));
         width: 100%;
         max-height: min(88vh, 720px);
-        margin: max(14px, var(--safe-top)) auto max(14px, var(--safe-bottom));
+        margin: auto;
         overflow: hidden;
         box-shadow: var(--glass-shadow-dialog), var(--glass-fresnel);
       }
@@ -1321,25 +1326,14 @@
         text-transform: none;
         letter-spacing: 0;
       }
-      .settings-toggle-label {
+      .settings-dialog .settings-toggle-label {
         display: flex;
+        flex-direction: row;
         align-items: center;
         justify-content: space-between;
         gap: 12px;
-        font-size: 13px;
-      }
-      .settings-toggle-hint {
-        display: block;
-        margin-top: 2px;
         font-size: 11px;
-        color: var(--muted);
-      }
-      .settings-toggle-label input[type="checkbox"] {
-        flex-shrink: 0;
-        width: 18px;
-        height: 18px;
-        accent-color: var(--accent);
-        cursor: pointer;
+        text-align: left;
       }
       .settings-liquid-track {
         position: relative;
@@ -1351,6 +1345,48 @@
         display: block;
         width: 100%;
       }
+      .settings-toggle-track {
+        flex: 0 0 auto;
+        width: 34px;
+      }
+      /* No pointer-follow drag on the toggle (see mountStaticLiquidThumb) —
+         animate the snap between its two fixed positions instead. */
+      .settings-toggle-track .liquid-thumb {
+        transition: left 0.15s ease, transform 0.08s linear, translate 0.08s linear;
+      }
+      .settings-toggle-track .toggle-switch::-webkit-slider-runnable-track {
+        height: 20px;
+        border-radius: 999px;
+        background: var(--glass-bg-elevated);
+        transition: background 0.15s ease;
+      }
+      .settings-toggle-track .toggle-switch::-moz-range-track {
+        height: 20px;
+        border-radius: 999px;
+        background: var(--glass-bg-elevated);
+        transition: background 0.15s ease;
+      }
+      .settings-toggle-track .toggle-switch.is-on::-webkit-slider-runnable-track {
+        background: var(--accent);
+      }
+      .settings-toggle-track .toggle-switch.is-on::-moz-range-track {
+        background: var(--accent);
+      }
+      .info-menu {
+        position: fixed;
+        z-index: 20000;
+        max-width: 220px;
+        padding: 8px 10px;
+        border-radius: 10px;
+        border: 1px solid var(--glass-stroke);
+        background: var(--glass-bg-strong);
+        backdrop-filter: blur(18px) saturate(1.2);
+        -webkit-backdrop-filter: blur(18px) saturate(1.2);
+        box-shadow: var(--glass-shadow-dialog);
+        color: var(--text);
+        font-size: 11px;
+        line-height: 1.4;
+      }
       .project-section .project-actions {
         display: flex;
         flex-wrap: wrap;
@@ -1361,6 +1397,7 @@
         min-width: 5.5rem;
       }
       .panel-body {
+        position: relative;
         display: flex;
         flex-direction: column;
         flex: 1 1 auto;
@@ -1393,15 +1430,18 @@
         align-items: flex-start;
         gap: 12px;
         flex-shrink: 0;
-        margin-top: auto;
-        margin-left: -16px;
-        margin-right: -16px;
-        margin-bottom: -18px;
+        position: absolute;
+        left: -16px;
+        right: -16px;
+        bottom: -18px;
         padding: 8px 16px 18px;
         border-top: 1px solid var(--glass-stroke);
-        background: color-mix(in srgb, var(--glass-bg-strong) 88%, transparent);
-        backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
-        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
+        background: var(--glass-bg);
+        /* Blurs the expression list directly behind it, not just the scene
+           (what the panel's own --glass-blur is tuned for) — needs a heavier
+           radius so rows are actually illegible, not just softened. */
+        backdrop-filter: blur(calc(var(--glass-blur) * 1.6)) saturate(1.35);
+        -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 1.6)) saturate(1.35);
         border-radius: 0 0 var(--panel-radius) var(--panel-radius);
       }
       .panel-status-row {
@@ -1693,6 +1733,68 @@
         justify-content: flex-end;
         gap: 8px;
       }
+      .share-dialog {
+        max-width: min(420px, calc(100vw - 28px));
+      }
+      .share-dialog-body {
+        gap: 14px;
+      }
+      .share-preview {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 1200 / 630;
+        border-radius: 10px;
+        overflow: hidden;
+        background: #1a1228;
+        border: 1px solid var(--stroke);
+      }
+      .share-preview-loading {
+        position: absolute;
+        inset: 0;
+        margin: auto;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        border: 3px solid rgba(255, 255, 255, 0.25);
+        border-top-color: rgba(255, 255, 255, 0.85);
+        animation: icon-btn-spin 0.8s linear infinite;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .share-preview-loading {
+          animation: none;
+        }
+      }
+      .share-preview-img {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+      .share-preview-copy {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        z-index: 1;
+        background: var(--glass-bg-strong);
+        backdrop-filter: blur(var(--glass-blur));
+        -webkit-backdrop-filter: blur(var(--glass-blur));
+        box-shadow: var(--glass-shadow-dialog);
+      }
+      .share-url-row {
+        display: flex;
+        gap: 8px;
+      }
+      .share-url-input {
+        flex: 1 1 auto;
+        min-width: 0;
+        text-overflow: ellipsis;
+      }
+      .share-native-btn {
+        width: 100%;
+        text-align: center;
+      }
       #viewport canvas {
         position: absolute;
         inset: 0;
@@ -1706,6 +1808,9 @@
       }
       #viewport canvas.axis-labels {
         pointer-events: none;
+        z-index: 2;
+      }
+      #viewport canvas.og-capture-freeze {
         z-index: 2;
       }
       .viewport-toolbar {

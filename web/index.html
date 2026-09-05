@@ -378,11 +378,10 @@
               </div>
             </label>
             <label class="settings-toggle-label">
-              <span>
-                Auto-adjust quality
-                <span class="settings-toggle-hint">Lowers quality automatically if frame rate drops</span>
-              </span>
-              <input id="autoQualityAdapt" type="checkbox" />
+              <span>Adaptive quality</span>
+              <div class="settings-liquid-track settings-toggle-track">
+                <input id="autoQualityAdapt" class="ui-slider toggle-switch" type="range" min="0" max="1" step="1" value="0" />
+              </div>
             </label>
           </section>
 
@@ -455,6 +454,51 @@
               <textarea id="metricsDump" readonly spellcheck="false"></textarea>
             </details>
           </section>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="shareDialog" class="settings-dialog share-dialog" aria-labelledby="shareDialogTitle">
+      <div class="settings-sheet">
+        <header class="settings-head">
+          <h2 id="shareDialogTitle">Share</h2>
+          <button id="closeShareDialog" class="icon-btn" type="button" aria-label="Close" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75">
+              <path stroke-linecap="round" d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </header>
+        <div class="settings-body share-dialog-body">
+          <div class="share-preview">
+            <div id="sharePreviewLoading" class="share-preview-loading" aria-hidden="true"></div>
+            <img id="sharePreviewImg" class="share-preview-img" alt="Preview of the shared scene" hidden />
+            <button
+              id="shareCopyImageBtn"
+              class="icon-btn share-preview-copy has-tooltip"
+              type="button"
+              aria-label="Copy image"
+              data-tooltip="Copy image"
+              hidden
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75">
+                <rect x="8" y="8" width="12" height="12" rx="2" />
+                <path stroke-linecap="round" d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+              </svg>
+            </button>
+          </div>
+          <div class="share-url-row">
+            <input
+              id="shareUrlInput"
+              class="share-url-input"
+              type="text"
+              readonly
+              spellcheck="false"
+              aria-label="Share link"
+              placeholder="Building link…"
+            />
+            <button id="shareCopyBtn" class="secondary" type="button" disabled>Copy link</button>
+          </div>
+          <button id="shareNativeBtn" class="secondary share-native-btn" type="button">Share via…</button>
         </div>
       </div>
     </dialog>

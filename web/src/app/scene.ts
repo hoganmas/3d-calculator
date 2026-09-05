@@ -232,7 +232,7 @@ export function rebuildWorldGrid(half: number) {
 }
 
 /** Distance multiplier to keep the same apparent framing when the FOV changes. */
-function fovDistanceScale(fromFovDeg: number, toFovDeg: number): number {
+export function fovDistanceScale(fromFovDeg: number, toFovDeg: number): number {
   const from = Math.tan((fromFovDeg * Math.PI) / 360);
   const to = Math.tan((toFovDeg * Math.PI) / 360);
   return from / to;

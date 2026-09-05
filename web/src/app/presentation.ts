@@ -1,4 +1,5 @@
-import { mountLiquidThumb, syncLiquidThumb } from "../ui/liquidSlider.js";
+import { mountLiquidThumb, mountStaticLiquidThumb, syncLiquidThumb } from "../ui/liquidSlider.js";
+import { attachInfoContextMenu } from "../ui/infoMenu.js";
 import {
   setClipGpuCanvasVisible,
   resizeClipGpuCanvas,
@@ -55,13 +56,94 @@ function mountSettingsLiquidSlider(input: HTMLInputElement | null | undefined) {
   if (wrap instanceof HTMLElement) mountLiquidThumb(wrap, input);
 }
 
+/** Toggle switches snap between two fixed states — no pointer-follow drag. */
+function mountSettingsToggleThumb(input: HTMLInputElement | null | undefined) {
+  if (!input) return;
+  const wrap = input.closest(".settings-liquid-track");
+  if (wrap instanceof HTMLElement) mountStaticLiquidThumb(wrap, input);
+}
+
+const QUALITY_INFO: [HTMLInputElement | null | undefined, string][] = [
+  [
+    els.precisionQuality,
+    "Polynomial fit degree for expression fields. Higher values resolve sharper detail at a higher compute cost.",
+  ],
+  [
+    els.scalarQuality,
+    "Resolution and step count for scalar volume (Beer) ray-marching.",
+  ],
+  [
+    els.surfaceQuality,
+    "Resolution and step count for iso-surface ray-marching.",
+  ],
+  [
+    els.vectorQuality,
+    "Particle count for flow / vector field animation.",
+  ],
+  [
+    els.autoQualityAdapt,
+    "Lowers quality automatically if frame rate drops.",
+  ],
+];
+
+function initSettingsInfoMenus() {
+  for (const [input, text] of QUALITY_INFO) {
+    if (!input) continue;
+    const row = input.closest("label");
+    attachInfoContextMenu(row instanceof HTMLElement ? row : input, text);
+  }
+}
+
+export function syncToggleSwitchColor(input: HTMLInputElement | null | undefined) {
+  if (!input) return;
+  input.classList.toggle("is-on", input.value === "1");
+}
+
+function initQualityToggleSwitch() {
+  const input = els.autoQualityAdapt;
+  if (!input) return;
+  syncToggleSwitchColor(input);
+  input.addEventListener("input", () => syncToggleSwitchColor(input));
+
+  // A 2-state switch shouldn't need a drag to land on a position — treat any
+  // click/tap as a flip instead of the native range "jump to click point".
+  input.addEventListener("pointerdown", (ev) => ev.preventDefault());
+  input.addEventListener("click", () => {
+    input.value = input.value === "1" ? "0" : "1";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    input.focus({ preventScroll: true });
+  });
+}
+
 function initSettingsLiquidSliders() {
   mountSettingsLiquidSlider(els.precisionQuality);
   mountSettingsLiquidSlider(els.boxSize);
   mountSettingsLiquidSlider(els.scalarQuality);
   mountSettingsLiquidSlider(els.surfaceQuality);
   mountSettingsLiquidSlider(els.vectorQuality);
+  mountSettingsToggleThumb(els.autoQualityAdapt);
   syncBoundsSlider();
+  initSettingsInfoMenus();
+  initQualityToggleSwitch();
+}
+
+/**
+ * The sidebar footer floats over the expression list (see `.panel-status` in
+ * app.css) so the list can scroll beneath its translucent background. Its
+ * height varies (a wrapped compile error grows it), so keep `--panel-status-h`
+ * in sync — `#exprList`'s bottom padding reads it to let the last expression
+ * still scroll fully clear of the overlay.
+ */
+function initPanelStatusOverlay() {
+  const status = document.getElementById("panelStatus");
+  if (!status) return;
+  const sync = () => {
+    const h = Math.ceil(status.getBoundingClientRect().height);
+    if (h > 0) document.documentElement.style.setProperty("--panel-status-h", `${h}px`);
+  };
+  sync();
+  if (typeof ResizeObserver !== "undefined") new ResizeObserver(sync).observe(status);
 }
 
 export function syncSettingsLiquidThumbs() {
@@ -70,6 +152,7 @@ export function syncSettingsLiquidThumbs() {
   syncLiquidThumb(els.scalarQuality);
   syncLiquidThumb(els.surfaceQuality);
   syncLiquidThumb(els.vectorQuality);
+  syncLiquidThumb(els.autoQualityAdapt);
 }
 
 function marchDownscaleTickPct(n: number) {
@@ -324,6 +407,7 @@ export function markMarchDirty() {
 export function initPresentation() {
   initMarchSliderUi();
   initSettingsLiquidSliders();
+  initPanelStatusOverlay();
   if (els.marchDownscale) {
     const wrap = els.marchDownscale.closest(".march-liquid-track") || els.marchDownscale.closest(".march-slider-wrap");
     if (wrap instanceof HTMLElement) mountLiquidThumb(wrap, els.marchDownscale);

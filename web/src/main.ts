@@ -42,12 +42,9 @@ import {
   scheduleAutosave,
   setAutosaveError,
 } from "./app/persistence/autosave.js";
-import {
-  applyExpressionsFromFragment,
-  applyExpressionsFromQuery,
-  shareExpressionLink,
-} from "./app/persistence/exprShare.js";
+import { applyExpressionsFromFragment, applyExpressionsFromQuery } from "./app/persistence/exprShare.js";
 import { installOgCapture } from "./app/ogCapture.js";
+import { initSharePopup, openSharePopup } from "./app/sharePopup.js";
 
 initSplash();
 initKeyframeLoadBar();
@@ -152,6 +149,7 @@ async function bootstrap() {
   });
 
   initWebmcpSetupDialog();
+  initSharePopup();
   void initWebMCP();
 
   if (els.hud) els.hud.textContent = "clip-grid · idct volume";
@@ -232,27 +230,8 @@ async function bootstrap() {
   }
 }
 
-function flashShareFeedback(btn: HTMLButtonElement, message: string) {
-  const prevTip = btn.dataset.tooltip ?? "Share link";
-  const prevLabel = btn.getAttribute("aria-label") ?? "Share link";
-  btn.dataset.tooltip = message;
-  btn.setAttribute("aria-label", message);
-  window.setTimeout(() => {
-    btn.dataset.tooltip = prevTip;
-    btn.setAttribute("aria-label", prevLabel);
-  }, 1600);
-}
-
 function initProjectActions() {
-  els.shareLink?.addEventListener("click", () => {
-    void shareExpressionLink().then((result) => {
-      const btn = els.shareLink;
-      if (!btn) return;
-      if (result === "shared") flashShareFeedback(btn, "Shared");
-      else if (result === "copied") flashShareFeedback(btn, "Link copied");
-      else setAutosaveError("Could not share link");
-    });
-  });
+  els.shareLink?.addEventListener("click", () => openSharePopup());
 }
 
 void bootstrap();
