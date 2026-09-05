@@ -35,6 +35,22 @@ const DRAW_LOD_INSTANCE_THRESHOLD = 25000;
 /** Vertical pixel count `trailWidth` is calibrated against (display, not march buffer).
  *  400 ≈ HTML default 2× downscale on an 800px-tall view, so width matches `npm run dev`. */
 const RIBBON_WIDTH_REF_PX = 400;
+/**
+ * Fixed FOV the ribbon-width-to-world conversion is calibrated against — must
+ * equal app/scene.ts's DEFAULT_FOV, duplicated locally rather than imported to
+ * avoid a scene.ts → march.js → renderFrame.js → flowParticles.js cycle.
+ *
+ * Deliberately NOT the camera's live FOV: isometric mode (scene.ts's
+ * setIsometric) narrows the FOV *and* scales the camera distance by the exact
+ * inverse (fovDistanceScale) to keep the framing identical, so tan(fov/2) ×
+ * distance is invariant to that toggle — but this formula uses `half` (the
+ * fixed scene half-extent) as its distance stand-in, which does NOT scale
+ * with the camera move. Using the live FOV here left it unbalanced: only the
+ * tan(fov/2) side shrank (2° vs. 50° is ~26× smaller), collapsing ribbons to
+ * near-invisible hairlines in isometric view. Anchoring to the one FOV that
+ * `half` actually corresponds to makes the result FOV-toggle-invariant.
+ */
+const RIBBON_WIDTH_REFERENCE_FOV_DEG = 50;
 const PROFILE_SMOOTH = 0.12;
 
 export type FlowParticleMetrics = {
@@ -563,7 +579,6 @@ function packFlowParticleParams(
   dirMatrix: Float64Array | Float32Array | number[],
   fbW: number,
   fbH: number,
-  cameraFovDeg: number,
   speedRange: [number, number],
   drawSegCount: number,
   segStride: number,
@@ -591,7 +606,7 @@ function packFlowParticleParams(
   const dt = effectiveFlowDt();
   const vMax = effectiveFlowVMax();
   f[45] = Math.max(half * 0.2, dt * vMax * 2.5 * TRAIL_PUSH_INTERVAL);
-  const fovRad = (cameraFovDeg * Math.PI) / 180;
+  const fovRad = (RIBBON_WIDTH_REFERENCE_FOV_DEG * Math.PI) / 180;
   // World scale from FOV only — do not divide by march-buffer height, or
   // downscaled mobile targets make ribbons several times thicker.
   f[46] = (2 * Math.tan(fovRad / 2)) / RIBBON_WIDTH_REF_PX;
@@ -610,7 +625,6 @@ function recordRibbonDraw(
   half: number,
   fbW: number,
   fbH: number,
-  cameraFovDeg: number,
   speedRange: [number, number],
   drawSegCount: number,
   segStride: number,
@@ -622,7 +636,7 @@ function recordRibbonDraw(
     device,
     gpu.flowParticlesParamBuf!,
     packFlowParticleParams(
-      viewProj, ro, half, dirMatrix, fbW, fbH, cameraFovDeg, speedRange, drawSegCount, segStride,
+      viewProj, ro, half, dirMatrix, fbW, fbH, speedRange, drawSegCount, segStride,
     ),
   );
   const bg = device.createBindGroup({
@@ -694,7 +708,6 @@ export function drawFlowParticlesPass(
     half,
     fbW,
     fbH,
-    camera.fov,
     speedRange,
     lod.drawSegCount,
     lod.segStride,
