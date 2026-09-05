@@ -23,6 +23,7 @@ export {
   isClipGpuUploadReady,
   isClipBakeGpuReady,
   isClipMarchReady,
+  isClipGpuInitPending,
 } from "./marchReadiness.js";
 
 export {
