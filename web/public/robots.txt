@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://laplaci.com/sitemap.xml
+Sitemap: https://www.laplaci.com/sitemap.xml

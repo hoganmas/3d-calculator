@@ -16,15 +16,15 @@
       content="laplaci is a browser-based 3D graphing calculator. Enter math expressions and visualize scalar fields, vector fields, and 2D manifolds in a 3D space."
     />
     <meta name="theme-color" content="#1a1228" />
-    <link rel="canonical" href="https://laplaci.com/" />
+    <link rel="canonical" href="https://www.laplaci.com/" />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://laplaci.com/" />
+    <meta property="og:url" content="https://www.laplaci.com/" />
     <meta property="og:title" content="laplaci — 3D Graphing Calculator" />
     <meta
       property="og:description"
       content="A 3D graphing calculator in your browser. Enter math expressions and visualize scalar fields, vector fields, and surfaces."
     />
-    <meta property="og:image" content="https://laplaci.com/og-image.png" />
+    <meta property="og:image" content="https://www.laplaci.com/og-image.png" />
     <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
@@ -34,25 +34,27 @@
       name="twitter:description"
       content="A 3D graphing calculator in your browser. Enter math expressions and visualize scalar fields, vector fields, and surfaces."
     />
-    <meta name="twitter:image" content="https://laplaci.com/og-image.png" />
+    <meta name="twitter:image" content="https://www.laplaci.com/og-image.png" />
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
         "@type": "WebApplication",
         "name": "laplaci",
-        "url": "https://laplaci.com/",
+        "url": "https://www.laplaci.com/",
         "description": "3D graphing calculator",
         "applicationCategory": "DesignApplication",
         "operatingSystem": "Any",
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
       }
     </script>
-    <!-- Google Search's crawler does not reliably pick up SVG-only favicons,
-         so a PNG + classic .ico are declared alongside the SVG that browsers
-         actually render. See https://developers.google.com/search/docs/appearance/favicon-in-search -->
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="icon" href="/favicon-48.png" sizes="48x48" type="image/png" />
+    <!-- Google Search does not support SVG favicons (BMP/GIF/ICO/PNG/JPEG/PPM/TIFF
+         only). Declare a raster icon first so Googlebot picks it; keep SVG last for
+         browsers. Prefer >48px. See https://developers.google.com/search/docs/appearance/favicon-in-search -->
+    <link rel="icon" href="/favicon-192.png" type="image/png" sizes="192x192" />
+    <link rel="icon" href="/favicon-48.png" type="image/png" sizes="48x48" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
     <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/src/ui/theme.css" />
     <link rel="stylesheet" href="/src/ui/splash.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
