@@ -70,7 +70,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const rows = await decodeSharePayload(payload);
     const panels = sharePanelsFromRows(rows);
     const primary = panels[0]?.label ?? "shared graph";
-    const title = `laplaci — ${primary}`;
+    // Keep the link-preview title brand-only. Platforms often truncate or
+    // prioritize og:title over the image, and an equation as the title reads
+    // like a broken/constant page name rather than a share of laplaci.
+    const title = "laplaci - 3D graphing calculator";
     const description = panels.length > 1
       ? `Shared scene with ${panels.length} expressions on laplaci.`
       : `Shared expression: ${primary}`;
